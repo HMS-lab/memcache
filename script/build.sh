@@ -85,7 +85,7 @@ export PYTHON_HOME="${PYTHON_HOME%/}" # remove the last char "/"
 
 export LD_LIBRARY_PATH=$PYTHON_HOME/lib:$LD_LIBRARY_PATH
 export PATH=$PYTHON_HOME/bin:$BACK_PATH_EVN
-export CMAKE_PREFIX_PATH=$PYTHON_HOME
+export CMAKE_PREFIX_PATH="${PYTHON_HOME}${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}"
 
 if command -v ninja &> /dev/null; then
     export GENERATOR="Ninja"
