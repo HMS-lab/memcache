@@ -97,6 +97,11 @@ public:
         return spaces_[type];
     }
 
+    bool IsReady()
+    {
+        return started_;
+    }
+
     std::string GetDataOpType() const;
     inline uint32_t RankId() const;
 

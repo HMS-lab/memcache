@@ -928,6 +928,9 @@ void MmcClientDefault::AsyncUpdateLease(BatchUpdateLeaseRequest &request)
 
 Result MmcClientDefault::InitMetricReporting()
 {
+    if (!bmProxy_->IsReady()) {
+        return MMC_OK;
+    }
     auto &metricMgr = MmcClientMetricManager::GetInstance();
     bandwidthCollector_ = metricMgr.InitDefaultCollectors();
 
