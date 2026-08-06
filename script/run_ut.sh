@@ -73,11 +73,11 @@ mkdir -p "$COVERAGE_PATH"
 cd "$OUTPUT_PATH"
 lcov -d "$BUILD_PATH" --c --output-file "$COVERAGE_PATH"/coverage.info -rc lcov_branch_coverage=1 --rc lcov_excl_br_line="LCOV_EXCL_BR_LINE|SM_LOG*|SM_ASSERT*|BM_LOG*|BM_ASSERT*|SM_VALIDATE_*|ASSERT*|LOG_*|MMC_LOG*|MMC_RETURN*|MMC_ASSERT*|MMC_VALIDATE*"
 lcov -e "$COVERAGE_PATH"/coverage.info "*/src/memcache/*" -o "$COVERAGE_PATH"/coverage.info --rc lcov_branch_coverage=1
-lcov -r "$COVERAGE_PATH"/coverage.info "*/3rdparty/*" "*/src/hybm/csrc/driver/*" -o "$COVERAGE_PATH"/coverage.info --rc lcov_branch_coverage=1
+COV_SUMMARY=$(lcov -r "$COVERAGE_PATH"/coverage.info "*/3rdparty/*" "*/src/hybm/csrc/driver/*" -o "$COVERAGE_PATH"/coverage.info --rc lcov_branch_coverage=1) || exit $?
 genhtml -o "$COVERAGE_PATH"/result "$COVERAGE_PATH"/coverage.info --show-details --legend --rc lcov_branch_coverage=1
 
-lines_rate=`lcov -r "$COVERAGE_PATH"/coverage.info -o "$COVERAGE_PATH"/coverage.info --rc lcov_branch_coverage=1 | grep lines | grep -Eo "[0-9\.]+%" | tr -d '%'`
-branches_rate=`lcov -r "$COVERAGE_PATH"/coverage.info -o "$COVERAGE_PATH"/coverage.info --rc lcov_branch_coverage=1 | grep branches | grep -Eo "[0-9\.]+%" | tr -d '%'`
+lines_rate=$(echo "$COV_SUMMARY" | grep lines | grep -Eo "[0-9\.]+%" | tr -d '%')
+branches_rate=$(echo "$COV_SUMMARY" | grep branches | grep -Eo "[0-9\.]+%" | tr -d '%')
 echo "lines    coverage rate: ${lines_rate}%"
 echo "branches coverage rate: ${branches_rate}%"
 
