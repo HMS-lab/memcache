@@ -407,6 +407,8 @@ private:
     EvictResult EvictRemoveSrc(const std::string &key, const MmcMemObjMetaPtr &objMeta,
                                const MmcBlobFilterPtr &srcFilter, uint32_t evictRank, MediaType srcMediaType,
                                MediaType dstMedium, bool isSsdDelete);
+    EvictResult EvictRemoveSrc(const std::string &key, const MmcMemObjMetaPtr &objMeta, MediaType srcMediaType,
+                               MediaType dstMedium, bool isSsdDelete);
 
     bool HandleEvictSsdBranch(const std::string &key, const MmcMemObjMetaPtr &objMeta,
                               const MmcBlobFilterPtr &srcFilter, uint32_t evictRank, MediaType srcMediaType,

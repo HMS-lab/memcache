@@ -14,6 +14,7 @@
 #include <chrono>
 #include "mmc_global_allocator.h"
 #include "mmc_meta_metric_manager.h"
+#include "mmc_ptracer.h"
 
 namespace ock {
 namespace mmc {
@@ -84,7 +85,9 @@ std::vector<MmcMemBlobPtr> MmcMemObjMeta::FreeBlobs(const std::string &key, MmcG
             }
         }
         // 此步骤如果lease的client num不为零，会等待超时才会返回
+        TP_TRACE_BEGIN(TP_MMC_META_FREE_BLOB_UPDATE_STATE);
         ret = blobs[i]->UpdateState(key, 0, 0, MMC_REMOVE_START);
+        TP_TRACE_END(TP_MMC_META_FREE_BLOB_UPDATE_STATE, ret);
         if (ret != MMC_OK) {
             MMC_LOG_ERROR("remove op, meta update failed:" << ret);
         }

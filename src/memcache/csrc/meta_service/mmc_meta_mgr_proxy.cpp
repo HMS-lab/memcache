@@ -196,7 +196,9 @@ Result MmcMetaMgrProxy::BatchUpdateLease(const BatchUpdateLeaseRequest &req, Bat
     if (req.flag_ == 1) {
         for (size_t i = 0; i < req.keys_.size(); ++i) {
             const auto &key = req.keys_[i];
+            TP_TRACE_BEGIN(TP_MMC_META_REMOVE_LEASE);
             Result ret = metaMangerPtr_->RemoveLease(key, req.operateIds_[i]);
+            TP_TRACE_END(TP_MMC_META_REMOVE_LEASE, ret);
             if (ret != MMC_OK) {
                 MMC_LOG_ERROR("BatchUpdateLease remove lease failed for key:" << key << ", ret:" << ret);
                 resp.results_[i] = ret;
@@ -212,7 +214,9 @@ Result MmcMetaMgrProxy::BatchUpdateLease(const BatchUpdateLeaseRequest &req, Bat
     for (size_t i = 0; i < req.keys_.size(); ++i) {
         const auto &key = req.keys_[i];
         MemObjQueryInfo queryInfo;
+        TP_TRACE_BEGIN(TP_MMC_META_ADD_LEASE);
         Result ret = metaMangerPtr_->AddLease(key, req.operateIds_[i], req.leaseTtlMs_, queryInfo);
+        TP_TRACE_END(TP_MMC_META_ADD_LEASE, ret);
         if (ret != MMC_OK) {
             MMC_LOG_ERROR("BatchUpdateLease add lease failed for key:" << key << ", ret:" << ret);
             resp.results_[i] = ret;

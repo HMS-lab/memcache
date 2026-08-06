@@ -1658,6 +1658,17 @@ EvictResult MmcMetaManager::EvictRemoveSrc(const std::string &key, const MmcMemO
                                                                                      : EvictResult::REMOVE;
 }
 
+EvictResult MmcMetaManager::EvictRemoveSrc(const std::string &key, const MmcMemObjMetaPtr &objMeta,
+                                           MediaType srcMediaType, MediaType dstMedium, bool isSsdDelete)
+{
+    MmcBlobFilterPtr srcFilter = MmcMakeRef<MmcBlobFilter>(UINT32_MAX, srcMediaType, NONE);
+    if (srcFilter == nullptr) {
+        MMC_LOG_ERROR("Evict skip key=" << key << " from " << srcMediaType << ", create filter failed");
+        return EvictResult::FAIL;
+    }
+    return EvictRemoveSrc(key, objMeta, srcFilter, UINT32_MAX, srcMediaType, dstMedium, isSsdDelete);
+}
+
 bool MmcMetaManager::HandleEvictSsdBranch(const std::string &key, const MmcMemObjMetaPtr &objMeta,
                                           const MmcBlobFilterPtr &srcFilter, uint32_t evictRank, MediaType srcMediaType,
                                           EvictResult &outResult)
@@ -1733,9 +1744,13 @@ EvictResult MmcMetaManager::EvictCallBackFunction(const std::string &key, const 
     std::vector<MmcMemBlobDesc> evictBlobs;
     objMeta->GetBlobsDesc(evictBlobs, srcFilter);
     if (evictBlobs.empty()) {
-        MMC_LOG_WARN("Evict skip key=" << key << " from " << srcMediaType << ", no READABLE blobs");
+        // A key holding ALLOCATED-only blobs (write not finished or WRITE_OK lost) can never be
+        // evicted through the READABLE path. Skipping it would block LRU eviction for every key.
+        // Remove every blob on this media type directly (ALLOCATED -> REMOVING already exists in
+        // the state transition table); per-rank metrics are not meaningful here.
+        MMC_LOG_WARN("Evict ALLOCATED-only key=" << key << " from " << srcMediaType << ", remove unreadable blob");
         TP_TRACE_END(TP_MMC_META_EVICT, MMC_OK);
-        return EvictResult::FAIL;
+        return EvictRemoveSrc(key, objMeta, srcMediaType, dstMedium, false);
     }
     uint32_t evictRank = evictBlobs[0].rank_;
     MmcMetaMetricManager::GetInstance().IncrementEvictCounter(evictRank);

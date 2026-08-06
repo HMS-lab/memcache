@@ -59,7 +59,7 @@ StateTransTable BlobStateMachine::GetGlobalTransTable()
         {ALLOCATED, MMC_WRITE_OK, READABLE, LeaseRemove},   // write ok,    remove <client, reqid> --> lease
         {ALLOCATED, MMC_WRITE_FAIL, REMOVING, LeaseRemove}, // write fail,  remove <client, reqid> --> lease
 
-        {ALLOCATED, MMC_REMOVE_START, REMOVING, nullptr}, // remove blob
+        {ALLOCATED, MMC_REMOVE_START, REMOVING, LeaseWait}, // remove blob, wait write lease timeout or no lease
 
         // layerwise 会重复来申请一个还没有写完的key，需要返回blob，触发加租约
         {ALLOCATED, MMC_REPEAT_ALLOC, ALLOCATED, LeaseAdd},
