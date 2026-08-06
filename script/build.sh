@@ -21,6 +21,10 @@ readonly SCRIPT_FULL_PATH=$(dirname $(readlink -f "$0"))
 readonly PROJECT_FULL_PATH=$(dirname "$SCRIPT_FULL_PATH")
 readonly MMC_BUILD_JOBS="${MMC_BUILD_JOBS:-32}"
 
+if ! command -v dos2unix &> /dev/null; then
+  dos2unix() { sed -i 's/\r$//' "$@"; }
+fi
+
 if [ "${BUILD_TESTS}" == "ON" ]; then
   readonly MOCKCPP_PATH="$PROJECT_FULL_PATH/test/3rdparty/mockcpp"
   readonly TEST_3RD_PATCH_PATH="$PROJECT_FULL_PATH/test/3rdparty/patch"

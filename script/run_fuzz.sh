@@ -100,6 +100,10 @@ mkdir -p ${OUTPUT_PATH}
 
 set -e
 
+if ! command -v dos2unix &> /dev/null; then
+  dos2unix() { sed -i 's/\r$//' "$@"; }
+fi
+
 dos2unix "$MOCKCPP_PATH/include/mockcpp/JmpCode.h"
 dos2unix "$MOCKCPP_PATH/include/mockcpp/mockcpp.h"
 dos2unix "$MOCKCPP_PATH/src/JmpCode.cpp"
