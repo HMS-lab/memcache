@@ -50,21 +50,23 @@ int SpdLogger::ValidateParams(int minLogLevel, const std::string &path, int rota
 
 void SpdLogger::LogMessage(int level, const char *message)
 {
-    if (mSPDLogger == nullptr) {
+    const auto logger = mSPDLogger;
+    if (logger == nullptr) {
         gLastErrorMessage = "No logger created";
         return;
     }
-    mSPDLogger->log(static_cast<spdlog::level::level_enum>(level), "{}", message);
+    logger->log(static_cast<spdlog::level::level_enum>(level), "{}", message);
 }
 
 void SpdLogger::AuditLogMessage(const char *message)
 {
-    if (mSPDLogger == nullptr) {
+    const auto logger = mSPDLogger;
+    if (logger == nullptr) {
         gLastErrorMessage = "No logger created";
         return;
     }
     const int level = 3;
-    mSPDLogger->log(static_cast<spdlog::level::level_enum>(level), "{}", message);
+    logger->log(static_cast<spdlog::level::level_enum>(level), "{}", message);
 }
 
 const char *SpdLogger::GetLastErrorMessage()

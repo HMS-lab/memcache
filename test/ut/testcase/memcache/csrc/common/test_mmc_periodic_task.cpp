@@ -19,6 +19,12 @@
 
 using namespace ock::mmc;
 
+static constexpr int TASK_INTERVAL_SECONDS = 1;
+static constexpr int MIN_EXECUTIONS_BEFORE_DESTROY = 2;
+static constexpr int WAIT_LOOP_TIMES = 30;
+static constexpr int WAIT_LOOP_INTERVAL_MS = 100;
+static constexpr int IDLE_VERIFY_WAIT_MS = 1100;
+
 class TestMmcPeriodicTask : public testing::Test {
 public:
     void SetUp() override {}
@@ -232,6 +238,29 @@ TEST_F(TestMmcPeriodicTask, FactoryDestroyInstanceRemovesInstance)
     ASSERT_NE(recreated, nullptr);
     EXPECT_NE(instance.get(), recreated.get());
     MmcPeriodicTaskFactory::DestroyInstance(key);
+}
+
+TEST_F(TestMmcPeriodicTask, FactoryDestroyInstanceJoinsWorkerAndStopsTaskExecution)
+{
+    const std::string key = "ut_factory_destroy_join";
+    std::atomic<int> execCount{0};
+
+    auto instance = MmcPeriodicTaskFactory::GetInstance(key);
+    ASSERT_NE(instance, nullptr);
+    ASSERT_TRUE(instance->RegisterTask("ut_destroy_join_task", TASK_INTERVAL_SECONDS, [&execCount]() { ++execCount; }));
+    ASSERT_TRUE(instance->Start());
+
+    for (int i = 0; i < WAIT_LOOP_TIMES && execCount.load() < MIN_EXECUTIONS_BEFORE_DESTROY; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(WAIT_LOOP_INTERVAL_MS));
+    }
+    ASSERT_GE(execCount.load(), MIN_EXECUTIONS_BEFORE_DESTROY);
+
+    MmcPeriodicTaskFactory::DestroyInstance(key);
+
+    EXPECT_FALSE(instance->IsRunning());
+    const int countAfterDestroy = execCount.load();
+    std::this_thread::sleep_for(std::chrono::milliseconds(IDLE_VERIFY_WAIT_MS));
+    EXPECT_EQ(execCount.load(), countAfterDestroy);
 }
 
 TEST_F(TestMmcPeriodicTask, FactoryDestroyInstanceOnAbsentKeyIsSafe)
