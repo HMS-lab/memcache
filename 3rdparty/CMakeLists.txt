@@ -125,7 +125,12 @@ if (NOT EXISTS "${_MMC_PROMETHEUS_SRC_DIR}/CMakeLists.txt")
         "3rdparty prometheus-cpp-lite submodule not found at ${_MMC_PROMETHEUS_SRC_DIR}.\n"
         "Run: git submodule update --init 3rdparty/prometheus-cpp-lite")
 endif ()
+# prometheus-cpp-lite submodule declares cmake_minimum_required(VERSION 3.2/3.3),
+# which CMake >= 3.27 no longer supports. Force the policy minimum so the vendored
+# submodule still configures without editing its (submodule-tracked) CMakeLists.
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 add_subdirectory(prometheus-cpp-lite)
+unset(CMAKE_POLICY_VERSION_MINIMUM)
 
 ####################################################################
 # MemFabric_Hybrid
