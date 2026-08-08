@@ -250,21 +250,29 @@ kv_event::KvEventStats MmcMetaService::GetKvEventStats() const
 
 void MmcMetaService::Stop()
 {
-    std::lock_guard<std::mutex> guard(mutex_);
-    if (!started_) {
-        MMC_LOG_WARN("MmcMetaService has not been started");
-        return;
+    // 持锁阶段：仅做状态翻转与快读，随即释锁。必须在 join 之前置 started_=false，
+    // 使 worker 线程在 ClearResource(213行)/BmUnregister(189行) 检查到未启动后早退，
+    // 避免持锁等待 join 而 worker 又反过等同一把 mutex_ 的死锁。
+    {
+        std::lock_guard<std::mutex> guard(mutex_);
+        if (!started_) {
+            MMC_LOG_WARN("MmcMetaService has not been started");
+            return;
+        }
+        UnregisterPeriodicTask("metrics_report");
+        PublishClearedForRanks(CollectRanks(rankMediaTypeMap_));
+        kvEventsPublishActive_ = false;
+        MmcMetaManager *metaManager = nullptr;
+        if (metaMgrProxy_ != nullptr && metaMgrProxy_->GetMetaManager() != nullptr) {
+            metaManager = metaMgrProxy_->GetMetaManager().Get();
+        }
+        if (metaManager != nullptr) {
+            metaManager->SetChangeCallbacks({});
+        }
+        started_ = false;
     }
-    UnregisterPeriodicTask("metrics_report");
-    PublishClearedForRanks(CollectRanks(rankMediaTypeMap_));
-    kvEventsPublishActive_ = false;
-    MmcMetaManager *metaManager = nullptr;
-    if (metaMgrProxy_ != nullptr && metaMgrProxy_->GetMetaManager() != nullptr) {
-        metaManager = metaMgrProxy_->GetMetaManager().Get();
-    }
-    if (metaManager != nullptr) {
-        metaManager->SetChangeCallbacks({});
-    }
+    // 无锁阶段：执行含 join 的停止。metaNetServer_->Stop() 会 join net worker，
+    // 若上方仍持 mutex_，worker 处理断链时在 ClearResource:219 等 mutex_ 即永久挂死。
     metaBackUpMgrPtr_->Stop();
     metaMgrProxy_->Stop();
     metaNetServer_->Stop();
@@ -273,7 +281,6 @@ void MmcMetaService::Stop()
     metadata_.clear();
     ock::smem::StoreFactory::DestroyStore(options_.configStoreURL);
     MMC_LOG_INFO("Stop MmcMetaServiceDefault (" << name_ << ") at " << options_.discoveryURL);
-    started_ = false;
 }
 
 void MmcMetaService::PublishClearedForRanks(const std::vector<uint32_t> &ranks)
