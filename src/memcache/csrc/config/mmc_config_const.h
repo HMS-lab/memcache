@@ -100,12 +100,19 @@ constexpr auto OCK_MMC_LOCAL_SERVICE_SSD_SIZE = std::make_pair("ock.mmc.local_se
 
 // KV cache event publisher (opt-in, default disabled).
 constexpr auto OCK_MMC_KV_EVENTS_ENABLE = std::make_pair("ock.mmc.kv_events.enable", false);
+constexpr auto OCK_MMC_KV_EVENTS_TRANSPORT = std::make_pair("ock.mmc.kv_events.transport", 0);
 constexpr auto OCK_MMC_KV_EVENTS_ENDPOINT = std::make_pair("ock.mmc.kv_events.endpoint", "");
 constexpr auto OCK_MMC_KV_EVENTS_MODEL_NAME = std::make_pair("ock.mmc.kv_events.model_name", "");
 constexpr auto OCK_MMC_KV_EVENTS_TENANT_ID = std::make_pair("ock.mmc.kv_events.tenant_id", "default");
 constexpr auto OCK_MMC_KV_EVENTS_BLOCK_SIZE = std::make_pair("ock.mmc.kv_events.block_size", 0);
 constexpr auto OCK_MMC_KV_EVENTS_QUEUE_CAPACITY = std::make_pair("ock.mmc.kv_events.queue_capacity", 65536);
 constexpr auto OCK_MMC_KV_EVENTS_HASH_AS_INT = std::make_pair("ock.mmc.kv_events.hash_as_int", true);
+
+// ZMQ transport plugin config (independent of kv_events).
+constexpr size_t CURVE_KEY_Z85_LEN = 40;
+constexpr auto OCK_MMC_ZMQ_ENABLE_CURVE = std::make_pair("ock.mmc.zmq.enable_curve", false);
+constexpr auto OCK_MMC_ZMQ_PUBLIC_KEY = std::make_pair("ock.mmc.zmq.public_key", "");
+constexpr auto OCK_MMC_ZMQ_SECRET_KEY = std::make_pair("ock.mmc.zmq.private_key", "");
 constexpr uint16_t DEFAULT_REWARM_WATERMARK_VAL = 95U;
 constexpr auto OCK_MMC_REWARM_DRAM_WATERMARK =
     std::make_pair("ock.mmc.rewarm.dram_watermark", DEFAULT_REWARM_WATERMARK_VAL);

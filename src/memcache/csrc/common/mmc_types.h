@@ -266,6 +266,11 @@ public:
     }
 };
 
+enum KV_EVENT_TRANSPORT : uint8_t {
+    ZMQ = 0,
+    KV_EVENT_TRANSPORT_TYPE_COUNT,
+};
+
 } // namespace mmc
 } // namespace ock
 

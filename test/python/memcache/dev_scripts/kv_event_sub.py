@@ -1,4 +1,15 @@
 #!/usr/bin/env python3
+# coding=utf-8
+# Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
+# MemCache_Hybrid is licensed under Mulan PSL v2.
+# You can use this software according to the terms and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#          http://license.coscl.org.cn/MulanPSL2
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+
 """
 ZMQ SUB subscriber for MemCache KV events.
 
@@ -21,6 +32,26 @@ import sys
 
 import msgpack
 import zmq
+from zmq.utils import z85
+
+# ZMQ CURVE server public key (Z85, 40 chars). Set to the MemCache server's
+# public key to enable CURVE encryption; leave empty for plaintext.
+SERVER_PUB_KEY = ""
+
+
+def setup_curve(sock, server_pub_key):
+    """Enable ZMQ CURVE (server-only auth) if server_pub_key is valid. Returns True if encrypted."""
+    if not server_pub_key:
+        return False
+    try:
+        if len(z85.decode(server_pub_key)) != 32:
+            return False
+    except Exception as exc:
+        print(f"WARNING: invalid CURVE server key, fallback to plaintext: {exc!r}", file=sys.stderr)
+        return False
+    sock.curve_publickey, sock.curve_secretkey = zmq.curve_keypair()
+    sock.curve_serverkey = server_pub_key.encode("ascii")
+    return True
 
 
 def decode_value(v):
@@ -43,7 +74,7 @@ def decode_event(event_obj):
 
 
 def decode_batch(payload: bytes):
-    obj = msgpack.unpackb(payload, raw=True)
+    obj = msgpack.unpackb(payload, raw=False)
     if isinstance(obj, dict) and "events" in obj:
         events_array = obj["events"]
         decoded_events = [decode_event(e) for e in events_array]
@@ -70,13 +101,17 @@ def main():
 
     ctx = zmq.Context.instance()
     sock = ctx.socket(zmq.SUB)
+    encrypted = setup_curve(sock, SERVER_PUB_KEY)
     sock.connect(args.endpoint)
     if args.topic:
         sock.setsockopt_string(zmq.SUBSCRIBE, args.topic)
     else:
         sock.setsockopt_string(zmq.SUBSCRIBE, "")
 
-    print(f"Subscribed to {args.endpoint} (topic={args.topic!r})", file=sys.stderr)
+    print(
+        f"Subscribed to {args.endpoint} (topic={args.topic!r}, curve={'on' if encrypted else 'off'})",
+        file=sys.stderr,
+    )
     print("Waiting for events...", file=sys.stderr)
 
     try:

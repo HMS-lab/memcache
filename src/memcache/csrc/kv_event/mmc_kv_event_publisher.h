@@ -27,6 +27,7 @@
 #include <vector>
 
 #include "mmc_kv_event.h"
+#include "mmc_types.h"
 
 namespace ock {
 namespace mmc {
@@ -44,6 +45,11 @@ struct KvEventConfig {
     bool emitHashAsInt{true};
     uint32_t queueCapacity{65536};
     uint32_t maxBatchSize{64};
+    KV_EVENT_TRANSPORT transportType{ZMQ}; /* transport plugin type, see mmc_types.h */
+    /* ZMQ CURVE (server-only auth) options, supplied by independent ock.mmc.zmq.* config domain. */
+    bool curveEnable{false};
+    std::string curveServerPublicKey;
+    std::string curveServerSecretKey;
 };
 
 struct KvEventStats {

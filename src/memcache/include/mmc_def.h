@@ -51,8 +51,15 @@ typedef struct {
     char tenantId[KV_EVENT_FIELD_SIZE];
     uint32_t blockSize;
     uint32_t queueCapacity;
-    bool hashAsInt; /* true: u64 hash (default); false: hex string */
+    bool hashAsInt;        /* true: u64 hash (default); false: hex string */
+    int32_t transportType; /* KV_EVENT_TRANSPORT enum value, see common/mmc_types.h */
 } mmc_kv_events_config_t;
+
+typedef struct {
+    bool enableCurve;                    /* ZMQ CURVE encryption (server-only auth), default false */
+    char publicKey[KV_EVENT_FIELD_SIZE]; /* Z85 encoded 40-char server public key */
+    char secretKey[KV_EVENT_FIELD_SIZE]; /* Z85 encoded 40-char server secret key, keep secret */
+} mmc_zmq_config_t;
 
 typedef struct {
     char discoveryURL[DISCOVERY_URL_SIZE];   /* composed by schema and url, e.g. tcp:// or etcd:// or zk:// */
@@ -76,6 +83,8 @@ typedef struct {
     mmc_kv_events_config_t kvEvents;
     uint16_t rewarmDramWatermark;
     bool prefetchEnabled;
+    /* ZMQ transport plugin config (independent of kv_events). */
+    mmc_zmq_config_t zmq;
     uint64_t pendingWaitTimeoutMs;
 } mmc_meta_service_config_t;
 

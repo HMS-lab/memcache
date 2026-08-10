@@ -246,6 +246,8 @@ public:
                    VStrLength::Create(OCK_MMC_CS_TLS_DECRYPTER_PATH.first, TLS_PATH_MAX_LEN), 0);
 
         AddBoolConf(OCK_MMC_KV_EVENTS_ENABLE, VStrEnum::Create(OCK_MMC_KV_EVENTS_ENABLE.first, BOOL_ENUM_STR), 0);
+        AddIntConf(OCK_MMC_KV_EVENTS_TRANSPORT,
+                   VIntRange::Create(OCK_MMC_KV_EVENTS_TRANSPORT.first, 0, KV_EVENT_TRANSPORT_TYPE_COUNT - 1), 0);
         AddStrConf(OCK_MMC_KV_EVENTS_ENDPOINT, VNoCheck::Create(), 0);
         AddStrConf(OCK_MMC_KV_EVENTS_MODEL_NAME, VNoCheck::Create(), 0);
         AddStrConf(OCK_MMC_KV_EVENTS_TENANT_ID, VNoCheck::Create(), 0);
@@ -253,6 +255,9 @@ public:
         AddIntConf(OCK_MMC_KV_EVENTS_QUEUE_CAPACITY, VNoCheck::Create(), 0);
         AddBoolConf(OCK_MMC_KV_EVENTS_HASH_AS_INT, VStrEnum::Create(OCK_MMC_KV_EVENTS_HASH_AS_INT.first, BOOL_ENUM_STR),
                     0);
+        AddBoolConf(OCK_MMC_ZMQ_ENABLE_CURVE, VStrEnum::Create(OCK_MMC_ZMQ_ENABLE_CURVE.first, BOOL_ENUM_STR), 0);
+        AddStrConf(OCK_MMC_ZMQ_PUBLIC_KEY, VStrLength::Create(OCK_MMC_ZMQ_PUBLIC_KEY.first, CURVE_KEY_Z85_LEN), 0);
+        AddStrConf(OCK_MMC_ZMQ_SECRET_KEY, VStrLength::Create(OCK_MMC_ZMQ_SECRET_KEY.first, CURVE_KEY_Z85_LEN), 0);
         AddBoolConf(OCK_MMC_METRICS_TLS_ENABLE, VStrEnum::Create(OCK_MMC_METRICS_TLS_ENABLE.first, BOOL_ENUM_STR), 0);
         AddStrConf(OCK_MMC_METRICS_TLS_CA_PATH, VStrLength::Create(OCK_MMC_METRICS_TLS_CA_PATH.first, TLS_PATH_MAX_LEN),
                    0);
@@ -306,12 +311,16 @@ public:
         GetAccTlsConfig(config.accTlsConfig);
         GetConfigStoreTlsConfig(config.configStoreTlsConfig);
         config.kvEvents.enable = GetBool(ConfConstant::OCK_MMC_KV_EVENTS_ENABLE);
+        config.kvEvents.transportType = static_cast<int32_t>(GetInt(ConfConstant::OCK_MMC_KV_EVENTS_TRANSPORT));
         SafeCopy(GetString(ConfConstant::OCK_MMC_KV_EVENTS_ENDPOINT), config.kvEvents.endpoint, DISCOVERY_URL_SIZE);
         SafeCopy(GetString(ConfConstant::OCK_MMC_KV_EVENTS_MODEL_NAME), config.kvEvents.modelName, KV_EVENT_FIELD_SIZE);
         SafeCopy(GetString(ConfConstant::OCK_MMC_KV_EVENTS_TENANT_ID), config.kvEvents.tenantId, KV_EVENT_FIELD_SIZE);
         config.kvEvents.blockSize = static_cast<uint32_t>(GetInt(ConfConstant::OCK_MMC_KV_EVENTS_BLOCK_SIZE));
         config.kvEvents.queueCapacity = static_cast<uint32_t>(GetInt(ConfConstant::OCK_MMC_KV_EVENTS_QUEUE_CAPACITY));
         config.kvEvents.hashAsInt = GetBool(ConfConstant::OCK_MMC_KV_EVENTS_HASH_AS_INT);
+        config.zmq.enableCurve = GetBool(ConfConstant::OCK_MMC_ZMQ_ENABLE_CURVE);
+        SafeCopy(GetString(ConfConstant::OCK_MMC_ZMQ_PUBLIC_KEY), config.zmq.publicKey, KV_EVENT_FIELD_SIZE);
+        SafeCopy(GetString(ConfConstant::OCK_MMC_ZMQ_SECRET_KEY), config.zmq.secretKey, KV_EVENT_FIELD_SIZE);
         GetMetricsTlsConfig(config.metricsTlsConfig);
     }
 };

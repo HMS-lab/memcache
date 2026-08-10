@@ -82,10 +82,31 @@ kv_event::KvEventConfig MmcKvEventRuntime::BuildKvEventConfig(const mmc_meta_ser
         config.queueCapacity = meta.kvEvents.queueCapacity;
     }
     config.emitHashAsInt = meta.kvEvents.hashAsInt;
+    config.transportType = static_cast<KV_EVENT_TRANSPORT>(meta.kvEvents.transportType);
+    config.curveEnable = meta.zmq.enableCurve;
+    config.curveServerPublicKey = meta.zmq.publicKey;
+    config.curveServerSecretKey = meta.zmq.secretKey;
     return config;
 #else
     (void)meta;
     return kv_event::KvEventConfig{};
+#endif
+}
+
+std::unique_ptr<kv_event::IKvEventTransport> MmcKvEventRuntime::MakeTransport(const kv_event::KvEventConfig &kvConfig)
+{
+#ifdef MMC_ENABLE_KV_EVENTS
+    switch (kvConfig.transportType) {
+        case ZMQ:
+            return kv_event::MakeZmqPubTransport(kvConfig);
+        default:
+            MMC_LOG_ERROR("kv_events: unsupported transport type " << static_cast<int>(kvConfig.transportType)
+                                                                   << ", publisher disabled");
+            return nullptr;
+    }
+#else
+    (void)kvConfig;
+    return nullptr;
 #endif
 }
 
@@ -99,10 +120,12 @@ void MmcKvEventRuntime::Start(const mmc_meta_service_config_t &options,
     }
     impl_ = std::make_unique<Impl>();
     impl_->backendIdResolver = backendIdResolver;
-    auto transport = kv_event::MakeZmqPubTransport(kvConfig);
+    auto transport = MakeTransport(kvConfig);
     impl_->publisher = std::make_unique<kv_event::KvEventPublisher>(kvConfig, std::move(transport));
     impl_->publisher->SetActive(!options.haEnable);
-    MMC_LOG_INFO("kv_events publisher created, enabled=" << impl_->publisher->Enabled() << " ha=" << options.haEnable);
+    MMC_LOG_INFO("kv_events publisher created, transport_type="
+                 << static_cast<int>(kvConfig.transportType) << " enabled=" << impl_->publisher->Enabled()
+                 << " curve=" << (kvConfig.curveEnable ? "on" : "off") << " ha=" << options.haEnable);
 #else
     (void)options;
 #endif

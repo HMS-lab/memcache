@@ -26,6 +26,54 @@ namespace {
 
 constexpr int K_ZMQ_SEND_HWM = 10000;
 constexpr int K_ZMQ_LINGER_MS = 0;
+constexpr size_t K_CURVE_KEY_BIN_SIZE = 32;
+constexpr size_t K_CURVE_KEY_Z85_LEN = 40;
+
+void ApplyCurveServer(void *socket, const KvEventConfig &config)
+{
+    if (!config.curveEnable) {
+        return;
+    }
+    if (config.curveServerPublicKey.empty() || config.curveServerSecretKey.empty()) {
+        MMC_LOG_ERROR("kv_events: curve_enable=true but server key is missing, FALLBACK TO PLAINTEXT");
+        return;
+    }
+    if (config.curveServerPublicKey.size() != K_CURVE_KEY_Z85_LEN ||
+        config.curveServerSecretKey.size() != K_CURVE_KEY_Z85_LEN) {
+        MMC_LOG_ERROR("kv_events: curve key length must be " << K_CURVE_KEY_Z85_LEN
+                                                             << " Z85 chars, FALLBACK TO PLAINTEXT");
+        return;
+    }
+    uint8_t dummy[K_CURVE_KEY_BIN_SIZE] = {0};
+    if (zmq_z85_decode(dummy, config.curveServerPublicKey.c_str()) == nullptr ||
+        zmq_z85_decode(dummy, config.curveServerSecretKey.c_str()) == nullptr) {
+        MMC_LOG_ERROR("kv_events: invalid CURVE key, FALLBACK TO PLAINTEXT");
+        return;
+    }
+    int on = 1;
+    // ZMQ_CURVE_PUBLICKEY/SECRETKEY expect the 40-char Z85 string (41 bytes incl. NUL),
+    // NOT the decoded 32-byte binary. Length < 41 yields EINVAL.
+    // Set ZMQ_CURVE_SERVER LAST: if any key option fails, the socket must stay in
+    // plaintext mode, otherwise a half-configured CURVE server would break zmq_bind
+    // while the log claims a plaintext fallback.
+    const size_t curveKeyOptLen = K_CURVE_KEY_Z85_LEN + 1;
+    if (zmq_setsockopt(socket, ZMQ_CURVE_PUBLICKEY, config.curveServerPublicKey.c_str(), curveKeyOptLen) != 0) {
+        MMC_LOG_ERROR("kv_events: failed to set ZMQ_CURVE_PUBLICKEY: " << zmq_strerror(zmq_errno())
+                                                                       << ", FALLBACK TO PLAINTEXT");
+        return;
+    }
+    if (zmq_setsockopt(socket, ZMQ_CURVE_SECRETKEY, config.curveServerSecretKey.c_str(), curveKeyOptLen) != 0) {
+        MMC_LOG_ERROR("kv_events: failed to set ZMQ_CURVE_SECRETKEY: " << zmq_strerror(zmq_errno())
+                                                                       << ", FALLBACK TO PLAINTEXT");
+        return;
+    }
+    if (zmq_setsockopt(socket, ZMQ_CURVE_SERVER, &on, sizeof(on)) != 0) {
+        MMC_LOG_ERROR("kv_events: failed to set ZMQ_CURVE_SERVER: " << zmq_strerror(zmq_errno())
+                                                                    << ", FALLBACK TO PLAINTEXT");
+        return;
+    }
+    MMC_LOG_INFO("kv_events: ZMQ CURVE encryption enabled (server-only auth)");
+}
 
 class ZmqMsg {
 public:
@@ -81,6 +129,7 @@ public:
 
     bool Send(uint64_t seq, const std::string &payload) override
     {
+        MMC_LOG_DEBUG("kv_events: prepare to send payload[:10]=" << payload.substr(0, 10) << " seq=" << seq);
         const auto seqBe = EncodeBigEndianU64(seq);
 
         ZmqMsg topicMsg(topic_.size());
@@ -143,6 +192,8 @@ std::unique_ptr<IKvEventTransport> MakeZmqPubTransport(const KvEventConfig &conf
     (void)zmq_setsockopt(socket, ZMQ_SNDHWM, &hwm, sizeof(hwm));
     int linger = K_ZMQ_LINGER_MS;
     (void)zmq_setsockopt(socket, ZMQ_LINGER, &linger, sizeof(linger));
+
+    ApplyCurveServer(socket, config);
 
     if (zmq_bind(socket, config.bindEndpoint.c_str()) != 0) {
         MMC_LOG_ERROR("kv_events: zmq_bind failed for " << config.bindEndpoint << ": " << zmq_strerror(zmq_errno()));

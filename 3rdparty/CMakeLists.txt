@@ -16,6 +16,78 @@ set(MMC_KV_EVENTS_MSGPACK_INCLUDE_DIR "${_MMC_MSGPACK_SRC_DIR}/include" CACHE IN
     "msgpack-cxx header root (3rdparty submodule)")
 
 ####################################################################
+# libsodium (CURVE backend for libzmq), MMC_ENABLE_KV_EVENTS=ON only
+# libsodium >= 1.0.21 dropped CMake support; build via autotools
+# (configure script ships with the release tag, no autotools needed).
+####################################################################
+if (MMC_ENABLE_KV_EVENTS)
+    set(_MMC_SODIUM_SRC_DIR ${PROJECT_3RDPARTY_SRC_DIR}/libsodium)
+    set(_MMC_SODIUM_BUILD_DIR ${PROJECT_BUILD_PATH}/build/libsodium)
+    set(_MMC_SODIUM_INSTALL_DIR ${PROJECT_3RDPARTY_BIN_DIR}/libsodium)
+
+    if (NOT EXISTS "${_MMC_SODIUM_SRC_DIR}/configure")
+        message(FATAL_ERROR
+            "3rdparty libsodium submodule not found at ${_MMC_SODIUM_SRC_DIR}.\n"
+            "Run: git submodule update --init 3rdparty/libsodium")
+    endif ()
+
+    set(_MMC_SODIUM_STATIC_LIB "${_MMC_SODIUM_INSTALL_DIR}/lib/libsodium.a")
+    set(_MMC_SODIUM_STATIC_LIB64 "${_MMC_SODIUM_INSTALL_DIR}/lib64/libsodium.a")
+    if (EXISTS "${_MMC_SODIUM_STATIC_LIB}" OR EXISTS "${_MMC_SODIUM_STATIC_LIB64}")
+        message(STATUS "kv_events 3rdparty: libsodium already built at ${_MMC_SODIUM_INSTALL_DIR}")
+    else ()
+        message(STATUS "kv_events 3rdparty: building libsodium (static, autotools) from ${_MMC_SODIUM_SRC_DIR}")
+        file(MAKE_DIRECTORY "${_MMC_SODIUM_BUILD_DIR}")
+        file(MAKE_DIRECTORY "${_MMC_SODIUM_INSTALL_DIR}")
+        execute_process(
+            COMMAND ${_MMC_SODIUM_SRC_DIR}/configure --disable-shared --enable-static
+                    --prefix=${_MMC_SODIUM_INSTALL_DIR}
+            WORKING_DIRECTORY ${_MMC_SODIUM_BUILD_DIR}
+            RESULT_VARIABLE _MMC_SODIUM_CFG_RESULT
+            OUTPUT_VARIABLE _MMC_SODIUM_CFG_OUT
+            ERROR_VARIABLE _MMC_SODIUM_CFG_ERR
+        )
+        if (NOT _MMC_SODIUM_CFG_RESULT EQUAL 0)
+            message(FATAL_ERROR "libsodium configure failed:\n${_MMC_SODIUM_CFG_OUT}\n${_MMC_SODIUM_CFG_ERR}")
+        endif ()
+        execute_process(
+            COMMAND make -j8
+            WORKING_DIRECTORY ${_MMC_SODIUM_BUILD_DIR}
+            RESULT_VARIABLE _MMC_SODIUM_MAKE_RESULT
+            OUTPUT_VARIABLE _MMC_SODIUM_MAKE_OUT
+            ERROR_VARIABLE _MMC_SODIUM_MAKE_ERR
+        )
+        if (NOT _MMC_SODIUM_MAKE_RESULT EQUAL 0)
+            message(FATAL_ERROR "libsodium build failed:\n${_MMC_SODIUM_MAKE_OUT}\n${_MMC_SODIUM_MAKE_ERR}")
+        endif ()
+        execute_process(
+            COMMAND make install
+            WORKING_DIRECTORY ${_MMC_SODIUM_BUILD_DIR}
+            RESULT_VARIABLE _MMC_SODIUM_INSTALL_RESULT
+            OUTPUT_VARIABLE _MMC_SODIUM_INSTALL_OUT
+            ERROR_VARIABLE _MMC_SODIUM_INSTALL_ERR
+        )
+        if (NOT _MMC_SODIUM_INSTALL_RESULT EQUAL 0)
+            message(FATAL_ERROR "libsodium install failed:\n${_MMC_SODIUM_INSTALL_OUT}\n${_MMC_SODIUM_INSTALL_ERR}")
+        endif ()
+        # On 64-bit distros autotools may install to lib64 instead of lib.
+        if (NOT EXISTS "${_MMC_SODIUM_STATIC_LIB}")
+            if (EXISTS "${_MMC_SODIUM_STATIC_LIB64}")
+                file(MAKE_DIRECTORY "${_MMC_SODIUM_INSTALL_DIR}/lib")
+                file(COPY "${_MMC_SODIUM_STATIC_LIB64}" DESTINATION "${_MMC_SODIUM_INSTALL_DIR}/lib")
+            else ()
+                message(FATAL_ERROR
+                    "libsodium static library not found after install (expected ${_MMC_SODIUM_STATIC_LIB})")
+            endif ()
+        endif ()
+        message(STATUS "kv_events 3rdparty: libsodium installed to ${_MMC_SODIUM_INSTALL_DIR}")
+    endif ()
+
+    set(MMC_KV_EVENTS_SODIUM_LIBRARY "${_MMC_SODIUM_STATIC_LIB}" CACHE INTERNAL
+        "libsodium static library (3rdparty)")
+endif ()
+
+####################################################################
 # KV Events ZMQ dep (libzmq static build), MMC_ENABLE_KV_EVENTS=ON only
 ####################################################################
 if (MMC_ENABLE_KV_EVENTS)
@@ -26,7 +98,7 @@ if (MMC_ENABLE_KV_EVENTS)
     if (NOT EXISTS "${_MMC_ZMQ_SRC_DIR}/CMakeLists.txt")
         message(FATAL_ERROR
             "3rdparty libzmq submodule not found at ${_MMC_ZMQ_SRC_DIR}.\n"
-            "Run: git submodule update --init 3rdparty/libzmq")
+            "Run: git submodule update --init 3rdparty/msgpack-c 3rdparty/libzmq 3rdparty/libsodium")
     endif ()
 
     set(MMC_KV_EVENTS_ZMQ_INCLUDE_DIR "${_MMC_ZMQ_INSTALL_DIR}/include" CACHE INTERNAL
@@ -67,8 +139,10 @@ if (MMC_ENABLE_KV_EVENTS)
                 -DBUILD_TESTS=OFF
                 -DENABLE_DRAFTS=OFF
                 -DENABLE_WS=OFF
-                -DENABLE_CURVE=OFF
-                -DWITH_LIBSODIUM=OFF
+                -DENABLE_CURVE=ON
+                -DWITH_LIBSODIUM=ON
+                -DWITH_LIBSODIUM_STATIC=ON
+                -DCMAKE_PREFIX_PATH=${_MMC_SODIUM_INSTALL_DIR}
                 -DWITH_TLS=OFF
                 -DWITH_DOCS=OFF
                 -S ${_MMC_ZMQ_SRC_DIR}

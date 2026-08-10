@@ -506,6 +506,37 @@ void DefineMmcStructModule(py::module_ &m)
                     Bounded queue capacity for async KV event publishing.
                 )pbdoc")
             .def_property(
+                "kv_events_transport_type",
+                [](const mmc_meta_service_config_t &config) { return config.kvEvents.transportType; },
+                [](mmc_meta_service_config_t &config, int32_t value) { config.kvEvents.transportType = value; },
+                R"pbdoc(
+                    Transport plugin type for KV events (KV_EVENT_TRANSPORT enum, see mmc_types.h).
+                )pbdoc")
+            .def_property(
+                "zmq_enable_curve", [](const mmc_meta_service_config_t &config) { return config.zmq.enableCurve; },
+                [](mmc_meta_service_config_t &config, bool value) { config.zmq.enableCurve = value; },
+                R"pbdoc(
+                    Enable ZMQ CURVE encryption for the zmq transport (default false).
+                )pbdoc")
+            .def_property(
+                "zmq_public_key",
+                [](const mmc_meta_service_config_t &config) { return std::string(config.zmq.publicKey); },
+                [](mmc_meta_service_config_t &config, const std::string &value) {
+                    SafeCopy(value, config.zmq.publicKey, sizeof(config.zmq.publicKey));
+                },
+                R"pbdoc(
+                    ZMQ CURVE server public key (Z85, 40 chars). Subscribers use it to decrypt.
+                )pbdoc")
+            .def_property(
+                "zmq_private_key", [](const mmc_meta_service_config_t &) { return std::string("***"); },
+                [](mmc_meta_service_config_t &config, const std::string &value) {
+                    SafeCopy(value, config.zmq.secretKey, sizeof(config.zmq.secretKey));
+                },
+                R"pbdoc(
+                    ZMQ CURVE server secret key (Z85, 40 chars). Write-only: the
+                    getter returns "***" to avoid leaking the private key material.
+                )pbdoc")
+            .def_property(
                 "tls_enable", [](const mmc_meta_service_config_t &config) { return config.accTlsConfig.tlsEnable; },
                 [](mmc_meta_service_config_t &config, bool value) { config.accTlsConfig.tlsEnable = value; },
                 R"pbdoc(

@@ -47,6 +47,7 @@ public:
 private:
     static std::string KvEventMediumName(uint16_t mediaType);
     static std::string BuildTopic(const std::string &modelName);
+    static std::unique_ptr<kv_event::IKvEventTransport> MakeTransport(const kv_event::KvEventConfig &kvConfig);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

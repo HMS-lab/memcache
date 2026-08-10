@@ -54,12 +54,16 @@ mmc_meta_service_config_t create_default_meta_config()
     config.configStoreTlsConfig.tlsEnable = false;
     config.metricsReportIntervalSeconds = 0U;
     config.kvEvents.enable = false;
+    config.kvEvents.transportType = static_cast<int32_t>(KV_EVENT_TRANSPORT::ZMQ);
     SafeCopy("", config.kvEvents.endpoint, sizeof(config.kvEvents.endpoint));
     SafeCopy("", config.kvEvents.modelName, sizeof(config.kvEvents.modelName));
     SafeCopy("default", config.kvEvents.tenantId, sizeof(config.kvEvents.tenantId));
     config.kvEvents.blockSize = 0U;
     config.kvEvents.queueCapacity = 65536U;
     config.kvEvents.hashAsInt = true;
+    config.zmq.enableCurve = false;
+    SafeCopy("", config.zmq.publicKey, sizeof(config.zmq.publicKey));
+    SafeCopy("", config.zmq.secretKey, sizeof(config.zmq.secretKey));
     return config;
 }
 
@@ -79,8 +83,11 @@ std::string meta_config_to_string(const mmc_meta_service_config_t &config)
     oss << "  evict_threshold_high: " << config.evictThresholdHigh << "\n";
     oss << "  evict_threshold_low: " << config.evictThresholdLow << "\n";
     oss << "  kv_events_enable: " << (config.kvEvents.enable ? "true" : "false") << "\n";
+    oss << "  kv_events_transport_type: " << config.kvEvents.transportType << "\n";
     oss << "  kv_events_endpoint: " << config.kvEvents.endpoint << "\n";
     oss << "  kv_events_hash_as_int: " << (config.kvEvents.hashAsInt ? "true" : "false") << "\n";
+    oss << "  zmq_curve_enable: " << (config.zmq.enableCurve ? "true" : "false") << "\n";
+    oss << "  zmq_public_key: " << config.zmq.publicKey << "\n";
     oss << "  lease_ttl_ms: " << config.leaseTtlMs << "\n";
     oss << "  tls_enable: " << (config.accTlsConfig.tlsEnable ? "true" : "false") << "\n";
     oss << "  tls_ca_path: " << config.accTlsConfig.caPath << "\n";

@@ -30,3 +30,7 @@
 	path = 3rdparty/libzmq
 	url = https://github.com/zeromq/libzmq.git
 	branch = tags/v4.3.5
+[submodule "3rdparty/libsodium"]
+	path = 3rdparty/libsodium
+	url = https://gitcode.com/gh_mirrors/li/libsodium.git
+	branch = tags/1.0.21-FINAL
