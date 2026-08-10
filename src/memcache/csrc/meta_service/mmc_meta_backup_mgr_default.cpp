@@ -33,8 +33,6 @@ void MMCMetaBackUpMgrDefault::BackupThreadFunc()
             MMC_LOG_INFO("backup thread destroy, thread id " << pthread_self());
             break;
         }
-        MMC_LOG_DEBUG("MMCMetaBackU thread will backup count " << backupList_.size() << " thread id "
-                                                               << pthread_self());
 
         SendBackup2Local();
     }
