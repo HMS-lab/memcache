@@ -94,12 +94,15 @@ int MmcMetaServiceProcess::MainForPython()
     }
 
     if (config_.haEnable) {
-        leaderElection_ = new (std::nothrow)
-            MmcMetaServiceLeaderElection("leader_election", META_POD_NAME, META_NAMESPACE, META_LEASE_NAME);
-        if (leaderElection_ == nullptr || leaderElection_->Start(config_) != MMC_OK) {
-            std::cerr << "Error, failed to start meta service leader election." << std::endl;
-            Exit();
-            return -1;
+        bool etcdHaMode = (std::string(config_.configStoreURL).find("etcd://") == 0);
+        if (!etcdHaMode) {
+            leaderElection_ = new (std::nothrow)
+                MmcMetaServiceLeaderElection("leader_election", META_POD_NAME, META_NAMESPACE, META_LEASE_NAME);
+            if (leaderElection_ == nullptr || leaderElection_->Start(config_) != MMC_OK) {
+                std::cerr << "Error, failed to start meta service leader election." << std::endl;
+                Exit();
+                return -1;
+            }
         }
     }
 

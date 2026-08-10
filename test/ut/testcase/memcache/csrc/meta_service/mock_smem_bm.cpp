@@ -170,3 +170,8 @@ int32_t smem_bm_gva_to_va(smem_bm_t handle, void *gva, smem_bm_mem_type_t vaMemT
     *va = reinterpret_cast<void *>(reinterpret_cast<uint64_t>(gva) + 0x1000);
     return 0;
 }
+
+int32_t smem_bm_get_meta_service_info(char *ip, size_t ipLen, uint16_t *port)
+{
+    return 0;
+}

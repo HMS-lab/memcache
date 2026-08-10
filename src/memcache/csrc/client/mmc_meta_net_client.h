@@ -39,6 +39,7 @@ using ClientBatchBlobCopyHandler =
     std::function<std::vector<Result>(const std::vector<std::string> &keys, const std::vector<MmcMemBlobDesc> &srcBlobs,
                                       const std::vector<MmcMemBlobDesc> &dstBlobs)>;
 using UrlResolver = std::function<bool(const std::string &url, std::string &ip, uint16_t &port)>;
+using DiscoverUrlFunc = std::function<std::string()>;
 class MetaNetClient : public MmcReferable {
 public:
     explicit MetaNetClient(const std::string &serverUrl, const std::string &inputName = "");
@@ -166,6 +167,11 @@ public:
         batchBlobCopyHandler_ = batchBlobCopyHandler;
     }
 
+    void RegisterDiscoverUrlFunc(DiscoverUrlFunc func)
+    {
+        discoverUrlFunc_ = std::move(func);
+    }
+
 private:
     Result HandleMetaReplicate(const NetContextPtr &context);
     Result HandlePing(const NetContextPtr &context);
@@ -187,6 +193,7 @@ private:
     ClientBlobCopyHandler blobCopyHandler_ = nullptr;
     ClientBlobDeleteHandler blobDeleteHandler_ = nullptr;
     ClientBatchBlobCopyHandler batchBlobCopyHandler_ = nullptr;
+    DiscoverUrlFunc discoverUrlFunc_;
     std::string serverUrl_;
     UrlResolver resolver_;
 

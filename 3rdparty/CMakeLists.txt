@@ -206,6 +206,13 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 add_subdirectory(prometheus-cpp-lite)
 unset(CMAKE_POLICY_VERSION_MINIMUM)
 
+# GCC >= 12 no longer transitively includes <stdexcept> from other headers;
+# prometheus headers use std::invalid_argument / std::runtime_error without
+# including it. Add the include via command line to keep the 3rdparty pristine.
+if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12)
+    target_compile_options(prometheus-cpp-simpleapi PRIVATE -include stdexcept)
+endif ()
+
 ####################################################################
 # MemFabric_Hybrid
 ####################################################################

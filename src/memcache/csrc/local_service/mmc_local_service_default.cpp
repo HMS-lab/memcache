@@ -12,6 +12,8 @@
 
 #include <sys/stat.h>
 
+#include "smem_bm.h"
+#include "smem_bm_api.h"
 #include "mmc_meta_net_client.h"
 #include "mmc_msg_client_meta.h"
 #include "mmc_ptracer.h"
@@ -23,6 +25,13 @@ namespace ock {
 namespace mmc {
 constexpr int TIMEOUT_THIRTY = 30;
 constexpr int CLIENT_THREAD_COUNT = 2;
+
+namespace {
+bool IsEtcdStoreUrl(const char *storeUrl)
+{
+    return storeUrl != nullptr && (std::string(storeUrl).find("etcd://") == 0);
+}
+} // namespace
 
 MmcLocalServiceDefault::~MmcLocalServiceDefault()
 {
@@ -59,7 +68,24 @@ Result MmcLocalServiceDefault::Start(const mmc_local_service_config_t &config)
         options.tlsOption = options_.accTlsConfig;
         options.logLevel = options_.logLevel;
         options.logFunc = options_.logFunc;
-        if (metaNetClient_->Start(options) != MMC_OK || metaNetClient_->Connect(options_.discoveryURL) != MMC_OK) {
+
+        std::string connectUrl(options_.discoveryURL);
+        // 非 etcd 模式（进程级）：MetaService 监听 meta_service_url 配置端口，
+        // 直接使用配置值（etcd HA 模式下由 HaConfigStore 动态分配 MetaService 端口，
+        // 通过 smem_bm_get_meta_service_info 查询）。
+        if (!IsEtcdStoreUrl(options_.bmIpPort)) {
+            MMC_LOG_INFO("non-etcd mode: connect MetaService via configured URL: " << connectUrl);
+        } else {
+            char metaIp[64] = {0};
+            uint16_t metaPort = 0;
+            if (ock::mmc::MFSmemApi::SmemBmGetMetaServiceInfo(metaIp, sizeof(metaIp), &metaPort) == 0 &&
+                metaIp[0] != '\0') {
+                connectUrl = "tcp://" + std::string(metaIp) + ":" + std::to_string(metaPort);
+                MMC_LOG_INFO("etcd HA: discovered MetaService leader via ConfigStore, " << connectUrl);
+            }
+        }
+
+        if (metaNetClient_->Start(options) != MMC_OK || metaNetClient_->Connect(connectUrl) != MMC_OK) {
             MMC_LOG_ERROR("Failed to start net server of local service, bmRankId=" << options_.rankId);
             DestroyBm();
             metaNetClient_->Stop();
@@ -104,6 +130,21 @@ Result MmcLocalServiceDefault::Start(const mmc_local_service_config_t &config)
         std::bind(&MmcLocalServiceDefault::BlobDelete, this, std::placeholders::_1, std::placeholders::_2),
         std::bind(&MmcLocalServiceDefault::BatchCopyBlob, this, std::placeholders::_1, std::placeholders::_2,
                   std::placeholders::_3));
+
+    metaNetClient_->RegisterDiscoverUrlFunc([this]() -> std::string {
+        // 非 etcd 模式（进程级）：MetaService 地址固定为 meta_service_url 配置值，
+        // 返回空让 MetaNetClient 使用默认（配置的 discoveryURL）。
+        if (!IsEtcdStoreUrl(options_.bmIpPort)) {
+            return "";
+        }
+        char metaIp[64] = {0};
+        uint16_t metaPort = 0;
+        if (ock::mmc::MFSmemApi::SmemBmGetMetaServiceInfo(metaIp, sizeof(metaIp), &metaPort) == 0 &&
+            metaIp[0] != '\0') {
+            return "tcp://" + std::string(metaIp) + ":" + std::to_string(metaPort);
+        }
+        return "";
+    });
     started_ = true;
     if (options_.dynamicConfigEnable && options_.configFilePath[0] != '\0') {
         StartConfigPolling();

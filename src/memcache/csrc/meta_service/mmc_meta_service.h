@@ -26,6 +26,7 @@
 #include "mmc_meta_mgr_proxy.h"
 #include "mmc_periodic_task.h"
 #include "smem_config_store.h"
+#include "smem_ha_config_store.h"
 #include "kv_event/mmc_kv_event_runtime.h"
 
 namespace ock {
@@ -64,7 +65,13 @@ public:
     bool KvEventsEnabled() const;
     kv_event::KvEventStats GetKvEventStats() const;
 
+    void OnBecomeLeader();
+    void OnBecomeStandby();
+
 private:
+    void RegisterHaLeaderCallback();
+    Result StartMetaNetServer();
+    void StopMetaNetServer();
     std::string GetBackendIdForRank(uint32_t rank);
     void PublishClearedForRanks(const std::vector<uint32_t> &ranks);
 
@@ -74,8 +81,11 @@ private:
 
     std::mutex mutex_;
     bool started_ = false;
+    bool metaNetServerPending_{false};
+    std::string metaServiceAddr_;
     std::string name_;
     mmc_meta_service_config_t options_;
+    NetEngineOptions netOptions_;
     std::unordered_map<uint32_t, std::unordered_set<uint16_t>> rankMediaTypeMap_;
     std::mutex rankBackendIdMapLock_;
     std::unordered_map<uint32_t, std::string> rankBackendIdMap_;

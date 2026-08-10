@@ -207,6 +207,12 @@ else ()
     message(STATUS "Not set CMAKE_PREFIX_PATH, and initialize to: ${CMAKE_PREFIX_PATH}")
 endif ()
 
+# memfabric_hybrid defines PROJECT_SMEM_SRC_BASE / PROJECT_UTIL_SRC_BASE in its
+# own CMakeLists scope (add_subdirectory), which is not visible to this scope.
+# Define them here so downstream include_directories resolve to the submodule.
+set(PROJECT_SMEM_SRC_BASE ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/memfabric_hybrid/src/smem)
+set(PROJECT_UTIL_SRC_BASE ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/memfabric_hybrid/src/util/csrc)
+
 add_subdirectory(3rdparty)
 
 # Enable -Werror for project's own source/test directories only (after 3rdparty).

@@ -155,6 +155,7 @@ Result MetaNetClient::ResolveAndConnect(bool isForce)
         MMC_LOG_ERROR("MetaNetClient connect " << ip << ", port " << port << " failed, ret: " << ret);
         return ret;
     }
+    MMC_LOG_DEBUG("MetaNetClient connect success, ip=" << ip << ", port " << port);
     {
         std::lock_guard<std::mutex> guard(mutex_);
         ip_ = ip;
@@ -247,6 +248,22 @@ Result MetaNetClient::HandleLinkBroken(const NetLinkPtr &link)
         if (stopping_) {
             MMC_LOG_INFO(name_ << " stopping, abort reconnect");
             return MMC_ERROR;
+        }
+        if (discoverUrlFunc_) {
+            std::string newUrl = discoverUrlFunc_();
+            if (!newUrl.empty()) {
+                UpdateServerUrl(newUrl);
+            } else {
+                MMC_LOG_DEBUG("discover leader url empty, keep current url");
+            }
+        }
+
+        std::string ip;
+        uint64_t port;
+        {
+            std::lock_guard<std::mutex> guard(mutex_);
+            ip = ip_;
+            port = port_;
         }
         // Re-resolve serverUrl_ on every retry so a DNS record repointed to a
         // new meta service IP (or an UpdateServerUrl change) is picked up automatically.

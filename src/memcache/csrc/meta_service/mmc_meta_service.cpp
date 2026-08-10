@@ -58,18 +58,16 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
     metaNetServer_ = MmcMakeRef<MetaNetServer>(this, name_ + "_MetaServer").Get();
     MMC_ASSERT_LOG_AND_RETURN(metaNetServer_.Get() != nullptr, "metaNetServer_.Get() is nullptr",
                               MMC_NEW_OBJECT_FAILED);
-    /* init engine */
-    NetEngineOptions netOptions;
+    /* init engine options — saved for later use in HA mode */
     std::string url{options_.discoveryURL};
-    NetEngineOptions::ExtractIpPortFromUrl(url, netOptions);
-    netOptions.name = name_;
-    netOptions.threadCount = threadCountBase;
-    netOptions.rankId = 0;
-    netOptions.startListener = true;
-    netOptions.tlsOption = options_.accTlsConfig;
-    netOptions.logFunc = SPDLOG_LogMessage;
-    netOptions.logLevel = options_.logLevel;
-    MMC_RETURN_ERROR(metaNetServer_->Start(netOptions), "Failed to start net server of meta service " << name_);
+    NetEngineOptions::ExtractIpPortFromUrl(url, netOptions_);
+    netOptions_.name = name_;
+    netOptions_.threadCount = threadCountBase;
+    netOptions_.rankId = 0;
+    netOptions_.startListener = true;
+    netOptions_.tlsOption = options_.accTlsConfig;
+    netOptions_.logFunc = SPDLOG_LogMessage;
+    netOptions_.logLevel = options_.logLevel;
 
     metaBackUpMgrPtr_ = MMCMetaBackUpMgrFactory::GetInstance("DefaultMetaBackup");
     MMCMetaBackUpConfPtr defaultPtr = MmcMakeRef<MMCMetaBackUpConfDefault>(metaNetServer_).Get();
@@ -107,6 +105,8 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
     });
     MMC_LOG_INFO("Config store server started, broken handler registered");
 
+    RegisterHaLeaderCallback();
+
     MmcMetaManager *metaManager = nullptr;
     if (metaMgrProxy_ != nullptr && metaMgrProxy_->GetMetaManager() != nullptr) {
         metaManager = metaMgrProxy_->GetMetaManager().Get();
@@ -126,8 +126,13 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
     kvEvents_.SetPublishActive(!options.haEnable);
     kvEventsPublishActive_ = !options.haEnable;
 
+    if (!metaNetServerPending_) {
+        MMC_RETURN_ERROR(StartMetaNetServer(), "Failed to start MetaNetServer in non-HA mode");
+    }
+
     started_ = true;
-    MMC_LOG_INFO("Started MetaService (" << name_ << ") at " << options_.discoveryURL);
+    MMC_LOG_INFO("Started MetaService (" << name_ << ") at " << options_.discoveryURL
+                                         << ", metaNetServerPending=" << metaNetServerPending_);
 
     StartMetricsReportTask();
     return MMC_OK;
@@ -351,6 +356,67 @@ Result MmcMetaService::DeleteMetadata(const std::string &key)
         metadata_.erase(it);
         return ock::smem::StoreErrorCode::SUCCESS;
     }
+}
+
+void MmcMetaService::RegisterHaLeaderCallback()
+{
+    auto coreStore = confStore_->GetCoreStore();
+    auto *haStore = dynamic_cast<ock::smem::HaConfigStore *>(coreStore.Get());
+    if (haStore == nullptr) {
+        MMC_LOG_INFO("ConfigStore is not HaConfigStore, HA leader callback not registered");
+        return;
+    }
+
+    metaNetServerPending_ = true;
+    haStore->RegisterLeaderChangeCallback([this](const ock::smem::HaConfigStore::LeaderAddresses &addrs) {
+        if (addrs.isLeader) {
+            metaServiceAddr_ = addrs.metaServiceAddr;
+            OnBecomeLeader();
+        } else {
+            OnBecomeStandby();
+        }
+    });
+    MMC_LOG_INFO("Registered HA leader change callback on HaConfigStore");
+}
+
+Result MmcMetaService::StartMetaNetServer()
+{
+    if (metaNetServer_ == nullptr) {
+        MMC_LOG_ERROR("metaNetServer_ is nullptr, cannot start MetaNetServer");
+        return MMC_NOT_INITIALIZED;
+    }
+
+    if (!metaServiceAddr_.empty()) {
+        NetEngineOptions::ExtractIpPortFromUrl("tcp://" + metaServiceAddr_, netOptions_);
+        MMC_LOG_INFO("Starting MetaNetServer on dynamically assigned address: " << metaServiceAddr_);
+    }
+
+    return metaNetServer_->Start(netOptions_);
+}
+
+void MmcMetaService::StopMetaNetServer()
+{
+    if (metaNetServer_ != nullptr) {
+        metaNetServer_->Stop();
+    }
+}
+
+void MmcMetaService::OnBecomeLeader()
+{
+    MMC_LOG_INFO("HaConfigStore elected as leader, starting MetaNetServer and enabling KvEvents");
+    if (StartMetaNetServer() != MMC_OK) {
+        MMC_LOG_ERROR("Failed to start MetaNetServer after becoming leader");
+        return;
+    }
+    SetPublishActive(true);
+    MMC_LOG_INFO("MetaService leader ready, MetaNetServer listening on " << options_.discoveryURL);
+}
+
+void MmcMetaService::OnBecomeStandby()
+{
+    MMC_LOG_INFO("HaConfigStore became standby/follower, stopping MetaNetServer and disabling KvEvents");
+    SetPublishActive(false);
+    StopMetaNetServer();
 }
 
 } // namespace mmc

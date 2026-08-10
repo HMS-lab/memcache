@@ -53,6 +53,7 @@ smemBmUnregisterUserMemFunc MFSmemApi::gSmemBmUnregisterUserMem = nullptr;
 smemBmWaitFunc MFSmemApi::gSmemBmWait = nullptr;
 smemBmGvaToVaFunc MFSmemApi::gSmemBmGvaToVa = nullptr;
 smemBmUpdateStoreUrlFunc MFSmemApi::gSmemBmUpdateStoreUrl = nullptr;
+smemBmGetMetaServiceInfoFunc MFSmemApi::gSmemBmGetMetaServiceInfo = nullptr;
 
 Result MFSmemApi::LoadAllSymbols()
 {
@@ -79,6 +80,7 @@ Result MFSmemApi::LoadAllSymbols()
         {reinterpret_cast<void **>(&gSmemBmWait), "smem_bm_wait"},
         {reinterpret_cast<void **>(&gSmemBmGvaToVa), "smem_bm_gva_to_va"},
         {reinterpret_cast<void **>(&gSmemBmUpdateStoreUrl), "smem_bm_update_store_url"},
+        {reinterpret_cast<void **>(&gSmemBmGetMetaServiceInfo), "smem_bm_get_meta_service_info"},
     };
 
     for (const auto &symbol : kSmemSymbols) {
