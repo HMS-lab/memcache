@@ -634,6 +634,8 @@ void MmcMetaManager::AttachReadLocks(const std::vector<std::string> &keys, uint3
                 objMeta.numBlobs_ = 0;
                 break;
             }
+            // READ_START 续约成功后再回填 desc，使 leaseTimeoutTtlMs_ 反映续约后的最新值
+            desc = blobs[0]->GetDesc();
         }
     }
     TP_TRACE_END(TP_MMC_META_BATCH_GET_READ_START, MMC_OK);
