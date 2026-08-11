@@ -41,7 +41,7 @@ if (MMC_ENABLE_KV_EVENTS)
         file(MAKE_DIRECTORY "${_MMC_SODIUM_INSTALL_DIR}")
         execute_process(
             COMMAND ${_MMC_SODIUM_SRC_DIR}/configure --disable-shared --enable-static
-                    --prefix=${_MMC_SODIUM_INSTALL_DIR}
+                    --prefix=${_MMC_SODIUM_INSTALL_DIR} --with-pic
             WORKING_DIRECTORY ${_MMC_SODIUM_BUILD_DIR}
             RESULT_VARIABLE _MMC_SODIUM_CFG_RESULT
             OUTPUT_VARIABLE _MMC_SODIUM_CFG_OUT

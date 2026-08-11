@@ -27,7 +27,7 @@ def check_env_flag(name: str, default: str = "") -> bool:
 
 
 # 消除whl压缩包的时间戳差异
-os.environ["SOURCE_DATE_EPOCH"] = "0"
+os.environ["SOURCE_DATE_EPOCH"] = "347155200"
 # 已经check
 current_version = os.getenv("MEMCACHE_VERSION")
 is_manylinux = check_env_flag("IS_MANYLINUX", "FALSE")
