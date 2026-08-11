@@ -126,6 +126,53 @@ TEST_F(TestMmcConfiguration, GetLogPathTest)
     ASSERT_NE(logPath, "/");
 }
 
+TEST_F(TestMmcConfiguration, EvictYieldConfigDefaultsTest)
+{
+    MetaServiceConfig config;
+    config.LoadDefault();
+
+    EXPECT_EQ(config.GetInt(ConfConstant::OKC_MMC_EVICT_YIELD_INTERVAL), 0);
+    EXPECT_EQ(config.GetInt(ConfConstant::OKC_MMC_EVICT_YIELD_DURATION_US), 100);
+}
+
+TEST_F(TestMmcConfiguration, EvictYieldConfigValidationTest)
+{
+    MetaServiceConfig config;
+    config.LoadDefault();
+
+    config.Set(ConfConstant::OKC_MMC_EVICT_YIELD_INTERVAL.first, static_cast<int32_t>(100));
+    config.Set(ConfConstant::OKC_MMC_EVICT_YIELD_DURATION_US.first, static_cast<int32_t>(200));
+
+    mmc_meta_service_config_t metaConfig{};
+    config.GetMetaServiceConfig(metaConfig);
+
+    EXPECT_EQ(metaConfig.evictYieldInterval, 100U);
+    EXPECT_EQ(metaConfig.evictYieldDurationUs, 200U);
+}
+
+TEST_F(TestMmcConfiguration, EvictYieldConfigRangeValidationTest)
+{
+    MetaServiceConfig config;
+    config.LoadDefault();
+
+    config.Set(ConfConstant::OKC_MMC_EVICT_YIELD_INTERVAL.first, static_cast<int32_t>(-1));
+    auto errors = config.ValidateConf();
+    ASSERT_FALSE(errors.empty());
+
+    config.Set(ConfConstant::OKC_MMC_EVICT_YIELD_INTERVAL.first, static_cast<int32_t>(100001));
+    errors = config.ValidateConf();
+    ASSERT_FALSE(errors.empty());
+
+    config.Set(ConfConstant::OKC_MMC_EVICT_YIELD_INTERVAL.first, static_cast<int32_t>(100));
+    config.Set(ConfConstant::OKC_MMC_EVICT_YIELD_DURATION_US.first, static_cast<int32_t>(10001));
+    errors = config.ValidateConf();
+    ASSERT_FALSE(errors.empty());
+
+    config.Set(ConfConstant::OKC_MMC_EVICT_YIELD_DURATION_US.first, static_cast<int32_t>(200));
+    errors = config.ValidateConf();
+    ASSERT_TRUE(errors.empty());
+}
+
 TEST_F(TestMmcConfiguration, ValidateLocalServiceConfigTest)
 {
     // 测试设备类型协议（1GB对齐）

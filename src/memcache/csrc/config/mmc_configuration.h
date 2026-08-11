@@ -222,6 +222,14 @@ public:
                    0);
         AddIntConf(OCK_MMC_META_LEASE_TTL_MS,
                    VIntRange::Create(OCK_MMC_META_LEASE_TTL_MS.first, MIN_LEASE_TTL_MS, MAX_LEASE_TTL_MS), 0);
+        AddIntConf(
+            OKC_MMC_EVICT_YIELD_INTERVAL,
+            VIntRange::Create(OKC_MMC_EVICT_YIELD_INTERVAL.first, MIN_EVICT_YIELD_INTERVAL, MAX_EVICT_YIELD_INTERVAL),
+            0);
+        AddIntConf(OKC_MMC_EVICT_YIELD_DURATION_US,
+                   VIntRange::Create(OKC_MMC_EVICT_YIELD_DURATION_US.first, MIN_EVICT_YIELD_DURATION_US,
+                                     MAX_EVICT_YIELD_DURATION_US),
+                   0);
 
         AddBoolConf(OCK_MMC_TLS_ENABLE, VStrEnum::Create(OCK_MMC_TLS_ENABLE.first, BOOL_ENUM_STR), 0);
         AddStrConf(OCK_MMC_TLS_CA_PATH, VStrLength::Create(OCK_MMC_TLS_CA_PATH.first, TLS_PATH_MAX_LEN), 0);
@@ -296,6 +304,8 @@ public:
         config.prefetchEnabled = GetBool(ConfConstant::OCK_MMC_PREFETCH_ENABLED);
         config.pendingWaitTimeoutMs = static_cast<uint64_t>(GetInt(ConfConstant::OCK_MMC_PENDING_WAIT_TIMEOUT_MS));
         config.leaseTtlMs = static_cast<uint64_t>(GetInt(ConfConstant::OCK_MMC_META_LEASE_TTL_MS));
+        config.evictYieldInterval = static_cast<uint32_t>(GetInt(ConfConstant::OKC_MMC_EVICT_YIELD_INTERVAL));
+        config.evictYieldDurationUs = static_cast<uint32_t>(GetInt(ConfConstant::OKC_MMC_EVICT_YIELD_DURATION_US));
         config.logRotationFileSize = GetInt(ConfConstant::OCK_MMC_LOG_ROTATION_FILE_SIZE) * MB_NUM;
         config.logRotationFileCount = GetInt(ConfConstant::OCK_MMC_LOG_ROTATION_FILE_COUNT);
         std::string logOutputTargetStr = GetString(ConfConstant::OCK_MMC_LOG_OUTPUT_TARGET);

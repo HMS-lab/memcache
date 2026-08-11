@@ -719,7 +719,8 @@ void MmcMetaManager::CheckAndEvict(MediaType media, uint64_t wantAllocSize)
             const std::vector<MediaType> &needEvictListL, const std::vector<uint16_t> &nowMemoryThresholds,
             const std::function<EvictResult(const std::string &key, const MmcMemObjMetaPtr &objMeta, MediaType)>
                 &moveFuncL) {
-            metaContainer_->MultiLevelElimination(evictWatermarksL, needEvictListL, nowMemoryThresholds, moveFuncL);
+            metaContainer_->MultiLevelElimination(evictWatermarksL, needEvictListL, nowMemoryThresholds, moveFuncL,
+                                                  evictYieldInterval_, evictYieldDurationUs_);
             bool expected = true;
             evictCheck_.compare_exchange_strong(expected, false);
         },

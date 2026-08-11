@@ -34,6 +34,11 @@ constexpr auto OKC_MMC_EVICT_THRESHOLD_HIGH = std::make_pair("ock.mmc.evict_thre
 constexpr auto OKC_MMC_EVICT_THRESHOLD_LOW = std::make_pair("ock.mmc.evict_threshold_low", 80);
 constexpr auto OCK_MMC_META_LEASE_TTL_MS = std::make_pair("ock.mmc.meta.lease_ttl_ms", 10000);
 constexpr auto OKC_MMC_LOCAL_SERVICE_BACKEND_ID = std::make_pair("ock.mmc.local_service.backend_id", "");
+// GC eviction yield: periodically sleep during eviction loop to release the write lock,
+// allowing blocked Put/Get/Exist requests to acquire the lock and execute.
+// yieldInterval=0 disables yield (backward compatible). Recommended: interval=100, duration=100us.
+constexpr auto OKC_MMC_EVICT_YIELD_INTERVAL = std::make_pair("ock.mmc.evict_yield_interval", 0);
+constexpr auto OKC_MMC_EVICT_YIELD_DURATION_US = std::make_pair("ock.mmc.evict_yield_duration_us", 100);
 constexpr auto OCK_MMC_LOG_LEVEL = std::make_pair("ock.mmc.log_level", "info");
 constexpr auto OCK_MMC_LOG_PATH = std::make_pair("ock.mmc.log_path", "/var/log/memcache_hybrid");
 constexpr auto OCK_MMC_LOG_ROTATION_FILE_SIZE = std::make_pair("ock.mmc.log_rotation_file_size", 20);
@@ -145,6 +150,13 @@ constexpr int MIN_PERCENT = 0;
 constexpr int MAX_PERCENT = 100;
 constexpr int MIN_LEASE_TTL_MS = 1;
 constexpr int MAX_LEASE_TTL_MS = 2147483647;
+
+// GC eviction yield parameter ranges
+constexpr int MIN_EVICT_YIELD_INTERVAL = 0;
+constexpr int MAX_EVICT_YIELD_INTERVAL = 100000;
+
+constexpr int MIN_EVICT_YIELD_DURATION_US = 0;
+constexpr int MAX_EVICT_YIELD_DURATION_US = 10000;
 
 constexpr int MIN_RETRY_MS = 0;
 constexpr int MAX_RETRY_MS = 600000;

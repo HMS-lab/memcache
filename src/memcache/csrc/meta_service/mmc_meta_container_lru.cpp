@@ -13,8 +13,10 @@
 #ifndef MF_HYBRID_MMC_META_CONTAINER_LRU_H
 #define MF_HYBRID_MMC_META_CONTAINER_LRU_H
 
+#include <chrono>
 #include <list>
 #include <memory>
+#include <thread>
 #include <unordered_map>
 
 #include "mmc_mem_obj_meta.h"
@@ -251,7 +253,8 @@ public:
     void MultiLevelElimination(const std::vector<std::pair<uint16_t, uint16_t>> &evictWatermarks,
                                const std::vector<MediaType> &needEvictList,
                                const std::vector<uint16_t> &nowMemoryThresholds,
-                               std::function<EvictResult(const Key &, const Value &, MediaType)> moveFunc)
+                               std::function<EvictResult(const Key &, const Value &, MediaType)> moveFunc,
+                               uint32_t yieldInterval = 0, uint32_t yieldDurationUs = 0) override
     {
         for (size_t i = 0; i < needEvictList.size(); ++i) {
             auto mediaType = needEvictList[i];
@@ -277,6 +280,12 @@ public:
 
             for (size_t j = 0; j < numEvictObjs; ++j) {
                 EvictOneLeastRecentlyUsed(moveFunc, mediaType);
+                // Yield: periodically sleep to extend the lock-free window between evictions,
+                // giving blocked Put/Get/Exist threads enough time (~5us kernel scheduling)
+                // to wake up and acquire metaLock_ during the ~100us sleep window.
+                if (yieldInterval > 0 && yieldDurationUs > 0 && (j + 1) % yieldInterval == 0) {
+                    std::this_thread::sleep_for(std::chrono::microseconds(yieldDurationUs));
+                }
             }
 
             MMC_LOG_INFO("Evicted " << numEvictObjs << " keys from " << mediaType << ". Number of keys: " << oriNum

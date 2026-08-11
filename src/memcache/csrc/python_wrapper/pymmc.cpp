@@ -450,6 +450,14 @@ void DefineMmcStructModule(py::module_ &m)
                            R"pbdoc(
                     Default read lease TTL in milliseconds.
                 )pbdoc")
+            .def_readwrite("evict_yield_interval", &mmc_meta_service_config_t::evictYieldInterval,
+                           R"pbdoc(
+                    Number of evicted objects between yields. 0 means yield disabled.
+                )pbdoc")
+            .def_readwrite("evict_yield_duration_us", &mmc_meta_service_config_t::evictYieldDurationUs,
+                           R"pbdoc(
+                    Sleep duration in microseconds during each yield. Default 100us.
+                )pbdoc")
             .def_property(
                 "kv_events_enable", [](const mmc_meta_service_config_t &config) { return config.kvEvents.enable; },
                 [](mmc_meta_service_config_t &config, bool value) { config.kvEvents.enable = value; },

@@ -81,7 +81,8 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
     extConfig.prefetchEnabled = options.prefetchEnabled;
     extConfig.pendingWaitTimeoutMs = options.pendingWaitTimeoutMs;
     MMC_RETURN_ERROR(metaMgrProxy_->Start(options_.leaseTtlMs, options.evictThresholdHigh, options.evictThresholdLow,
-                                          options.rewarmDramWatermark, extConfig),
+                                          options.rewarmDramWatermark, extConfig, options.evictYieldInterval,
+                                          options.evictYieldDurationUs),
                      "Failed to start meta mgr proxy of meta service " << name_);
 
     NetEngineOptions configStoreOpt{};

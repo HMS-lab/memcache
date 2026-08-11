@@ -123,10 +123,14 @@ class MmcMetaManager : public MmcReferable {
 
 public:
     explicit MmcMetaManager(uint64_t defaultTtl, uint16_t evictThresholdHigh, uint16_t evictThresholdLow,
-                            uint16_t rewarmDramWatermark, const MmcMetaExtConfig &extConfig = {})
+                            uint16_t rewarmDramWatermark, const MmcMetaExtConfig &extConfig = {},
+                            uint32_t evictYieldInterval = 0, uint32_t evictYieldDurationUs = 100)
         : defaultTtlMs_(defaultTtl == 0 ? MMC_DATA_TTL_MS : defaultTtl), evictThresholdHigh_(evictThresholdHigh),
-          evictThresholdLow_(evictThresholdLow), rewarmDramWatermark_(rewarmDramWatermark), extConfig_(extConfig)
+          evictThresholdLow_(evictThresholdLow), rewarmDramWatermark_(rewarmDramWatermark), extConfig_(extConfig),
+          evictYieldInterval_(evictYieldInterval), evictYieldDurationUs_(evictYieldDurationUs)
     {}
+    // evictYieldInterval: number of evicted objects between yields (0=disabled, default=0)
+    // evictYieldDurationUs: sleep duration per yield in microseconds (default=100us)
 
     ~MmcMetaManager() override
     {
@@ -496,6 +500,8 @@ private:
     uint16_t evictThresholdLow_;
     uint16_t rewarmDramWatermark_;
     MmcMetaExtConfig extConfig_;
+    uint32_t evictYieldInterval_;   /* GC eviction yield interval (0=disabled) */
+    uint32_t evictYieldDurationUs_; /* GC eviction yield sleep duration in microseconds */
     MetaNetServerPtr metaNetServer_;
     MmcThreadPoolPtr threadPool_;
 

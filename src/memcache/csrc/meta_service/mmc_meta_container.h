@@ -37,7 +37,10 @@ public:
     virtual void MultiLevelElimination(const std::vector<std::pair<uint16_t, uint16_t>> &evictWatermarks,
                                        const std::vector<MediaType> &needEvictList,
                                        const std::vector<uint16_t> &nowMemoryThresholds,
-                                       std::function<EvictResult(const Key &, const Value &, MediaType)> moveFunc) = 0;
+                                       std::function<EvictResult(const Key &, const Value &, MediaType)> moveFunc,
+                                       uint32_t yieldInterval = 0, uint32_t yieldDurationUs = 0) = 0;
+    // yieldInterval: evict this many objects then sleep yieldDurationUs microseconds to release
+    //                the write lock, allowing blocked requests to acquire the lock. 0 disables yield.
 
     static MmcRef<MmcMetaContainer<Key, Value>> Create(std::function<MediaType(const Value &)> GetTypeFunc);
 };

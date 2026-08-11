@@ -54,6 +54,8 @@ TEST_F(TestMetaConfigUtils, CreateDefaultMetaConfigReturnsExpectedDefaults)
     EXPECT_EQ(config.evictThresholdHigh, 90U);
     EXPECT_EQ(config.evictThresholdLow, 80U);
     EXPECT_EQ(config.leaseTtlMs, 10000U);
+    EXPECT_EQ(config.evictYieldInterval, 0U);
+    EXPECT_EQ(config.evictYieldDurationUs, 100U);
 
     EXPECT_FALSE(config.kvEvents.enable);
     EXPECT_STREQ(config.kvEvents.endpoint, "");
@@ -93,6 +95,8 @@ TEST_F(TestMetaConfigUtils, MetaConfigToStringReturnsExpectedFormat)
     config.evictThresholdHigh = 95U;
     config.evictThresholdLow = 70U;
     config.leaseTtlMs = 4321U;
+    config.evictYieldInterval = 100U;
+    config.evictYieldDurationUs = 200U;
 
     config.accTlsConfig.tlsEnable = true;
     SafeCopy("/tls/ca.pem", config.accTlsConfig.caPath, sizeof(config.accTlsConfig.caPath));
@@ -127,6 +131,8 @@ TEST_F(TestMetaConfigUtils, MetaConfigToStringReturnsExpectedFormat)
     ExpectConfigStringContains(actual, "log_output_target: 2");
     ExpectConfigStringContains(actual, "evict_threshold_high: 95");
     ExpectConfigStringContains(actual, "evict_threshold_low: 70");
+    ExpectConfigStringContains(actual, "evict_yield_interval: 100");
+    ExpectConfigStringContains(actual, "evict_yield_duration_us: 200");
     ExpectConfigStringContains(actual, "tls_enable: true");
     // kv_events 字段：零初始化 config 对应 false / 空 / false
     ExpectConfigStringContains(actual, "kv_events_enable: false");

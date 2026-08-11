@@ -50,6 +50,8 @@ mmc_meta_service_config_t create_default_meta_config()
     config.prefetchEnabled = false;
     config.pendingWaitTimeoutMs = 300U;
     config.leaseTtlMs = MMC_DATA_TTL_MS;
+    config.evictYieldInterval = 0U; /* disabled by default, set e.g. 100 to enable */
+    config.evictYieldDurationUs = 100U;
     config.accTlsConfig.tlsEnable = false;
     config.configStoreTlsConfig.tlsEnable = false;
     config.metricsReportIntervalSeconds = 0U;
@@ -89,6 +91,8 @@ std::string meta_config_to_string(const mmc_meta_service_config_t &config)
     oss << "  zmq_curve_enable: " << (config.zmq.enableCurve ? "true" : "false") << "\n";
     oss << "  zmq_public_key: " << config.zmq.publicKey << "\n";
     oss << "  lease_ttl_ms: " << config.leaseTtlMs << "\n";
+    oss << "  evict_yield_interval: " << config.evictYieldInterval << "\n";
+    oss << "  evict_yield_duration_us: " << config.evictYieldDurationUs << "\n";
     oss << "  tls_enable: " << (config.accTlsConfig.tlsEnable ? "true" : "false") << "\n";
     oss << "  tls_ca_path: " << config.accTlsConfig.caPath << "\n";
     oss << "  tls_ca_crl_path: " << config.accTlsConfig.crlPath << "\n";
