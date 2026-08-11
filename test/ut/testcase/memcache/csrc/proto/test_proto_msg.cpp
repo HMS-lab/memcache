@@ -96,3 +96,85 @@ TEST_F(TestProtoMsg, BlobDeleteRequest_MsgIdMatchesMetaNetClientRegistration)
     // LM_* REQ/RSP 对共享同一 ID 值，与其他 LM_* 对不冲突
     EXPECT_EQ(static_cast<int16_t>(LM_BLOB_DELETE_REQ), static_cast<int16_t>(LM_BLOB_DELETE_RSP));
 }
+
+// BatchQueryResponse oversized container guard
+TEST_F(TestProtoMsg, BatchQueryResponse_OversizedContainer)
+{
+    NetMsgPacker packer;
+    int16_t msgVer = 0;
+    int16_t msgId = static_cast<int16_t>(ML_BATCH_QUERY_RESP);
+    uint32_t destRankId = 0;
+    packer.Serialize(msgVer);
+    packer.Serialize(msgId);
+    packer.Serialize(destRankId);
+    const std::size_t hugeSize = static_cast<std::size_t>(MAX_CONTAINER_SIZE) + 1;
+    packer.Serialize(hugeSize);
+
+    BatchQueryResponse resp;
+    NetMsgUnpacker unpacker(packer.String());
+    EXPECT_EQ(resp.Deserialize(unpacker), MMC_ERROR);
+}
+
+// BatchUpdateLeaseResponse oversized container guard
+TEST_F(TestProtoMsg, BatchUpdateLeaseResponse_OversizedContainer)
+{
+    NetMsgPacker packer;
+    int16_t msgVer = 0;
+    int16_t msgId = static_cast<int16_t>(ML_BATCH_UPDATE_LEASE_RESP);
+    uint32_t destRankId = 0;
+    packer.Serialize(msgVer);
+    packer.Serialize(msgId);
+    packer.Serialize(destRankId);
+    Result ret = MMC_OK;
+    packer.Serialize(ret);
+    std::vector<Result> results;
+    packer.Serialize(results);
+    const std::size_t hugeSize = static_cast<std::size_t>(MAX_CONTAINER_SIZE) + 1;
+    packer.Serialize(hugeSize);
+
+    BatchUpdateLeaseResponse resp;
+    NetMsgUnpacker unpacker(packer.String());
+    EXPECT_EQ(resp.Deserialize(unpacker), MMC_ERROR);
+}
+
+// MetaReplicateRequest::KeysString with multiple and single key
+TEST_F(TestProtoMsg, MetaReplicateRequest_KeysString)
+{
+    MetaReplicateRequest req;
+    req.keys_ = {"a", "b"};
+    EXPECT_EQ(req.KeysString(), "[a, b]");
+
+    MetaReplicateRequest single;
+    single.keys_ = {"only"};
+    EXPECT_EQ(single.KeysString(), "[only]");
+}
+
+// UpdateRequest operator== / operator!=
+TEST_F(TestProtoMsg, UpdateRequest_EqualityOperators)
+{
+    constexpr uint16_t testMediaType = 2;
+    constexpr uint64_t testOperateId = 3;
+
+    UpdateRequest a;
+    a.key_ = "k";
+    a.rank_ = 1;
+    a.mediaType_ = testMediaType;
+    a.operateId_ = testOperateId;
+
+    UpdateRequest b;
+    b.key_ = "k";
+    b.rank_ = 1;
+    b.mediaType_ = testMediaType;
+    b.operateId_ = testOperateId;
+
+    UpdateRequest c;
+    c.key_ = "different";
+    c.rank_ = 1;
+    c.mediaType_ = testMediaType;
+    c.operateId_ = testOperateId;
+
+    EXPECT_TRUE(a == b);
+    EXPECT_FALSE(a == c);
+    EXPECT_TRUE(a != c);
+    EXPECT_FALSE(a != b);
+}

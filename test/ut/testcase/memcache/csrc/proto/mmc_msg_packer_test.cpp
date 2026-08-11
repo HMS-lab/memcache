@@ -57,3 +57,56 @@ TEST_F(MmcMsgPacker, pack_and_unpack)
 
     std::cout << aa << " " << bb << " " << std::endl;
 }
+
+TEST_F(MmcMsgPacker, deserialize_oversized_string)
+{
+    std::string raw;
+    const uint32_t hugeSize = static_cast<uint32_t>(MAX_CONTAINER_SIZE) + 1;
+    raw.append(reinterpret_cast<const char *>(&hugeSize), sizeof(hugeSize));
+    NetMsgUnpacker unpacker(raw);
+    std::string val = "nonempty";
+    unpacker.Deserialize(val);
+    EXPECT_EQ(val, "nonempty");
+}
+
+TEST_F(MmcMsgPacker, deserialize_oversized_vector)
+{
+    std::string raw;
+    const std::size_t hugeSize = static_cast<std::size_t>(MAX_CONTAINER_SIZE) + 1;
+    raw.append(reinterpret_cast<const char *>(&hugeSize), sizeof(hugeSize));
+    NetMsgUnpacker unpacker(raw);
+    std::vector<int32_t> vec;
+    vec.push_back(1);
+    unpacker.Deserialize(vec);
+    EXPECT_EQ(vec.size(), 1u);
+}
+
+TEST_F(MmcMsgPacker, deserialize_oversized_map)
+{
+    std::string raw;
+    const std::size_t hugeSize = static_cast<std::size_t>(MAX_CONTAINER_SIZE) + 1;
+    raw.append(reinterpret_cast<const char *>(&hugeSize), sizeof(hugeSize));
+    NetMsgUnpacker unpacker(raw);
+    std::map<std::string, int32_t> mp;
+    mp["x"] = 1;
+    unpacker.Deserialize(mp);
+    EXPECT_EQ(mp.size(), 1u);
+}
+
+TEST_F(MmcMsgPacker, deserialize_empty_vector_and_map)
+{
+    NetMsgPacker packer;
+    std::vector<int32_t> emptyVec;
+    std::map<std::string, int32_t> emptyMap;
+    packer.Serialize(emptyVec);
+    packer.Serialize(emptyMap);
+    auto serialized = packer.String();
+
+    NetMsgUnpacker unpacker(serialized);
+    std::vector<int32_t> vec;
+    std::map<std::string, int32_t> mp;
+    unpacker.Deserialize(vec);
+    unpacker.Deserialize(mp);
+    EXPECT_TRUE(vec.empty());
+    EXPECT_TRUE(mp.empty());
+}

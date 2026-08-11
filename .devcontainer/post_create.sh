@@ -13,12 +13,15 @@
 # post_create.sh — MemCache Dev Container bootstrap
 # =============================================================================
 # This script runs once after the container is created.  It:
-#   1. Installs Python dev / test dependencies.
-#   2. Verifies that the build toolchain is functional.
+#   1. Initializes git submodules (third-party dependencies).
+#   2. Installs Python dev / test dependencies.
+#   3. Verifies that the build toolchain is functional.
+#   4. Runs a quick CMake configure smoke test.
+#   5. Installs Go toolchain (for gitleaks hook) and pre-commit hooks.
 #
 # VS Code's `postCreateCommand` in devcontainer.json invokes this file.
-# Git submodule initialisation is handled by `postStartCommand` in
-# devcontainer.json (so it also re-syncs on every container start).
+# Git submodule initialisation is performed in step 1 below (runs once
+# after container creation; re-run manually if you switch branches).
 #
 # IMPORTANT — working directory:
 #   Dev Containers run postCreateCommand in /workspaces/<repo-name> by default
@@ -44,7 +47,10 @@ echo "============================================"
 # ------------------------------------------------------------------
 
 echo "[1/5] Initializing git submodules …"
-git submodule update --init --recursive 3rdparty/ test/3rdparty/
+if ! GIT_SSL_NO_VERIFY=1 git -c protocol.file.allow=always \
+    submodule update --init --recursive 3rdparty/ test/3rdparty/; then
+    echo "  ! submodule init failed — continuing; build/test may fail later if 3rdparty is missing."
+fi
 
 # ------------------------------------------------------------------
 # 1. Python development dependencies
@@ -77,6 +83,11 @@ echo "  ✓ Toolchain ready."
 # ------------------------------------------------------------------
 echo ""
 echo "[4/5] Quick CMake smoke test …"
+if [[ -f /usr/local/Ascend/ascend-toolkit/set_env.sh ]]; then
+    source /usr/local/Ascend/ascend-toolkit/set_env.sh
+else
+    echo "WARNING: Ascend toolkit env script not found, cmake may fail"
+fi
 cd "${PROJECT_DIR}"
 cmake -S . -B /tmp/build-smoke \
     -DCMAKE_BUILD_TYPE=DEBUG \
@@ -91,28 +102,63 @@ rm -rf /tmp/build-smoke
 echo "  ✓ CMake configure passed (smoke test)."
 
 # ------------------------------------------------------------------
-# 5. Install Git pre-commit hooks
+# 5. Install Go toolchain and pre-commit hooks
 # ------------------------------------------------------------------
+# pre-commit's golang language probes https://go.dev/dl/?mode=json to infer the
+# latest Go version; that endpoint is SSL-unstable on restricted networks, so
+# the gitleaks hook install fails.  A system `go` on PATH makes pre-commit use
+# language_version "system" and skip the probe.  GOPROXY=goproxy.cn serves
+# gitleaks' deps; GOTOOLCHAIN=local blocks toolchain auto-download from go.dev.
+# Best-effort: a download failure is reported but does not abort setup.
 echo ""
-echo "[5/5] Installing pre-commit hooks …"
+echo "[5/5] Installing Go toolchain and pre-commit hooks …"
+NEEDED_GO_VERSION="1.26.5"
+GO_TARBALL="/tmp/go${NEEDED_GO_VERSION}.tar.gz"
+CURRENT_GO_VERSION="$(/usr/local/go/bin/go version 2>/dev/null | grep -oP 'go\K[0-9]+\.[0-9]+\.[0-9]+' || true)"
+
+if [ "${CURRENT_GO_VERSION}" = "${NEEDED_GO_VERSION}" ]; then
+    echo "  - go already at required version ${NEEDED_GO_VERSION}"
+else
+    ARCH="$(dpkg --print-architecture)"
+    echo "  - installing go${NEEDED_GO_VERSION} linux-${ARCH} (was: ${CURRENT_GO_VERSION:-none}) …"
+    rm -rf /usr/local/go
+    if curl -fsSL "https://golang.google.cn/dl/go${NEEDED_GO_VERSION}.linux-${ARCH}.tar.gz" -o "${GO_TARBALL}"; then
+        tar -xzf "${GO_TARBALL}" -C /usr/local && rm -f "${GO_TARBALL}"
+        echo "  - installed: $(/usr/local/go/bin/go version 2>&1 | head -1)"
+    else
+        rm -f "${GO_TARBALL}"
+        echo "  ! go download failed — gitleaks pre-commit hook will not build (check network)."
+    fi
+fi
+if [ -x /usr/local/go/bin/go ]; then
+    ln -sf /usr/local/go/bin/go /usr/local/bin/go
+    ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
+fi
+export GOPROXY="https://goproxy.cn,direct"
+export GOTOOLCHAIN="local"
+
+export GIT_SSL_NO_VERIFY=1
+git config --global http.sslVerify false
+git config --global http.version HTTP/1.1
+git config --global http.lowSpeedLimit 0
+git config --global http.postBuffer 524288000
+
 cd "${PROJECT_DIR}"
 if [ -f ".pre-commit-config.yaml" ]; then
+    export PATH="/usr/local/python3.11.15/bin:$HOME/.local/bin:$PATH"
+    pip install --root-user-action=ignore pre-commit
+    hash -r
     pre-commit install
     echo "  ✓ pre-commit hooks installed."
+    # Pre-warm hook environments (notably gitleaks' Go build) into the
+    # persistent pre-commit cache volume so the first commit is instant.
+    if ! pre-commit install-hooks; then
+        echo "  ! some hook envs failed to pre-warm — will build on first commit."
+    else
+        echo "  ✓ pre-commit hook environments pre-warmed."
+    fi
 else
     echo "  - .pre-commit-config.yaml not found — skipping."
-fi
-
-# ------------------------------------------------------------------
-# 6. (Optional) Quick UT smoke test
-# ------------------------------------------------------------------
-echo ""
-echo "[6/6] Quick UT smoke test (optional, may fail without NPU) …"
-cd "${PROJECT_DIR}"
-if bash script/run_ut.sh; then
-    echo "  ✓ UT passed."
-else
-    echo "  - UT failed (expected without NPU/MetaService). Skipping."
 fi
 
 echo ""

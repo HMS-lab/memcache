@@ -182,3 +182,125 @@ TEST_F(TestKVParser, FromFile_DuplicateMmcKey_ReturnsError)
 
     remove(filePath.c_str());
 }
+
+// ======================== GetItem / GetI edge cases ========================
+
+TEST_F(TestKVParser, GetItem_NotFound_ReturnsError)
+{
+    KVParser parser;
+    string line = "ock.mmc.key1 = value1";
+    parser.ParseLine(line);
+    string val;
+    EXPECT_NE(parser.GetItem("ock.mmc.nonexistent", val), MMC_OK);
+}
+
+TEST_F(TestKVParser, GetItem_Found_ReturnsValue)
+{
+    KVParser parser;
+    string line = "ock.mmc.key1 = value1";
+    parser.ParseLine(line);
+    string val;
+    EXPECT_EQ(parser.GetItem("ock.mmc.key1", val), MMC_OK);
+    EXPECT_EQ(val, "value1");
+}
+
+TEST_F(TestKVParser, GetI_OutOfBounds_DoesNothing)
+{
+    constexpr uint32_t outOfBoundsIndex = 100;
+    KVParser parser;
+    string line = "ock.mmc.key1 = value1";
+    parser.ParseLine(line);
+    string key;
+    string val;
+    parser.GetI(outOfBoundsIndex, key, val);
+    EXPECT_TRUE(key.empty());
+    EXPECT_TRUE(val.empty());
+}
+
+TEST_F(TestKVParser, GetI_ValidIndex_ReturnsKeyAndValue)
+{
+    KVParser parser;
+    string line = "ock.mmc.key1 = value1";
+    parser.ParseLine(line);
+    string key;
+    string val;
+    parser.GetI(0, key, val);
+    EXPECT_EQ(key, "ock.mmc.key1");
+    EXPECT_EQ(val, "value1");
+}
+
+// ======================== ParseLine error branches ========================
+
+TEST_F(TestKVParser, ParseLine_EmptyKeyAfterEquals_ReturnsError)
+{
+    KVParser parser;
+    string line = "= value_without_key";
+    EXPECT_NE(parser.ParseLine(line), MMC_OK);
+}
+
+TEST_F(TestKVParser, ParseLine_LineTooLong_ReturnsError)
+{
+    constexpr size_t overLimitLineLength = 5000;
+    KVParser parser;
+    string longLine = "ock.mmc.key = ";
+    longLine.append(overLimitLineLength, 'x');
+    EXPECT_NE(parser.ParseLine(longLine), MMC_OK);
+}
+
+TEST_F(TestKVParser, ParseLine_LineWithoutEquals_Skipped)
+{
+    KVParser parser;
+    string line = "ock.mmc.key_without_equals";
+    EXPECT_EQ(parser.ParseLine(line), MMC_OK);
+    EXPECT_EQ(parser.Size(), 0U);
+}
+
+// ======================== CheckSet ========================
+
+TEST_F(TestKVParser, CheckSet_MissingKey_ReturnsFalse)
+{
+    KVParser parser;
+    string line = "ock.mmc.key1 = value1";
+    parser.ParseLine(line);
+    vector<string> keys = {"ock.mmc.key1", "ock.mmc.missing"};
+    EXPECT_FALSE(parser.CheckSet(keys));
+}
+
+TEST_F(TestKVParser, CheckSet_AllKeysPresent_ReturnsTrue)
+{
+    KVParser parser;
+    string line1 = "ock.mmc.key1 = value1";
+    string line2 = "ock.mmc.key2 = value2";
+    parser.ParseLine(line1);
+    parser.ParseLine(line2);
+    vector<string> keys = {"ock.mmc.key1", "ock.mmc.key2"};
+    EXPECT_TRUE(parser.CheckSet(keys));
+}
+
+// ======================== Dump / Size ========================
+
+TEST_F(TestKVParser, Dump_DoesNotCrash)
+{
+    KVParser parser;
+    string line1 = "ock.mmc.key1 = value1";
+    string line2 = "ock.mmc.key2 = value2";
+    parser.ParseLine(line1);
+    parser.ParseLine(line2);
+    testing::internal::CaptureStdout();
+    parser.Dump();
+    string output = testing::internal::GetCapturedStdout();
+    EXPECT_TRUE(output.find("ock.mmc.key1 = value1") != string::npos);
+    EXPECT_TRUE(output.find("ock.mmc.key2 = value2") != string::npos);
+}
+
+TEST_F(TestKVParser, Size_ReturnsCorrectCount)
+{
+    KVParser parser;
+    EXPECT_EQ(parser.Size(), 0U);
+    string line1 = "ock.mmc.key1 = value1";
+    parser.ParseLine(line1);
+    EXPECT_EQ(parser.Size(), 1U);
+    string line2 = "ock.mmc.key2 = value2";
+    parser.ParseLine(line2);
+    EXPECT_EQ(parser.Size(), 2U);
+}
