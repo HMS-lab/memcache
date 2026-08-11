@@ -216,7 +216,7 @@ public:
                    VIntRange::Create(OKC_MMC_EVICT_THRESHOLD_LOW.first, MIN_EVICT_THRESHOLD, MAX_EVICT_THRESHOLD - 1),
                    0);
         AddIntConf(OCK_MMC_REWARM_DRAM_WATERMARK,
-                   VIntRange::Create(OCK_MMC_REWARM_DRAM_WATERMARK.first, MIN_PERCENT, MAX_PERCENT), 0);
+                   VIntRange::Create(OCK_MMC_REWARM_DRAM_WATERMARK.first, MIN_DRAM_WATERMARK, MAX_DRAM_WATERMARK), 0);
         AddBoolConf(OCK_MMC_PREFETCH_ENABLED, VStrEnum::Create(OCK_MMC_PREFETCH_ENABLED.first, BOOL_ENUM_STR), 0);
         AddIntConf(OCK_MMC_PENDING_WAIT_TIMEOUT_MS, VIntRange::Create(OCK_MMC_PENDING_WAIT_TIMEOUT_MS.first, 1, 60000U),
                    0);

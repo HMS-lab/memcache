@@ -42,6 +42,8 @@ public:
 
     // 写入 lastUpdateMs + 各 data 字段: lastUpdateMs 由 meta 本机时钟写入
     Result Update(const StatsReportRequest &req);
+    // 断链/踢出集群时移除指定 rank 的客户端指标，避免 ssd_used 等聚合保留断链前的旧值
+    void Remove(uint32_t rank);
 
     // 读取时现场计算 stale: now - lastUpdateMs > staleThresholdSec
     // staleThresholdSec 单位: 秒, GetAll 内部转换为毫秒比较

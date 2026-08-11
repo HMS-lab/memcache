@@ -146,8 +146,8 @@ constexpr int MAX_WORLD_SIZE = 1024;
 
 constexpr int MIN_EVICT_THRESHOLD = 1;
 constexpr int MAX_EVICT_THRESHOLD = 99;
-constexpr int MIN_PERCENT = 0;
-constexpr int MAX_PERCENT = 100;
+constexpr int MIN_DRAM_WATERMARK = 5;
+constexpr int MAX_DRAM_WATERMARK = 95;
 constexpr int MIN_LEASE_TTL_MS = 1;
 constexpr int MAX_LEASE_TTL_MS = 2147483647;
 

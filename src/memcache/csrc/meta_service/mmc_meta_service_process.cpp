@@ -233,6 +233,12 @@ int MmcMetaServiceProcess::ValidateConfig() const
         std::cerr << "Invalid log level." << std::endl;
         return -1;
     }
+    if (config_.rewarmDramWatermark <= config_.evictThresholdHigh) {
+        std::cerr << "Invalid dram watermark, 'ock.mmc.rewarm.dram_watermark' should be greater than "
+                     "'ock.mmc.evict_threshold_high'."
+                  << std::endl;
+        return -1;
+    }
     if (MetaServiceConfig::ValidateTLSConfig(config_.accTlsConfig) != MMC_OK) {
         std::cerr << "Invalid tls config." << std::endl;
         return -1;

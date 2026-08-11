@@ -73,6 +73,7 @@ private:
     Result StartMetaNetServer();
     void StopMetaNetServer();
     std::string GetBackendIdForRank(uint32_t rank);
+    Result BmUnregisterWithoutLock(uint32_t rank, uint16_t mediaType);
     void PublishClearedForRanks(const std::vector<uint32_t> &ranks);
 
     MetaNetServerPtr metaNetServer_;

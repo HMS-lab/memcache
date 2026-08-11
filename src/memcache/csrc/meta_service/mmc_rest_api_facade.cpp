@@ -260,6 +260,24 @@ void AppendUbsIoPerDisk(std::ostringstream &oss, const std::vector<ock::mmc::Ran
         [](const auto &d) -> uint64_t { return d.totalBandwidth; });
 }
 
+// SSD 数据由 ubsio 管理，SSD 不是 allocator segment，usage 从客户端上报的 ubsIo 统计聚合
+ock::mmc::Result BuildSsdUsageFromUbsIo(ock::mmc::RestUsageSnapshot &usage)
+{
+    usage = ock::mmc::RestUsageSnapshot{};
+    const auto views =
+        ock::mmc::MmcClientMetricStore::GetInstance().GetAll(ock::mmc::CLIENT_METRIC_STALE_THRESHOLD_SECONDS);
+    for (const auto &view : views) {
+        if (view.stale) {
+            continue;
+        }
+        usage.totalBytes += view.ubsIo.diskCap;
+        usage.usedBytes += view.ubsIo.diskUsed;
+    }
+    usage.freeBytes = usage.totalBytes >= usage.usedBytes ? (usage.totalBytes - usage.usedBytes) : 0;
+    usage.usageRatio = usage.totalBytes == 0 ? 0.0 : static_cast<double>(usage.usedBytes) / usage.totalBytes;
+    return ock::mmc::MMC_OK;
+}
+
 } // namespace
 
 namespace ock {
@@ -631,9 +649,9 @@ Result MmcRestApiFacade::BuildMetricsSummary(bool serviceReady, std::string &res
         return ret;
     }
     // SSD usage 可能为空（未配置 SSD），不阻塞流程
-    ret = BuildUsageFromMedium(segments, kLowerMediumSsd, ssdUsage);
+    ret = BuildSsdUsageFromUbsIo(ssdUsage);
     if (ret != MMC_OK) {
-        MMC_LOG_WARN("BuildUsageFromMedium SSD failed in BuildMetricsSummary, ret=" << ret);
+        MMC_LOG_WARN("BuildSsdUsageFromUbsIo failed in BuildMetricsSummary, ret=" << ret);
     }
 
     std::ostringstream oss;
@@ -747,9 +765,9 @@ Result MmcRestApiFacade::BuildPrometheusMetrics(bool serviceReady, std::string &
         return ret;
     }
     // SSD usage 可能为空（未配置 SSD），不阻塞流程
-    ret = BuildUsageFromMedium(segments, kLowerMediumSsd, ssdUsage);
+    ret = BuildSsdUsageFromUbsIo(ssdUsage);
     if (ret != MMC_OK) {
-        MMC_LOG_WARN("BuildUsageFromMedium SSD failed in BuildPrometheusMetrics, ret=" << ret);
+        MMC_LOG_WARN("BuildSsdUsageFromUbsIo failed in BuildPrometheusMetrics, ret=" << ret);
     }
 
     std::ostringstream oss;

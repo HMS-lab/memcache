@@ -35,9 +35,6 @@ constexpr int METAMGR_POOL_BASE = 16;
 constexpr int REWARM_POOL_BASE = 32;
 constexpr int REMOVE_POOL_BASE = 16;
 constexpr uint16_t DEFAULT_REWARM_HIGH_WATERMARK = 95U;
-constexpr uint16_t REWARM_WATERMARK_DELTA = 5U;
-constexpr uint16_t REWARM_WATERMARK_MIN = 10U;
-constexpr uint16_t REWARM_WATERMARK_MAX = 95U;
 
 struct MmcMetaChangeCallbacks {
     using Callback = std::function<void(const std::string &key, uint32_t rank, uint16_t mediaType)>;
@@ -248,6 +245,12 @@ public:
     Result Unmount(const MmcLocation &loc);
 
     /**
+     * @brief Clean SSD blobs of a rank from the meta container
+     * @param rank [in] rank whose SSD blobs should be removed
+     */
+    Result CleanSsdBlobs(uint32_t rank);
+
+    /**
      * @brief Get all segment info: rank, medium, size, used size...
      */
     nlohmann::json GetAllSegmentInfo() const;
@@ -318,17 +321,7 @@ public:
 
     uint16_t GetRewarmWatermark(MediaType media) const
     {
-        if (rewarmDramWatermark_ != DEFAULT_REWARM_HIGH_WATERMARK) {
-            return rewarmDramWatermark_;
-        }
-        uint16_t watermark = evictThresholdHigh_ + REWARM_WATERMARK_DELTA;
-        if (watermark < REWARM_WATERMARK_MIN) {
-            watermark = REWARM_WATERMARK_MIN;
-        }
-        if (watermark > REWARM_WATERMARK_MAX) {
-            watermark = REWARM_WATERMARK_MAX;
-        }
-        return watermark;
+        return rewarmDramWatermark_;
     }
 
     std::vector<std::pair<uint16_t, uint16_t>> GetEvictWatermark() const
@@ -404,6 +397,8 @@ private:
                                    const MmcLocation &dst, uint32_t srcRank, std::unique_lock<std::mutex> &guard);
 
     Result RebuildMeta(std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList);
+
+    Result RemoveBlobs(uint32_t rank, MediaType mediaType);
 
     void PushRemoveList(const std::string &key, const MmcMemObjMetaPtr &meta, const MmcBlobFilterPtr &filter = nullptr,
                         bool triggerSsdPreFree = false);

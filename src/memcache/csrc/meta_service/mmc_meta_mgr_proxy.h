@@ -142,6 +142,11 @@ public:
         return ret;
     }
 
+    Result CleanSsdBlobs(uint32_t rank)
+    {
+        return metaMangerPtr_->CleanSsdBlobs(rank);
+    }
+
     Result ExistKey(const IsExistRequest &req, IsExistResponse &resp)
     {
         MmcMetaMetricManager &metricManager = MmcMetaMetricManager::GetInstance();

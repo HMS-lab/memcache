@@ -37,6 +37,12 @@ Result MmcClientMetricStore::Update(const StatsReportRequest &req)
     return MMC_OK;
 }
 
+void MmcClientMetricStore::Remove(uint32_t rank)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    entries_.erase(rank);
+}
+
 std::vector<RankMetricView> MmcClientMetricStore::GetAll(uint32_t staleThresholdSec) const
 {
     const uint64_t nowMs = ock::dagger::Monotonic::TimeUs() / MILLI;

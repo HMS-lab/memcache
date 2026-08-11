@@ -1170,23 +1170,29 @@ Result MmcMetaManager::RebuildMeta(std::vector<std::pair<std::string, MmcMemBlob
     return MMC_OK;
 }
 
-Result MmcMetaManager::Unmount(const MmcLocation &loc)
+Result MmcMetaManager::RemoveBlobs(uint32_t rank, MediaType mediaType)
 {
-    Result ret = globalAllocator_->Stop(loc);
-    if (ret != MMC_OK) {
-        return ret;
+    MmcBlobFilterPtr filter = MmcMakeRef<MmcBlobFilter>(rank, mediaType, NONE);
+    if (filter == nullptr) {
+        MMC_LOG_ERROR("Failed to create blob filter for rank=" << rank << ", media=" << static_cast<int>(mediaType));
+        return MMC_MALLOC_FAILED;
     }
-    // Force delete the blobs
-    MmcBlobFilterPtr filter = MmcMakeRef<MmcBlobFilter>(loc.rank_, loc.mediaType_, NONE);
 
-    auto matchFunc = [this, &filter](const std::string &key, const MmcMemObjMetaPtr &objMeta) -> bool {
+    uint64_t freedBlobs = 0;
+    uint64_t erasedKeys = 0;
+    auto matchFunc = [this, &filter, &freedBlobs, &erasedKeys](const std::string &key,
+                                                               const MmcMemObjMetaPtr &objMeta) -> bool {
         if (objMeta == nullptr) {
             MMC_LOG_ERROR("objMeta is null for key:" << key);
             return false;
         }
         std::unique_lock<std::mutex> guard(objMeta->Mutex());
         auto blobs = objMeta->FreeBlobs(key, globalAllocator_, filter, false, false);
+        freedBlobs += blobs.size();
         const bool shouldErase = (objMeta->NumBlobs() == 0);
+        if (shouldErase) {
+            ++erasedKeys;
+        }
         return shouldErase;
     };
 
@@ -1194,16 +1200,41 @@ Result MmcMetaManager::Unmount(const MmcLocation &loc)
     {
         std::lock_guard<std::mutex> cbLock(changeCallbacks_.mutex);
         if (changeCallbacks_.cleared) {
-            changeCallbacks_.cleared(loc.rank_, loc.mediaType_);
+            changeCallbacks_.cleared(rank, mediaType);
         }
     }
+    MMC_LOG_INFO("Remove blobs for rank=" << rank << ", media=" << static_cast<int>(mediaType)
+                                          << " done, freedBlobs=" << freedBlobs << ", erasedKeys=" << erasedKeys);
+    return MMC_OK;
+}
 
-    ret = globalAllocator_->Unmount(loc);
-    if (ret == MMC_OK) {
-        std::lock_guard<std::mutex> guard(ssdMutex_);
-        ssdEnabledRanks_.erase(loc.rank_);
+Result MmcMetaManager::Unmount(const MmcLocation &loc)
+{
+    Result ret = globalAllocator_->Stop(loc);
+    if (ret != MMC_OK) {
+        return ret;
     }
-    return ret;
+    ret = RemoveBlobs(loc.rank_, loc.mediaType_);
+    const Result removeBlobsRet = ret;
+    if (removeBlobsRet != MMC_OK) {
+        MMC_LOG_ERROR("Remove blobs failed for loc " << loc << ", ret=" << removeBlobsRet);
+    }
+    ret = globalAllocator_->Unmount(loc);
+    if (ret != MMC_OK) {
+        MMC_LOG_ERROR("global allocator unmount failed for loc " << loc << ", ret=" << ret);
+        return ret;
+    }
+    if (removeBlobsRet != MMC_OK) {
+        return removeBlobsRet;
+    }
+    std::lock_guard<std::mutex> guard(ssdMutex_);
+    ssdEnabledRanks_.erase(loc.rank_);
+    return MMC_OK;
+}
+
+Result MmcMetaManager::CleanSsdBlobs(uint32_t rank)
+{
+    return RemoveBlobs(rank, MEDIA_SSD);
 }
 
 nlohmann::json MmcMetaManager::GetAllSegmentInfo() const

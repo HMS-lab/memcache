@@ -16,6 +16,7 @@
 
 #include "mmc_logger.h"
 #include "mmc_ref.h"
+#include "mmc_client_metric_store.h"
 #include "mmc_meta_mgr_proxy.h"
 #include "mmc_meta_net_server.h"
 #include "mmc_rest_api_facade.h"
@@ -192,6 +193,11 @@ Result MmcMetaService::BmRegister(uint32_t rank, std::vector<uint16_t> mediaType
 Result MmcMetaService::BmUnregister(uint32_t rank, uint16_t mediaType)
 {
     std::lock_guard<std::mutex> guard(mutex_);
+    return BmUnregisterWithoutLock(rank, mediaType);
+}
+
+Result MmcMetaService::BmUnregisterWithoutLock(uint32_t rank, uint16_t mediaType)
+{
     if (!started_) {
         MMC_LOG_ERROR("MetaService (" << name_ << ") is not started");
         return MMC_NOT_STARTED;
@@ -216,24 +222,35 @@ Result MmcMetaService::BmUnregister(uint32_t rank, uint16_t mediaType)
 
 Result MmcMetaService::ClearResource(uint32_t rank)
 {
+    // 持锁与 BmRegister 串行，避免清理期间重连恢复的 SSD 元数据被误清
+    std::lock_guard<std::mutex> guard(mutex_);
     if (!started_) {
         MMC_LOG_ERROR("MetaService (" << name_ << ") is not started.");
         return MMC_NOT_STARTED;
     }
     std::unordered_set<uint16_t> mediaTypes;
-    {
-        std::lock_guard<std::mutex> guard(mutex_);
-        if (rankMediaTypeMap_.find(rank) == rankMediaTypeMap_.end()) {
-            MMC_LOG_DEBUG("Rank " << rank << " has no resources.");
-            return MMC_OK;
-        }
-        mediaTypes = rankMediaTypeMap_[rank];
+    auto it = rankMediaTypeMap_.find(rank);
+    if (it == rankMediaTypeMap_.end()) {
+        MMC_LOG_DEBUG("Rank " << rank << " has no registered media types.");
+    } else {
+        mediaTypes = it->second;
     }
 
     for (const auto &mediaType : mediaTypes) {
         MMC_LOG_INFO("Clear resource {rank, mediaType} -> { " << rank << ", " << mediaType << " }");
-        BmUnregister(rank, mediaType);
+        (void)BmUnregisterWithoutLock(rank, mediaType);
     }
+
+    // SSD 数据由 UBS IO 管理，未注册为 allocator segment；断链时需单独清理容器中的 SSD blob
+    if (metaMgrProxy_ != nullptr) {
+        Result ret = metaMgrProxy_->CleanSsdBlobs(rank);
+        if (ret != MMC_OK) {
+            MMC_LOG_WARN("Clean SSD blobs failed for rank=" << rank << ", ret=" << ret);
+        }
+    }
+    // 断链后客户端已不在，清除其上报的指标，ssd_used 等聚合立即归零，不再保留旧值
+    MmcClientMetricStore::GetInstance().Remove(rank);
+    MMC_LOG_INFO("Remove client metrics for rank=" << rank);
     return MMC_OK;
 }
 
