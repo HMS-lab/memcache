@@ -744,9 +744,9 @@ PYBIND11_MODULE(_pymmc, m)
         .def("batch_is_exist", &MmcacheStore::BatchIsExist, py::call_guard<py::gil_scoped_release>(), py::arg("keys"),
              "Check if multiple objects exist. Returns list of results: 1 if exists, 0 if not exists, -1 if error")
         .def("get_key_info", &MmcacheStore::GetKeyInfo, py::call_guard<py::gil_scoped_release>(), py::arg("key"),
-             py::arg("flag") = 0)
+             py::arg("flag") = GET_KEY_INFO_FOR_LAYER_WISE)
         .def("batch_get_key_info", &MmcacheStore::BatchGetKeyInfo, py::call_guard<py::gil_scoped_release>(),
-             py::arg("keys"), py::arg("flag") = 0)
+             py::arg("keys"), py::arg("flag") = GET_KEY_INFO_FOR_LAYER_WISE)
         .def("batch_add_lease", &MmcacheStore::BatchAddLease, py::call_guard<py::gil_scoped_release>(), py::arg("keys"),
              py::arg("leaseTtlMs") = 0)
         .def("batch_remove_lease", &MmcacheStore::BatchRemoveLease, py::call_guard<py::gil_scoped_release>(),

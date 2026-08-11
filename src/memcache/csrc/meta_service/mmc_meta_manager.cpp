@@ -1211,6 +1211,20 @@ nlohmann::json MmcMetaManager::GetAllSegmentInfo() const
     return globalAllocator_->GetAllSegmentInfo();
 }
 
+void MmcMetaManager::PrefetchKeys(const std::vector<std::string> &keys)
+{
+    if (keys.empty()) {
+        return;
+    }
+    uint64_t operateId = GenerateOperateId(UINT32_MAX);
+    std::vector<MmcMemMetaDesc> objMetas(keys.size());
+
+    auto ret = GetByRank(keys, operateId, objMetas);
+    if (ret != MMC_OK) {
+        MMC_LOG_ERROR("GetByRank failed ret:" << ret << " operatedId:" << operateId << " size:" << keys.size());
+    }
+}
+
 Result MmcMetaManager::Query(const std::string &key, uint64_t operateId, uint32_t flags, MemObjQueryInfo &queryInfo)
 {
     (void)operateId;

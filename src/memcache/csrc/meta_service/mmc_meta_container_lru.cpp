@@ -246,7 +246,6 @@ public:
             mapIter->second.mediaType_ = MEDIA_NONE;
             return true;
         }
-        MMC_LOG_ERROR("Failed to evict Key " << key << ", moveFunc failed.");
         return false;
     }
 

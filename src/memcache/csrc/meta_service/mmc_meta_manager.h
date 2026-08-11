@@ -252,6 +252,8 @@ public:
      */
     nlohmann::json GetAllSegmentInfo() const;
 
+    void PrefetchKeys(const std::vector<std::string> &keys);
+
     /**
      * @brief Check if a meta object (key) is in memory
      * @param key          [in] key of the meta object

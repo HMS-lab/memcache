@@ -399,3 +399,70 @@ TEST_F(TestIpAddressParserMgr, GetInstance_ReturnSameInstance)
     auto &instance2 = IpAddressParserMgr::getInstance();
     EXPECT_EQ(&instance1, &instance2);
 }
+
+// 未初始化状态下各 getter 应返回默认值
+TEST_F(TestUrlParser, GettersBeforeInit_ReturnDefaults)
+{
+    EXPECT_EQ(parser_.GetPort(), 0);
+    EXPECT_FALSE(parser_.IsIpv6());
+    EXPECT_EQ(parser_.GetAddressFamily(), 0);
+    EXPECT_EQ(parser_.GetProtocol(), "");
+    EXPECT_EQ(parser_.GetIp(), "");
+}
+
+// IPv6 模式下传入无效对端地址应失败
+TEST_F(TestUrlParser, GetPeerAddressIpv6InvalidIp_Fail)
+{
+    ASSERT_TRUE(parser_.Initialize(VALID_IPV6_URL));
+    constexpr uint16_t peerPort = 9091;
+    auto [addr, size] = parser_.GetPeerAddress("not_a_valid_ipv6", peerPort);
+    EXPECT_EQ(addr, nullptr);
+    EXPECT_EQ(size, 0U);
+}
+
+// 非数字端口应触发解析异常
+TEST_F(TestUrlParser, ParseUrlNonNumericPort_Fail)
+{
+    EXPECT_FALSE(parser_.Initialize("tcp://192.168.1.1:abc"));
+}
+
+// 无括号但含冒号的 IPv6 主机应识别为 IPv6
+TEST_F(TestUrlParser, ParseUrlBareIpv6WithColon_Success)
+{
+    ASSERT_TRUE(parser_.Initialize("tcp://::1:9090"));
+    EXPECT_TRUE(parser_.IsIpv6());
+    EXPECT_EQ(parser_.GetPort(), VALID_PORT_9090);
+}
+
+// ResolveDomainToIp 解析 IPv4 字面量
+TEST_F(TestUrlParser, ResolveDomainToIpValidIpv4_ReturnsNonEmpty)
+{
+    UrlParser resolver;
+    auto resolved = resolver.ResolveDomainToIp(VALID_IPV4_URL);
+    EXPECT_FALSE(resolved.empty());
+    EXPECT_NE(resolved.find("192.168.1.1"), string::npos);
+}
+
+// ResolveDomainToIp 传入空 URL 应失败
+TEST_F(TestUrlParser, ResolveDomainToIpEmptyUrl_ReturnsEmpty)
+{
+    UrlParser resolver;
+    EXPECT_TRUE(resolver.ResolveDomainToIp("").empty());
+}
+
+// ResolveUrlToIpPort 解析合法 IPv4 URL
+TEST(TestUrlResolveHelper, ResolveUrlToIpPortValidIp_ReturnsTrue)
+{
+    string ip;
+    uint16_t port = 0;
+    EXPECT_TRUE(ResolveUrlToIpPort(VALID_IPV4_URL, ip, port));
+    EXPECT_FALSE(ip.empty());
+}
+
+// ResolveUrlToIpPort 传入无端口 URL 应失败
+TEST(TestUrlResolveHelper, ResolveUrlToIpPortInvalidUrl_ReturnsFalse)
+{
+    string ip = "sentinel";
+    uint16_t port = 0;
+    EXPECT_FALSE(ResolveUrlToIpPort("invalid_no_port", ip, port));
+}

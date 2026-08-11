@@ -17,6 +17,8 @@
 #include "mmc_def.h"
 #undef private
 
+#include "mmc_meta_metric_manager.h"
+
 using namespace testing;
 using namespace std;
 using namespace ock::mmc;
@@ -600,4 +602,182 @@ TEST_F(TestMmcConfiguration, DynamicConfigIntervalRangeBounds)
     EXPECT_EQ(MIN_DYNAMIC_CONFIG_INTERVAL, 1);
     EXPECT_EQ(MAX_DYNAMIC_CONFIG_INTERVAL, 300);
     EXPECT_EQ(DEFAULT_DYNAMIC_CONFIG_INTERVAL, 5);
+}
+
+namespace {
+constexpr uint64_t HUGE_MEM_SIZE = 1ULL << 50; // 远超单机 DRAM/HBM 上限，用于触发 exceeds 校验
+constexpr uint64_t ALIGNED_2MB = 2ULL * 1024 * 1024;
+constexpr uint64_t ALIGNED_4MB = 4ULL * 1024 * 1024;
+
+mmc_local_service_config_t MakeValidBaseConfig()
+{
+    mmc_local_service_config_t config{};
+    config.logLevel = INFO_LEVEL;
+    SafeCopy("host_rdma", config.dataOpType, PROTOCOL_SIZE);
+    config.accTlsConfig.tlsEnable = false;
+    config.hcomTlsConfig.tlsEnable = false;
+    config.configStoreTlsConfig.tlsEnable = false;
+    return config;
+}
+} // namespace
+
+// localDRAMSize 超过上限
+TEST_F(TestMmcConfiguration, ValidateLocalServiceConfigDramExceedsMax_Fail)
+{
+    auto config = MakeValidBaseConfig();
+    config.localDRAMSize = HUGE_MEM_SIZE;
+    config.localMaxDRAMSize = ALIGNED_2MB;
+    config.localHBMSize = ALIGNED_2MB;
+    config.localMaxHBMSize = ALIGNED_2MB;
+    EXPECT_EQ(ClientConfig::ValidateLocalServiceConfig(config), MMC_INVALID_PARAM);
+}
+
+// localMaxDRAMSize 超过上限
+TEST_F(TestMmcConfiguration, ValidateLocalServiceConfigMaxDramExceedsMax_Fail)
+{
+    auto config = MakeValidBaseConfig();
+    config.localDRAMSize = ALIGNED_2MB;
+    config.localMaxDRAMSize = HUGE_MEM_SIZE;
+    config.localHBMSize = ALIGNED_2MB;
+    config.localMaxHBMSize = ALIGNED_2MB;
+    EXPECT_EQ(ClientConfig::ValidateLocalServiceConfig(config), MMC_INVALID_PARAM);
+}
+
+// localMaxDRAMSize 小于 localDRAMSize
+TEST_F(TestMmcConfiguration, ValidateLocalServiceConfigMaxDramLessThanDram_Fail)
+{
+    auto config = MakeValidBaseConfig();
+    config.localDRAMSize = ALIGNED_4MB;
+    config.localMaxDRAMSize = ALIGNED_2MB;
+    config.localHBMSize = ALIGNED_2MB;
+    config.localMaxHBMSize = ALIGNED_2MB;
+    EXPECT_EQ(ClientConfig::ValidateLocalServiceConfig(config), MMC_INVALID_PARAM);
+}
+
+// localHBMSize 超过上限
+TEST_F(TestMmcConfiguration, ValidateLocalServiceConfigHbmExceedsMax_Fail)
+{
+    auto config = MakeValidBaseConfig();
+    config.localDRAMSize = ALIGNED_2MB;
+    config.localMaxDRAMSize = ALIGNED_2MB;
+    config.localHBMSize = HUGE_MEM_SIZE;
+    config.localMaxHBMSize = ALIGNED_2MB;
+    EXPECT_EQ(ClientConfig::ValidateLocalServiceConfig(config), MMC_INVALID_PARAM);
+}
+
+// localMaxHBMSize 超过上限
+TEST_F(TestMmcConfiguration, ValidateLocalServiceConfigMaxHbmExceedsMax_Fail)
+{
+    auto config = MakeValidBaseConfig();
+    config.localDRAMSize = ALIGNED_2MB;
+    config.localMaxDRAMSize = ALIGNED_2MB;
+    config.localHBMSize = ALIGNED_2MB;
+    config.localMaxHBMSize = HUGE_MEM_SIZE;
+    EXPECT_EQ(ClientConfig::ValidateLocalServiceConfig(config), MMC_INVALID_PARAM);
+}
+
+// localMaxHBMSize 小于 localHBMSize
+TEST_F(TestMmcConfiguration, ValidateLocalServiceConfigMaxHbmLessThanHbm_Fail)
+{
+    auto config = MakeValidBaseConfig();
+    config.localDRAMSize = ALIGNED_2MB;
+    config.localMaxDRAMSize = ALIGNED_2MB;
+    config.localHBMSize = ALIGNED_4MB;
+    config.localMaxHBMSize = ALIGNED_2MB;
+    EXPECT_EQ(ClientConfig::ValidateLocalServiceConfig(config), MMC_INVALID_PARAM);
+}
+
+// acc_link TLS 配置无效
+TEST_F(TestMmcConfiguration, ValidateLocalServiceConfigTlsAccInvalid_Fail)
+{
+    auto config = MakeValidBaseConfig();
+    config.localDRAMSize = ALIGNED_2MB;
+    config.localMaxDRAMSize = ALIGNED_2MB;
+    config.localHBMSize = ALIGNED_2MB;
+    config.localMaxHBMSize = ALIGNED_2MB;
+    config.accTlsConfig.tlsEnable = true; // 未提供有效路径
+    EXPECT_EQ(ClientConfig::ValidateLocalServiceConfig(config), MMC_INVALID_PARAM);
+}
+
+// hcom TLS 配置无效
+TEST_F(TestMmcConfiguration, ValidateLocalServiceConfigTlsHcomInvalid_Fail)
+{
+    auto config = MakeValidBaseConfig();
+    config.localDRAMSize = ALIGNED_2MB;
+    config.localMaxDRAMSize = ALIGNED_2MB;
+    config.localHBMSize = ALIGNED_2MB;
+    config.localMaxHBMSize = ALIGNED_2MB;
+    config.hcomTlsConfig.tlsEnable = true;
+    EXPECT_EQ(ClientConfig::ValidateLocalServiceConfig(config), MMC_INVALID_PARAM);
+}
+
+// config store TLS 配置无效
+TEST_F(TestMmcConfiguration, ValidateLocalServiceConfigTlsConfigStoreInvalid_Fail)
+{
+    auto config = MakeValidBaseConfig();
+    config.localDRAMSize = ALIGNED_2MB;
+    config.localMaxDRAMSize = ALIGNED_2MB;
+    config.localHBMSize = ALIGNED_2MB;
+    config.localMaxHBMSize = ALIGNED_2MB;
+    config.configStoreTlsConfig.tlsEnable = true;
+    EXPECT_EQ(ClientConfig::ValidateLocalServiceConfig(config), MMC_INVALID_PARAM);
+}
+
+// 调用 GetClientConfig 覆盖其内部 getter 调用
+TEST_F(TestMmcConfiguration, GetClientConfig_PopulatesConfig)
+{
+    ClientConfig clientConfig;
+    auto config = CreateLocalConfigWithCurrentDefaults();
+    ASSERT_TRUE(clientConfig.Setup(&config));
+    mmc_client_config_t clientCfg{};
+    clientConfig.GetClientConfig(clientCfg);
+    EXPECT_EQ(string(clientCfg.dataOpType), "host_rdma");
+    EXPECT_EQ(clientCfg.rpcRetryTimeOut, 0U);
+    EXPECT_EQ(clientCfg.timeOut, 60U);
+}
+
+// RankedOpMetrics 覆盖 per-rank 计数器与序列化分支
+TEST_F(TestMmcConfiguration, RankedOpMetricsIncrementAndAppendBranches)
+{
+    RankedOpMetrics metrics;
+    constexpr uint32_t validRank = 7;
+    constexpr uint32_t invalidRank = UINT32_MAX;
+    // 合法 rank：递增四类计数（首次创建 + 已存在共享读路径）
+    metrics.IncrementRequest(validRank);
+    metrics.IncrementSuccess(validRank);
+    metrics.IncrementFailure(validRank);
+    metrics.IncrementNotFound(validRank);
+    metrics.IncrementRequest(validRank); // 再次命中已存在分支
+    // 非法 rank 应被忽略
+    metrics.IncrementRequest(invalidRank);
+    metrics.IncrementSuccess(invalidRank);
+    metrics.IncrementFailure(invalidRank);
+    metrics.IncrementNotFound(invalidRank);
+    // 仅 notFound 的 rank，覆盖 rv/sv/fv==0 分支
+    constexpr uint32_t notFoundOnlyRank = 9;
+    metrics.IncrementNotFound(notFoundOnlyRank);
+
+    std::ostringstream oss;
+    metrics.AppendPerRankToStream(oss, "req", "succ", "fail", "nf");
+    EXPECT_FALSE(oss.str().empty());
+
+    // 空 nfName 分支
+    std::ostringstream ossEmptyNf;
+    metrics.AppendPerRankToStream(ossEmptyNf, "req", "succ", "fail", "");
+    EXPECT_FALSE(ossEmptyNf.str().empty());
+}
+
+// SimplePerRankCounter 覆盖递增/递减/查询分支
+TEST_F(TestMmcConfiguration, SimplePerRankCounterIncrementDecrementBranches)
+{
+    SimplePerRankCounter counter;
+    constexpr uint32_t validRank = 3;
+    constexpr uint32_t invalidRank = UINT32_MAX;
+    counter.Increment(validRank);
+    counter.Increment(validRank, 5);
+    counter.Decrement(validRank, 2);
+    counter.Increment(invalidRank); // 被忽略
+    counter.Decrement(invalidRank); // 被忽略
+    const auto rankMap = counter.GetRankMap();
+    EXPECT_EQ(rankMap.at(validRank), 4U); // 1 + 5 - 2
 }

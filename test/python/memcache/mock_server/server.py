@@ -624,12 +624,12 @@ class MmcTest(TestServer):
 
     @result_handler
     def get_key_info(self, key: str):
-        res = self._store.get_key_info(key)
+        res = self._store.get_key_info(key, 0)
         self.cli_return(res)
 
     @result_handler
     def batch_get_key_info(self, keys: List[str]):
-        res = self._store.batch_get_key_info(keys)
+        res = self._store.batch_get_key_info(keys, 0)
         self.cli_return(res)
 
     @result_handler

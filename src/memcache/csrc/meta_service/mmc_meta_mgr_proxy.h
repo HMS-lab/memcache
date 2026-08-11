@@ -157,6 +157,9 @@ public:
     {
         MmcMetaMetricManager &metricManager = MmcMetaMetricManager::GetInstance();
         metricManager.IncrementRequestCounter(RestMetricType::QUERY, UINT32_MAX);
+        if ((req.flag_ & GET_KEY_INFO_FOR_LAYER_WISE) != 0) {
+            metaMangerPtr_->PrefetchKeys({req.key_});
+        }
         Result metaRet = metaMangerPtr_->Query(req.key_, req.operateId_, req.flag_, resp.queryInfo_);
         IncrementResultCounter(metricManager, RestMetricType::QUERY, metaRet, UINT32_MAX);
         return metaRet;
@@ -166,6 +169,9 @@ public:
     {
         MmcMetaMetricManager &metricManager = MmcMetaMetricManager::GetInstance();
         metricManager.IncrementRequestCounter(RestMetricType::BATCH_QUERY, UINT32_MAX);
+        if ((req.flag_ & GET_KEY_INFO_FOR_LAYER_WISE) != 0) {
+            metaMangerPtr_->PrefetchKeys(req.keys_);
+        }
         std::vector<Result> results;
         results.reserve(req.keys_.size());
         for (const std::string &key : req.keys_) {
