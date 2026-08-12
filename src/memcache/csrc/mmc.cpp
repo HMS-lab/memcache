@@ -55,6 +55,7 @@ mmc_meta_service_config_t create_default_meta_config()
     config.accTlsConfig.tlsEnable = false;
     config.configStoreTlsConfig.tlsEnable = false;
     config.metricsReportIntervalSeconds = 0U;
+    config.evictCheckIntervalSeconds = 5U;
     config.kvEvents.enable = false;
     config.kvEvents.transportType = static_cast<int32_t>(KV_EVENT_TRANSPORT::ZMQ);
     SafeCopy("", config.kvEvents.endpoint, sizeof(config.kvEvents.endpoint));
@@ -84,6 +85,7 @@ std::string meta_config_to_string(const mmc_meta_service_config_t &config)
     oss << "  log_output_target: " << config.logOutputTarget << "\n";
     oss << "  evict_threshold_high: " << config.evictThresholdHigh << "\n";
     oss << "  evict_threshold_low: " << config.evictThresholdLow << "\n";
+    oss << "  evict_check_interval_seconds: " << config.evictCheckIntervalSeconds << "\n";
     oss << "  kv_events_enable: " << (config.kvEvents.enable ? "true" : "false") << "\n";
     oss << "  kv_events_transport_type: " << config.kvEvents.transportType << "\n";
     oss << "  kv_events_endpoint: " << config.kvEvents.endpoint << "\n";

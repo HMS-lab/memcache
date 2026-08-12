@@ -32,6 +32,7 @@ constexpr auto OCK_MMC_META_HA_ENABLE = std::make_pair("ock.mmc.meta.ha.enable",
 constexpr auto OCK_MMC_META_BACKUP_ENABLE = std::make_pair("ock.mmc.meta.backup.enable", false);
 constexpr auto OKC_MMC_EVICT_THRESHOLD_HIGH = std::make_pair("ock.mmc.evict_threshold_high", 90);
 constexpr auto OKC_MMC_EVICT_THRESHOLD_LOW = std::make_pair("ock.mmc.evict_threshold_low", 80);
+constexpr auto OCK_MMC_EVICT_CHECK_INTERVAL_SECONDS = std::make_pair("ock.mmc.evict_check_interval_seconds", 5);
 constexpr auto OCK_MMC_META_LEASE_TTL_MS = std::make_pair("ock.mmc.meta.lease_ttl_ms", 10000);
 constexpr auto OKC_MMC_LOCAL_SERVICE_BACKEND_ID = std::make_pair("ock.mmc.local_service.backend_id", "");
 // GC eviction yield: periodically sleep during eviction loop to release the write lock,

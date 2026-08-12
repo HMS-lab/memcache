@@ -124,7 +124,9 @@ int MmcMetaServiceProcess::MainForPython()
         std::this_thread::sleep_for(PROCESS_EXIT_POLL_INTERVAL);
         if (config_.haEnable && leaderElection_ != nullptr && metaService_ != nullptr) {
             const std::string role = leaderElection_->GetSnapshot().role;
-            const bool shouldPublish = (role == "leader" || role == "unknown");
+            const bool isLeader = role == "leader";
+            const bool shouldPublish = isLeader || role == "unknown";
+            metaService_->SetPeriodicEvictActive(isLeader);
             metaService_->SetPublishActive(shouldPublish);
         }
     }

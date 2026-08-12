@@ -66,6 +66,7 @@ MetaConfig是元数据服务的启动配置类，用于设置MetaService的监�
 | log_output_target | str | "file" | 日志输出目标：screen（仅stdout）, file（仅滚动文件）, both（stdout + 滚动文件） |
 | evict_threshold_high | int | 90 | 驱逐高水位百分比 |
 | evict_threshold_low | int | 80 | 驱逐低水位百分比 |
+| evict_check_interval_seconds | int | 5 | 周期驱逐检查间隔，单位秒；设置为0时禁用周期检查；HA模式下仅选举出的Master执行周期检查，Standby和角色未知节点不执行 |
 | ubs_io_enable | bool | false | 是否启用UBS_IO |
 | tls_enable | bool | false | 是否为metaservice启用TLS |
 | tls_ca_path | str | "" | TLS CA证书路径 |
@@ -102,6 +103,7 @@ config.log_rotation_file_count = 10
 config.log_output_target = "both"
 config.evict_threshold_high = 90
 config.evict_threshold_low = 80
+config.evict_check_interval_seconds = 5
 ```
 
 ### MetaService 类

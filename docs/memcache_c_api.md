@@ -664,6 +664,7 @@ int32_t mmc_set_log_level(int level);
 - `logRotationFileCount`：轮转日志文件个数。
 - `evictThresholdHigh`：高水位驱逐阈值。
 - `evictThresholdLow`：低水位驱逐阈值。
+- `evictCheckIntervalSeconds`：周期驱逐检查间隔，单位秒；设置为0时禁用周期检查；HA模式下仅选举出的Master执行周期检查，Standby和角色未知节点不执行。
 - `accTlsConfig`：元数据服务TLS配置。
 - `configStoreTlsConfig`：config store的TLS配置。
 - `metricsTlsConfig`：metrics HTTP 服务的 mTLS 配置。

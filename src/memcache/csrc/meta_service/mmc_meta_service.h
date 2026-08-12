@@ -12,6 +12,7 @@
 #ifndef MEM_FABRIC_MMC_META_SERVICE_DEFAULT_H
 #define MEM_FABRIC_MMC_META_SERVICE_DEFAULT_H
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -62,6 +63,7 @@ public:
     Result DeleteMetadata(const std::string &key);
 
     void SetPublishActive(bool active);
+    void SetPeriodicEvictActive(bool active);
     bool KvEventsEnabled() const;
     kv_event::KvEventStats GetKvEventStats() const;
 
@@ -94,6 +96,7 @@ private:
     ock::smem::StorePtr confStore_ = nullptr;
     MmcKvEventRuntime kvEvents_;
     bool kvEventsPublishActive_{false};
+    std::atomic<bool> periodicEvictActive_{false};
 
     void StartMetricsReportTask();
 };

@@ -127,6 +127,7 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
     }
     kvEvents_.SetPublishActive(!options.haEnable);
     kvEventsPublishActive_ = !options.haEnable;
+    periodicEvictActive_.store(!options.haEnable, std::memory_order_relaxed);
 
     if (!metaNetServerPending_) {
         MMC_RETURN_ERROR(StartMetaNetServer(), "Failed to start MetaNetServer in non-HA mode");
@@ -137,6 +138,21 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
                                          << ", metaNetServerPending=" << metaNetServerPending_);
 
     StartMetricsReportTask();
+    if (options_.evictCheckIntervalSeconds == 0) {
+        MMC_LOG_INFO("Periodic eviction check disabled by config");
+    } else {
+        const uint32_t intervalSeconds = options_.evictCheckIntervalSeconds;
+        const MmcMetaManagerPtr metaManagerPtr = metaMgrProxy_->GetMetaManager();
+        const Result periodicEvictRet = RegisterPeriodicTask("evict_check", intervalSeconds, [this, metaManagerPtr]() {
+            if (!periodicEvictActive_.load(std::memory_order_relaxed)) {
+                return;
+            }
+            metaManagerPtr->CheckAndEvict(MEDIA_NONE, 0);
+        });
+        if (periodicEvictRet != MMC_OK) {
+            MMC_LOG_ERROR("Failed to start periodic eviction check task, ret: " << periodicEvictRet);
+        }
+    }
     return MMC_OK;
 }
 
@@ -261,6 +277,11 @@ void MmcMetaService::SetPublishActive(bool active)
     kvEventsPublishActive_ = active;
 }
 
+void MmcMetaService::SetPeriodicEvictActive(bool active)
+{
+    periodicEvictActive_.store(active, std::memory_order_relaxed);
+}
+
 bool MmcMetaService::KvEventsEnabled() const
 {
     return kvEvents_.Enabled();
@@ -282,6 +303,8 @@ void MmcMetaService::Stop()
             MMC_LOG_WARN("MmcMetaService has not been started");
             return;
         }
+        periodicEvictActive_.store(false, std::memory_order_relaxed);
+        UnregisterPeriodicTask("evict_check");
         UnregisterPeriodicTask("metrics_report");
         PublishClearedForRanks(CollectRanks(rankMediaTypeMap_));
         kvEventsPublishActive_ = false;
@@ -427,12 +450,14 @@ void MmcMetaService::OnBecomeLeader()
         return;
     }
     SetPublishActive(true);
+    SetPeriodicEvictActive(true);
     MMC_LOG_INFO("MetaService leader ready, MetaNetServer listening on " << options_.discoveryURL);
 }
 
 void MmcMetaService::OnBecomeStandby()
 {
     MMC_LOG_INFO("HaConfigStore became standby/follower, stopping MetaNetServer and disabling KvEvents");
+    SetPeriodicEvictActive(false);
     SetPublishActive(false);
     StopMetaNetServer();
 }

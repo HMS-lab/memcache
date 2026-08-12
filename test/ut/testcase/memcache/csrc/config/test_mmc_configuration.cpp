@@ -550,6 +550,21 @@ TEST_F(TestMmcConfiguration, LogOutputTargetEnumConversionTest)
     ASSERT_EQ(config6.logOutputTarget, LOG_OUTPUT_TARGET_BOTH);
 }
 
+TEST_F(TestMmcConfiguration, EvictCheckIntervalDefaultsAndCanBeDisabled)
+{
+    MetaServiceConfig metaConfig;
+    metaConfig.LoadDefault();
+
+    mmc_meta_service_config_t defaultConfig{};
+    metaConfig.GetMetaServiceConfig(defaultConfig);
+    EXPECT_EQ(defaultConfig.evictCheckIntervalSeconds, 5U);
+
+    metaConfig.Set(ConfConstant::OCK_MMC_EVICT_CHECK_INTERVAL_SECONDS.first, static_cast<uint64_t>(0));
+    mmc_meta_service_config_t disabledConfig{};
+    metaConfig.GetMetaServiceConfig(disabledConfig);
+    EXPECT_EQ(disabledConfig.evictCheckIntervalSeconds, 0U);
+}
+
 TEST_F(TestMmcConfiguration, DynamicConfigDefaultsInLocalServiceConfig)
 {
     ClientConfig clientConfig;

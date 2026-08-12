@@ -88,6 +88,7 @@ typedef struct {
     /* ZMQ transport plugin config (independent of kv_events). */
     mmc_zmq_config_t zmq;
     uint64_t pendingWaitTimeoutMs;
+    uint32_t evictCheckIntervalSeconds;
 } mmc_meta_service_config_t;
 
 typedef struct {

@@ -196,6 +196,10 @@ public:
                       VUInt64Range::Create(OCK_MMC_METRICS_REPORT_INTERVAL_SECONDS.first, MIN_INTERVAL_SECONDS,
                                            MAX_INTERVAL_SECONDS),
                       0);
+        AddUInt64Conf(OCK_MMC_EVICT_CHECK_INTERVAL_SECONDS,
+                      VUInt64Range::Create(OCK_MMC_EVICT_CHECK_INTERVAL_SECONDS.first, MIN_INTERVAL_SECONDS,
+                                           MAX_INTERVAL_SECONDS),
+                      0);
         AddBoolConf(OCK_MMC_META_HA_ENABLE, VStrEnum::Create(OCK_MMC_META_HA_ENABLE.first, BOOL_ENUM_STR), 0);
         AddBoolConf(OCK_MMC_META_BACKUP_ENABLE, VStrEnum::Create(OCK_MMC_META_BACKUP_ENABLE.first, BOOL_ENUM_STR), 0);
         AddStrConf(OCK_MMC_LOG_LEVEL, VStrEnum::Create(OCK_MMC_LOG_LEVEL.first, LOG_LEVEL_ENUM_STR), 0);
@@ -318,6 +322,7 @@ public:
             config.logOutputTarget = LOG_OUTPUT_TARGET_FILE;
         }
         config.metricsReportIntervalSeconds = GetUInt64(ConfConstant::OCK_MMC_METRICS_REPORT_INTERVAL_SECONDS);
+        config.evictCheckIntervalSeconds = GetUInt64(ConfConstant::OCK_MMC_EVICT_CHECK_INTERVAL_SECONDS);
         GetAccTlsConfig(config.accTlsConfig);
         GetConfigStoreTlsConfig(config.configStoreTlsConfig);
         config.kvEvents.enable = GetBool(ConfConstant::OCK_MMC_KV_EVENTS_ENABLE);
