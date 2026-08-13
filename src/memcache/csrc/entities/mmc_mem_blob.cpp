@@ -100,8 +100,9 @@ Result MmcMemBlob::Backup(const std::string &key)
         return MMC_META_BACKUP_ERROR;
     }
     MmcMemBlobDesc desc = GetDesc();
-    MMC_LOG_DEBUG("Backup add " << key << " for blob: " << desc);
-    return mmcBackupPtr->Add(key, desc);
+    uint32_t op = IsRewarmOrigin() ? META_BACKUP_ADD_REWARM : META_BACKUP_ADD;
+    MMC_LOG_DEBUG("Backup add " << key << " for blob: " << desc << " op=" << op);
+    return mmcBackupPtr->Add(key, desc, op);
 }
 
 Result MmcMemBlob::BackupRemove(const std::string &key)

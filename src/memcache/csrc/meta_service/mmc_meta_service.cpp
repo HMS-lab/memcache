@@ -18,6 +18,7 @@
 #include "mmc_ref.h"
 #include "mmc_client_metric_store.h"
 #include "mmc_meta_mgr_proxy.h"
+#include "mmc_meta_metric_manager.h"
 #include "mmc_meta_net_server.h"
 #include "mmc_rest_api_facade.h"
 #include "mmc_smem_bm_helper.h"
@@ -70,21 +71,34 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
     netOptions_.logFunc = SPDLOG_LogMessage;
     netOptions_.logLevel = options_.logLevel;
 
-    metaBackUpMgrPtr_ = MMCMetaBackUpMgrFactory::GetInstance("DefaultMetaBackup");
-    MMCMetaBackUpConfPtr defaultPtr = MmcMakeRef<MMCMetaBackUpConfDefault>(metaNetServer_).Get();
-    MMC_ASSERT_LOG_AND_RETURN(metaBackUpMgrPtr_ != nullptr, "metaBackUpMgrPtr_ is nullptr", MMC_MALLOC_FAILED);
-    if (options.haEnable || options.backupEnable) {
-        MMC_RETURN_ERROR(metaBackUpMgrPtr_->Start(defaultPtr), "metaBackUpMgr start failed");
-    }
-
     metaMgrProxy_ = MmcMakeRef<MmcMetaMgrProxy>(metaNetServer_).Get();
     MmcMetaExtConfig extConfig{};
     extConfig.prefetchEnabled = options.prefetchEnabled;
-    extConfig.pendingWaitTimeoutMs = options.pendingWaitTimeoutMs;
+    extConfig.asyncFlushEnabled = options_.asyncFlushEnabled;
+    extConfig.pendingWaitTimeoutMs = options_.pendingWaitTimeoutMs;
     MMC_RETURN_ERROR(metaMgrProxy_->Start(options_.leaseTtlMs, options.evictThresholdHigh, options.evictThresholdLow,
                                           options.rewarmDramWatermark, extConfig, options.evictYieldInterval,
                                           options.evictYieldDurationUs),
                      "Failed to start meta mgr proxy of meta service " << name_);
+
+    metaBackUpMgrPtr_ = MMCMetaBackUpMgrFactory::GetInstance("DefaultMetaBackup");
+    auto backupConf = MmcMakeRef<MMCMetaBackUpConfDefault>(metaNetServer_);
+    MMC_ASSERT_LOG_AND_RETURN(backupConf.Get() != nullptr, "backupConf.Get() is nullptr", MMC_MALLOC_FAILED);
+    MMC_ASSERT_LOG_AND_RETURN(metaBackUpMgrPtr_ != nullptr, "metaBackUpMgrPtr_ is nullptr", MMC_MALLOC_FAILED);
+    // async flush 复用 backup 通道，可独立拉起，不再要求 HA/backup 同时开启
+    if (options_.haEnable || options_.backupEnable || options_.asyncFlushEnabled) {
+        MMC_LOG_INFO("Meta backup channel starting, ha=" << options_.haEnable << ", backup=" << options_.backupEnable
+                                                         << ", async_flush=" << options_.asyncFlushEnabled);
+        backupConf->Setup(
+            options.asyncFlushIntervalMs, options.asyncFlushBatchLimit, options.asyncFlushEnabled,
+            std::bind(&MmcMetaService::IsSsdAvailable, this, std::placeholders::_1),
+            std::bind(&MmcMetaService::OnAsyncFlushComplete, this, std::placeholders::_1, std::placeholders::_2));
+        if (options.asyncFlushEnabled && metaMgrProxy_ != nullptr && metaMgrProxy_->GetMetaManager() != nullptr) {
+            backupConf->rewarmPool_ = metaMgrProxy_->GetMetaManager()->GetRewarmThreadPool();
+        }
+        MMCMetaBackUpConfPtr defaultPtr = Convert<MMCMetaBackUpConfDefault, MMCMetaBackUpConf>(backupConf);
+        MMC_RETURN_ERROR(metaBackUpMgrPtr_->Start(defaultPtr), "metaBackUpMgr start failed");
+    }
 
     NetEngineOptions configStoreOpt{};
     NetEngineOptions::ExtractIpPortFromUrl(options_.configStoreURL, configStoreOpt);
@@ -365,6 +379,27 @@ void MmcMetaService::StartMetricsReportTask()
     });
     if (ret != MMC_OK) {
         MMC_LOG_ERROR("Failed to start metrics report task");
+    }
+}
+
+bool MmcMetaService::IsSsdAvailable(uint32_t rank) const
+{
+    return metaMgrProxy_.Get() != nullptr && metaMgrProxy_->GetMetaManager().Get() != nullptr &&
+           metaMgrProxy_->GetMetaManager()->IsSsdAvailable(rank);
+}
+
+void MmcMetaService::OnAsyncFlushComplete(uint32_t rank,
+                                          const std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobs)
+{
+    auto &metricMgr = MmcMetaMetricManager::GetInstance();
+    if (metaMgrProxy_.Get() != nullptr && metaMgrProxy_->GetMetaManager().Get() != nullptr) {
+        for (const auto &[key, desc] : blobs) {
+            metaMgrProxy_->GetMetaManager()->AddSsdBlob(key, desc);
+            metricMgr.IncrementAsyncFlushBlobAdded(rank, desc.size_);
+        }
+        if (!blobs.empty()) {
+            metricMgr.IncrementAsyncFlushWriteCount(rank);
+        }
     }
 }
 

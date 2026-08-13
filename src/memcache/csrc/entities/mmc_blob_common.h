@@ -18,7 +18,7 @@
 #include "mmc_ref.h"
 namespace ock {
 namespace mmc {
-enum BackUpOperate { META_BACKUP_ADD = 0, META_BACKUP_REMOVE = 1 };
+enum BackUpOperate { META_BACKUP_ADD = 0, META_BACKUP_REMOVE = 1, META_BACKUP_ADD_REWARM = 2 };
 
 class MmcMemBlob;
 using MmcMemBlobPtr = MmcRef<MmcMemBlob>;

@@ -125,6 +125,9 @@ constexpr auto OCK_MMC_REWARM_DRAM_WATERMARK =
 constexpr auto OCK_MMC_PREFETCH_ENABLED = std::make_pair("ock.mmc.storage.prefetch.enabled", false);
 constexpr auto OCK_MMC_PENDING_WAIT_TIMEOUT_MS = std::make_pair("ock.mmc.storage.pending_wait.timeout", 300U);
 constexpr auto OCK_MMC_LOCAL_SERVICE_STORAGE_ENABLED = std::make_pair("ock.mmc.local_service.storage.enabled", false);
+constexpr auto OCK_MMC_ASYNC_FLUSH_ENABLED = std::make_pair("ock.mmc.storage.async_flush.enabled", false);
+constexpr auto OCK_MMC_ASYNC_FLUSH_INTERVAL_MS = std::make_pair("ock.mmc.storage.async_flush.interval_ms", 200);
+constexpr auto OCK_MMC_ASYNC_FLUSH_BATCH_LIMIT = std::make_pair("ock.mmc.storage.async_flush.batch_limit", 20);
 constexpr auto OCK_MMC_LOCAL_SERVICE_DRAM_BEST_EFFORT =
     std::make_pair("ock.mmc.local_service.dram.best_effort.enabled", false);
 
@@ -191,6 +194,14 @@ constexpr uint64_t DEFAULT_BATCH_CHUNK_SIZE = 8 * MB_MEM_BYTES;
 
 constexpr uint64_t MIN_INTERVAL_SECONDS = 0;
 constexpr uint64_t MAX_INTERVAL_SECONDS = 86400;
+
+constexpr int MIN_FLUSH_INTERVAL_MS = 1;
+constexpr int MAX_FLUSH_INTERVAL_MS = 60000;
+constexpr int MIN_FLUSH_BATCH_LIMIT = 1;
+constexpr int MAX_FLUSH_BATCH_LIMIT = 65536;
+
+constexpr int MIN_PENDING_WAIT_TIMEOUT_MS = 1;
+constexpr int MAX_PENDING_WAIT_TIMEOUT_MS = 60000;
 
 } // namespace mmc
 } // namespace ock

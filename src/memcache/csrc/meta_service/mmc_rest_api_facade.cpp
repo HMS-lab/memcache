@@ -662,6 +662,9 @@ Result MmcRestApiFacade::BuildMetricsSummary(bool serviceReady, std::string &res
         << " rewarm_fail=" << metricSnapshot.rewarmFailCount
         << " rewarm_bytes_total=" << metricSnapshot.rewarmBytesCount
         << " rewarm_bytes_current=" << metricSnapshot.rewarmBytesCurrent
+        << " async_flush_blobs_added=" << metricSnapshot.asyncFlushBlobAdded
+        << " async_flush_bytes=" << metricSnapshot.asyncFlushBlobBytes
+        << " async_flush_writes=" << metricSnapshot.asyncFlushWriteCount
         << " get_hit_dram=" << metricSnapshot.getHitDramCount << " get_hit_ssd=" << metricSnapshot.getHitSsdCount
         << " hbm_used=" << BuildUsedText(hbmUsage) << " dram_used=" << BuildUsedText(dramUsage)
         << " ssd_used=" << BuildUsedText(ssdUsage) << " alloc_req=" << metricSnapshot.allocRequestCount
@@ -727,6 +730,9 @@ Result MmcRestApiFacade::BuildMetricsSummary(bool serviceReady, std::string &res
         AppendPerRankText(oss, "rewarm_fail_by_rank", metricSnapshot.rewarmFailCountByRank);
         AppendPerRankText(oss, "rewarm_bytes_by_rank", metricSnapshot.rewarmBytesByRank);
         AppendPerRankText(oss, "rewarm_bytes_current_by_rank", metricSnapshot.rewarmBytesCurrentByRank);
+        AppendPerRankText(oss, "async_flush_blobs_added_by_rank", metricSnapshot.asyncFlushBlobAddedByRank);
+        AppendPerRankText(oss, "async_flush_bytes_by_rank", metricSnapshot.asyncFlushBlobBytesByRank);
+        AppendPerRankText(oss, "async_flush_writes_by_rank", metricSnapshot.asyncFlushWriteCountByRank);
     }
     result = oss.str();
     return MMC_OK;
@@ -781,6 +787,10 @@ Result MmcRestApiFacade::BuildPrometheusMetrics(bool serviceReady, std::string &
         AppendPerRankPrometheus(oss, "memcache_get_hits_dram_total", metricSnapshot.getHitDramCountByRank);
         AppendPerRankPrometheus(oss, "memcache_get_hits_ssd_total", metricSnapshot.getHitSsdCountByRank);
         AppendPerRankPrometheus(oss, "memcache_rewarm_total", metricSnapshot.rewarmCountByRank);
+        AppendPerRankPrometheus(oss, "memcache_async_flush_blobs_added_total",
+                                metricSnapshot.asyncFlushBlobAddedByRank);
+        AppendPerRankPrometheus(oss, "memcache_async_flush_bytes_total", metricSnapshot.asyncFlushBlobBytesByRank);
+        AppendPerRankPrometheus(oss, "memcache_async_flush_writes_total", metricSnapshot.asyncFlushWriteCountByRank);
         AppendPerRankPrometheus(oss, "memcache_rewarm_failed_total", metricSnapshot.rewarmFailCountByRank);
         AppendPerRankPrometheus(oss, "memcache_rewarm_bytes_total", metricSnapshot.rewarmBytesByRank);
         AppendPerRankPrometheus(oss, "memcache_rewarm_bytes_current", metricSnapshot.rewarmBytesCurrentByRank);
@@ -865,6 +875,15 @@ Result MmcRestApiFacade::BuildPrometheusMetrics(bool serviceReady, std::string &
     AppendMetricHeader(oss, "memcache_evict_mem_delete_total", "Total number of memory tier eviction delete operations",
                        "counter");
     AppendMetricValue(oss, "memcache_evict_mem_delete_total", metricSnapshot.evictMemDeleteCount);
+    AppendMetricHeader(oss, "memcache_async_flush_blobs_added_total",
+                       "Total number of SSD blobs registered via async flush", "counter");
+    AppendMetricValue(oss, "memcache_async_flush_blobs_added_total", metricSnapshot.asyncFlushBlobAdded);
+    AppendMetricHeader(oss, "memcache_async_flush_bytes_total", "Total bytes flushed to SSD via async flush",
+                       "counter");
+    AppendMetricValue(oss, "memcache_async_flush_bytes_total", metricSnapshot.asyncFlushBlobBytes);
+    AppendMetricHeader(oss, "memcache_async_flush_writes_total", "Total number of async flush SSD write operations",
+                       "counter");
+    AppendMetricValue(oss, "memcache_async_flush_writes_total", metricSnapshot.asyncFlushWriteCount);
     AppendMetricHeader(oss, "memcache_get_hits_dram_total", "Total number of Get hits served from DRAM", "counter");
     AppendMetricValue(oss, "memcache_get_hits_dram_total", metricSnapshot.getHitDramCount);
     AppendMetricHeader(oss, "memcache_get_hits_ssd_total", "Total number of Get hits served from SSD (rewarm)",

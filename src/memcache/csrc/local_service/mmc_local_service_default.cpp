@@ -93,11 +93,11 @@ Result MmcLocalServiceDefault::Start(const mmc_local_service_config_t &config)
         }
     }
 
-    ubsioEventPool_ = MmcMakeRef<MmcThreadPool>("io_evt_pool", UBSIO_EVENT_POOL_SIZE);
-    MMC_ASSERT_LOG_AND_RETURN(ubsioEventPool_ != nullptr, "ubsioEventPool_ is nullptr", MMC_MALLOC_FAILED);
-    MMC_RETURN_ERROR(ubsioEventPool_->Start(), "ubsio event pool start failed");
-
     if (options_.storageEnabled) {
+        ubsioEventPool_ = MmcMakeRef<MmcThreadPool>("io_evt_pool", UBSIO_EVENT_POOL_SIZE);
+        MMC_ASSERT_LOG_AND_RETURN(ubsioEventPool_ != nullptr, "ubsioEventPool_ is nullptr", MMC_MALLOC_FAILED);
+        MMC_RETURN_ERROR(ubsioEventPool_->Start(), "ubsio event pool start failed");
+
         if (InitUbsIo(config.deviceId, config.configFilePath) != MMC_OK) {
             MMC_LOG_ERROR("Failed to init ubsIo of local service " << name_);
             ubsioEventPool_->Destroy();
@@ -116,15 +116,18 @@ Result MmcLocalServiceDefault::Start(const mmc_local_service_config_t &config)
             ubsIoProxyPtr_->SetMetaEventCallback(nullptr);
             ubsIoProxyPtr_->DestroyUbsIo();
         }
-        ubsioEventPool_->Destroy();
+        if (ubsioEventPool_ != nullptr) {
+            ubsioEventPool_->Destroy();
+        }
         DestroyBm();
         metaNetClient_->Stop();
         return MMC_ERROR;
     }
+    metaNetClient_->SetBackupPool(ubsioEventPool_);
     metaNetClient_->RegisterRetryHandler(
         std::bind(&MmcLocalServiceDefault::RegisterBm, this),
         std::bind(&MmcLocalServiceDefault::UpdateMetaBackup, this, std::placeholders::_1, std::placeholders::_2,
-                  std::placeholders::_3),
+                  std::placeholders::_3, std::placeholders::_4, std::placeholders::_5),
         std::bind(&MmcLocalServiceDefault::CopyBlob, this, std::placeholders::_1, std::placeholders::_2,
                   std::placeholders::_3),
         std::bind(&MmcLocalServiceDefault::BlobDelete, this, std::placeholders::_1, std::placeholders::_2),
@@ -359,61 +362,187 @@ Result MmcLocalServiceDefault::InitUbsIo(int32_t deviceId, const std::string &co
 }
 
 Result MmcLocalServiceDefault::UpdateMetaBackup(const std::vector<uint32_t> &ops, const std::vector<std::string> &keys,
-                                                const std::vector<MmcMemBlobDesc> &blobs)
+                                                const std::vector<MmcMemBlobDesc> &blobs, bool asyncFlush,
+                                                std::vector<Result> &keyResults)
 {
-    std::lock_guard<std::mutex> guard(blobMutex_);
-
     const auto opCount = ops.size();
     const auto keyCount = keys.size();
     const auto blobCount = blobs.size();
     auto length = keyCount;
-    // 检查ops、keys和blobs大小是否一致，避免越界访问
-    if (keyCount != blobCount || keyCount != opCount || opCount != blobCount) {
-        MMC_LOG_ERROR("Local service replicate warning, length is not equal: opSize="
-                      << opCount << ", keySize=" << keyCount << ", blobSize=" << blobCount);
-        length = std::min({opCount, keyCount, blobCount});
+    if (keyCount != blobCount || keyCount != opCount) {
+        MMC_LOG_ERROR("Local service replicate error, length mismatch: opSize=" << opCount << ", keySize=" << keyCount
+                                                                                << ", blobSize=" << blobCount);
+        return MMC_INVALID_PARAM;
     }
 
-    for (size_t i = 0; i < length; i++) {
-        if (ops[i] == META_BACKUP_ADD) {
-            // ADD: 同介质覆盖写入，不同介质追加
-            auto &descs = blobMap_[keys[i]];
-            bool found = false;
-            for (auto &desc : descs) {
-                if (desc.mediaType_ == blobs[i].mediaType_) {
-                    if (!(desc == blobs[i])) {
-                        desc = blobs[i];
-                    }
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                descs.push_back(blobs[i]);
-            }
-        } else if (ops[i] == META_BACKUP_REMOVE) {
-            // REMOVE: 精确匹配删除，不匹配说明是 stale remove
-            auto it = blobMap_.find(keys[i]);
-            if (it != blobMap_.end()) {
-                auto &descs = it->second;
-                for (auto dit = descs.begin(); dit != descs.end(); ++dit) {
-                    if (*dit == blobs[i]) {
-                        descs.erase(dit);
-                        break;
-                    }
-                }
-                if (descs.empty()) {
-                    blobMap_.erase(it);
-                }
-            }
-        } else {
-            // 永远走不到这里
-            MMC_LOG_ERROR("meta backup error, key: " << keys[i]);
-        }
-    }
+    std::vector<size_t> flushTasks = ProcessBackupMetadata(ops, keys, blobs, asyncFlush, length, keyResults);
+    MMC_LOG_DEBUG("ProcessBackupMetadata done, asyncFlush=" << asyncFlush << ", flushTasks=" << flushTasks.size());
+
+    BatchFlushToSsd(flushTasks, keys, blobs, keyResults);
 
     MMC_LOG_DEBUG("Handle " << length << " metas backup");
     return MMC_OK;
+}
+
+static bool AddDesc(std::vector<MmcMemBlobDesc> &descs, const MmcMemBlobDesc &blob)
+{
+    for (auto &d : descs) {
+        if (d.mediaType_ == blob.mediaType_) {
+            if (d != blob) {
+                MMC_LOG_WARN("duplicate blob desc for same mediaType, old=" << d << ", new=" << blob);
+                return false;
+            }
+            return true;
+        }
+    }
+    descs.push_back(blob);
+    return true;
+}
+
+static bool EraseDesc(std::map<std::string, std::vector<MmcMemBlobDesc>> &blobMap, const std::string &key,
+                      const MmcMemBlobDesc &blob)
+{
+    auto it = blobMap.find(key);
+    if (it == blobMap.end()) {
+        MMC_LOG_WARN("backup remove key not found in blobMap, key=" << key);
+        return false;
+    }
+    auto &descs = it->second;
+    for (auto dit = descs.begin(); dit != descs.end(); ++dit) {
+        if (*dit == blob) {
+            descs.erase(dit);
+            if (descs.empty()) {
+                blobMap.erase(it);
+            }
+            return true;
+        }
+    }
+    MMC_LOG_WARN("backup remove blob desc mismatch in blobMap, key=" << key << ", blob=" << blob);
+    return false;
+}
+
+std::vector<size_t> MmcLocalServiceDefault::ProcessBackupMetadata(const std::vector<uint32_t> &ops,
+                                                                  const std::vector<std::string> &keys,
+                                                                  const std::vector<MmcMemBlobDesc> &blobs,
+                                                                  bool asyncFlush, size_t length,
+                                                                  std::vector<Result> &keyResults)
+{
+    keyResults.resize(length, MMC_ERROR);
+    std::vector<size_t> flushTasks;
+    std::lock_guard<std::mutex> guard(blobMutex_);
+    size_t unexpectedOps = 0;
+    for (size_t i = 0; i < length; i++) {
+        if (ops[i] == META_BACKUP_ADD) {
+            auto &descs = blobMap_[keys[i]];
+            if (!AddDesc(descs, blobs[i])) {
+                keyResults[i] = MMC_DUPLICATED_OBJECT;
+                continue;
+            }
+            if (asyncFlush && blobs[i].mediaType_ == MEDIA_DRAM && ubsIoProxyPtr_ != nullptr &&
+                bmProxyPtr_ != nullptr) {
+                flushTasks.push_back(i);
+            } else if (asyncFlush && blobs[i].mediaType_ == MEDIA_DRAM) {
+                MMC_LOG_WARN("async flush skipped, ubs or bm not available, key=" << keys[i]);
+            } else {
+                keyResults[i] = MMC_OK;
+            }
+        } else if (ops[i] == META_BACKUP_ADD_REWARM) {
+            auto &descs = blobMap_[keys[i]];
+            if (AddDesc(descs, blobs[i])) {
+                keyResults[i] = MMC_OK;
+            } else {
+                keyResults[i] = MMC_DUPLICATED_OBJECT;
+            }
+        } else if (ops[i] == META_BACKUP_REMOVE) {
+            bool removed = EraseDesc(blobMap_, keys[i], blobs[i]);
+            keyResults[i] = removed ? MMC_OK : MMC_UNMATCHED_KEY;
+        } else {
+            ++unexpectedOps;
+            MMC_LOG_ERROR("meta backup error, key: " << keys[i]);
+        }
+    }
+    if (unexpectedOps > 0) {
+        MMC_LOG_ERROR("ProcessBackupMetadata unexpected op count=" << unexpectedOps << "/" << length);
+    }
+    return flushTasks;
+}
+
+void MmcLocalServiceDefault::CollectFlushParams(const std::vector<size_t> &indices,
+                                                const std::vector<std::string> &keys,
+                                                const std::vector<MmcMemBlobDesc> &blobs,
+                                                std::vector<Result> &keyResults, BatchIoParams &out)
+{
+    for (size_t idx : indices) {
+        uint64_t srcVa = 0;
+        TP_TRACE_BEGIN(TP_MMC_META_ASYNC_FLUSH_RESOLVE_VA);
+        Result gvaRet = bmProxyPtr_->GvaToVa(blobs[idx].gva_, MEDIA_DRAM, srcVa);
+        TP_TRACE_END(TP_MMC_META_ASYNC_FLUSH_RESOLVE_VA, gvaRet);
+        if (gvaRet != MMC_OK) {
+            MMC_LOG_WARN("Failed to resolve VA for SSD flush, key=" << keys[idx] << ", gva=" << blobs[idx].gva_);
+            keyResults[idx] = gvaRet;
+            continue;
+        }
+        out.keys.push_back(keys[idx]);
+        out.vas.push_back(reinterpret_cast<void *>(srcVa));
+        out.sizes.push_back(blobs[idx].size_);
+        out.validIdx.push_back(idx);
+    }
+}
+
+size_t MmcLocalServiceDefault::ExecuteFlushBatch(BatchIoParams &params, const std::vector<MmcMemBlobDesc> &blobs,
+                                                 std::vector<Result> &keyResults)
+{
+    std::vector<int> batchResults(params.keys.size(), MMC_ERROR);
+    TP_TRACE_BEGIN(TP_MMC_META_ASYNC_FLUSH_BATCH_PUT);
+    Result batchRet = ubsIoProxyPtr_->BatchPut(params.keys, params.vas, params.sizes, batchResults);
+    TP_TRACE_END(TP_MMC_META_ASYNC_FLUSH_BATCH_PUT, batchRet);
+
+    size_t successCnt = 0;
+    for (size_t i = 0; i < params.keys.size(); ++i) {
+        if (batchRet == MMC_OK && batchResults[i] == 0) {
+            MmcMemBlobDesc ssdDesc = blobs[params.validIdx[i]];
+            ssdDesc.mediaType_ = MEDIA_SSD;
+            ssdDesc.gva_ = 0;
+            // 刷盘成功并写入 blobMap 后才返回成功，保证 keyResults 反映完整结果
+            {
+                std::lock_guard<std::mutex> guard(blobMutex_);
+                auto &descs = blobMap_[params.keys[i]];
+                if (AddDesc(descs, ssdDesc)) {
+                    keyResults[params.validIdx[i]] = MMC_OK;
+                    ++successCnt;
+                } else {
+                    keyResults[params.validIdx[i]] = MMC_DUPLICATED_OBJECT;
+                    MMC_LOG_WARN("Failed to record SSD desc in blobMap, key=" << params.keys[i]);
+                }
+            }
+        } else {
+            MMC_LOG_WARN("Failed to flush blob to SSD, key=" << params.keys[i] << ", batchRet=" << batchRet
+                                                             << ", result=" << batchResults[i]);
+            // UBS 返回码与 MMC 错误码不是一个体系，统一映射为 MMC_ERROR，具体码留在日志中
+            keyResults[params.validIdx[i]] = MMC_ERROR;
+        }
+    }
+    return successCnt;
+}
+
+void MmcLocalServiceDefault::BatchFlushToSsd(const std::vector<size_t> &indices, const std::vector<std::string> &keys,
+                                             const std::vector<MmcMemBlobDesc> &blobs, std::vector<Result> &keyResults)
+{
+    BatchIoParams params;
+    CollectFlushParams(indices, keys, blobs, keyResults, params);
+    if (params.keys.empty()) {
+        if (!indices.empty()) {
+            MMC_LOG_WARN("BatchFlushToSsd all GvaToVa failed, count=" << indices.size());
+        }
+        return;
+    }
+
+    size_t successCnt = ExecuteFlushBatch(params, blobs, keyResults);
+    if (successCnt < indices.size()) {
+        MMC_LOG_WARN("BatchFlushToSsd completed, success=" << successCnt << "/" << indices.size());
+    } else {
+        MMC_LOG_DEBUG("BatchFlushToSsd completed, flushed " << successCnt << " blobs");
+    }
 }
 
 Result MmcLocalServiceDefault::CopyBlob(const std::string &key, const MmcMemBlobDesc &src, const MmcMemBlobDesc &dst)
@@ -627,7 +756,7 @@ void MmcLocalServiceDefault::ExecuteBatchIo(BatchIoParams &params, bool srcIsSsd
     if (params.keys.empty()) {
         return;
     }
-    std::vector<int> batchResults(params.keys.size(), -1);
+    std::vector<int> batchResults(params.keys.size(), MMC_ERROR);
     Result batchRet = MMC_ERROR;
     if (srcIsSsd) {
         TP_TRACE_BEGIN(TP_MMC_LOCAL_UBS_IO_BATCH_GET);
@@ -667,10 +796,14 @@ void MmcLocalServiceDefault::HandleUbsIoMetaEvents(int type, const std::vector<s
         request.rank_ = options_.rankId;
         request.keys_ = keys;
         UbsIoMetaDeleteResponse response;
+        TP_TRACE_BEGIN(TP_MMC_UBS_IO_META_DELETE_RPC);
         Result ret = SyncCallMeta(request, response, TIMEOUT_THIRTY);
+        TP_TRACE_END(TP_MMC_UBS_IO_META_DELETE_RPC, ret);
         if (ret != MMC_OK || response.ret_ != MMC_OK) {
             MMC_LOG_WARN("UBS IO meta DELETE RPC failed, ret=" << ret << ", resp=" << response.ret_
                                                                << ", keyCount=" << keys.size());
+        } else {
+            MMC_LOG_INFO("UBS IO meta DELETE RPC success, keyCount=" << keys.size());
         }
     } else {
         MMC_LOG_ERROR("unknown UBS IO meta event type=" << type << ", keyCount=" << keys.size());

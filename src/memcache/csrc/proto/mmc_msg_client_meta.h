@@ -494,6 +494,7 @@ struct UpdateRequest : MsgBase {
 
 struct Response : MsgBase {
     Result ret_ = 0;
+    std::vector<Result> keyResults_;
 
     Response() : MsgBase{0, ML_UPDATE_REQ, 0} {}
     explicit Response(const Result &ret) : MsgBase{0, ML_UPDATE_REQ, 0}, ret_(ret) {};
@@ -504,6 +505,7 @@ struct Response : MsgBase {
         packer.Serialize(msgId);
         packer.Serialize(destRankId);
         packer.Serialize(ret_);
+        packer.Serialize(keyResults_);
         return MMC_OK;
     }
 
@@ -513,6 +515,7 @@ struct Response : MsgBase {
         packer.Deserialize(msgId);
         packer.Deserialize(destRankId);
         packer.Deserialize(ret_);
+        packer.Deserialize(keyResults_);
         return MMC_OK;
     }
 };
@@ -621,6 +624,7 @@ struct MetaReplicateRequest : public MsgBase {
     std::vector<uint32_t> ops_;
     std::vector<std::string> keys_;
     std::vector<MmcMemBlobDesc> blobs_; /* pointers of blobs */
+    bool asyncFlush_ = false;
 
     MetaReplicateRequest() : MsgBase{0, LM_META_REPLICATE_REQ, 0} {}
     MetaReplicateRequest(const std::vector<uint32_t> &ops, const std::vector<std::string> &keys,
@@ -636,6 +640,7 @@ struct MetaReplicateRequest : public MsgBase {
         packer.Serialize(ops_);
         packer.Serialize(keys_);
         packer.Serialize(blobs_);
+        packer.Serialize(asyncFlush_);
         return MMC_OK;
     }
 
@@ -647,6 +652,7 @@ struct MetaReplicateRequest : public MsgBase {
         packer.Deserialize(ops_);
         packer.Deserialize(keys_);
         packer.Deserialize(blobs_);
+        packer.Deserialize(asyncFlush_);
         return MMC_OK;
     }
 

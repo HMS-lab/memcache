@@ -108,10 +108,20 @@ struct MmcMemMetaDesc {
     {
         return size_;
     };
+
+    void FillFromMeta(const MmcMemObjMetaPtr &memObj, std::vector<MmcMemBlobDesc> blobDescs)
+    {
+        prot_ = memObj->Prot();
+        priority_ = memObj->Priority();
+        size_ = memObj->Size();
+        numBlobs_ = static_cast<uint8_t>(blobDescs.size());
+        blobs_ = std::move(blobDescs);
+    }
 };
 
 struct MmcMetaExtConfig {
     bool prefetchEnabled = false;
+    bool asyncFlushEnabled = false;
     uint64_t pendingWaitTimeoutMs = 300U;
 };
 
@@ -367,6 +377,7 @@ public:
 
     // UBS IO metadata event handlers
     Result RemoveSsdBlob(const std::string &key, uint32_t rank);
+    Result AddSsdBlob(const std::string &key, const MmcMemBlobDesc &desc);
 
     bool IsSsdAvailable(uint32_t rank) const
     {
@@ -423,25 +434,32 @@ private:
 
 private:
     struct RewarmEntry {
-        size_t index;
-        MmcMemObjMetaPtr memObj;
-        MmcMemBlobPtr ssdBlob;
+        size_t index = 0;
+        MmcMemObjMetaPtr memObj = nullptr;
+        MmcMemBlobPtr ssdBlob = nullptr;
         MmcMemBlobDesc ssdDesc;
-        MmcMemBlobPtr dstBlob;
+        MmcMemBlobPtr dstBlob = nullptr;
         MmcMemBlobDesc dstDesc;
         uint32_t opRankId = 0;
         uint32_t opSeq = 0;
+
+        RewarmEntry() = default;
+
+        RewarmEntry(size_t idx, MmcMemObjMetaPtr mo, MmcMemBlobPtr sb, const MmcMemBlobDesc &sd, MmcMemBlobPtr db,
+                    const MmcMemBlobDesc &dd, uint32_t rid, uint32_t seq)
+            : index(idx), memObj(mo), ssdBlob(sb), ssdDesc(sd), dstBlob(db), dstDesc(dd), opRankId(rid), opSeq(seq)
+        {}
+    };
+
+    struct DeferredLockEntry {
+        size_t index;
+        MmcMemObjMetaPtr memObj;
     };
 
     struct PendingRewarmWait {
         size_t index;
         MmcMemObjMetaPtr memObj;
         MmcMemBlobPtr pendingBlob;
-    };
-
-    struct DeferredLockEntry {
-        size_t index;
-        MmcMemObjMetaPtr memObj;
     };
 
     struct BatchRpcData {

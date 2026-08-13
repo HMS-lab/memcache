@@ -127,7 +127,7 @@ public:
             return MMC_INVALID_PARAM;
         }
         if (blob->Type() == MEDIA_SSD) {
-            MMC_LOG_WARN("Free SSD blob (UBS IO managed), skipping allocator release, rank: " << blob->Rank());
+            MMC_LOG_DEBUG("Free SSD blob (UBS IO managed), skipping allocator release, rank: " << blob->Rank());
             return MMC_OK;
         }
         globalAllocLock_.LockRead();

@@ -14,20 +14,21 @@
 
 #include "mmc_meta_backup_mgr_factory.h"
 #include "mmc_msg_client_meta.h"
+#include "mmc_ptracer.h"
 
 namespace ock {
 namespace mmc {
-constexpr uint32_t BATCH_BACKUP_SIZE = 1024;
 
 std::map<std::string, MmcRef<MMCMetaBackUpMgr>> MMCMetaBackUpMgrFactory::instances_;
 std::mutex MMCMetaBackUpMgrFactory::instanceMutex_;
 
 void MMCMetaBackUpMgrDefault::BackupThreadFunc()
 {
+    auto interval = std::chrono::milliseconds(asyncFlushIntervalMs_);
     while (true) {
         {
             std::unique_lock<std::mutex> lock(backupThreadLock_);
-            backupThreadCv_.wait(lock, [this] { return backupList_.size() || !started_; });
+            backupThreadCv_.wait_for(lock, interval, [this] { return !backupList_.empty() || !started_; });
         }
         if (!started_) {
             MMC_LOG_INFO("backup thread destroy, thread id " << pthread_self());
@@ -40,70 +41,125 @@ void MMCMetaBackUpMgrDefault::BackupThreadFunc()
 
 void MMCMetaBackUpMgrDefault::SendBackup2Local()
 {
-    MetaReplicateRequest request;
-    Response response;
-    uint32_t haveCount = 1;
-    std::vector<uint32_t> ops;
-    std::vector<std::string> keys;
-    std::vector<MmcMemBlobDesc> blobs;
-    uint32_t rank;
-    while (haveCount && started_) {
-        {
-            std::lock_guard<std::mutex> lg(backupThreadLock_);
-            rank = PopMetas2Backup(ops, keys, blobs);
-            haveCount = backupList_.size();
-            MMC_LOG_DEBUG("BackupThreadFunc bm rank=" << rank);
-        }
-        if (metaNetServer_ == nullptr) {
-            MMC_LOG_WARN("MMCMetaBackUpMgr back up net not start");
-            continue;
-        }
+    if (metaNetServer_ == nullptr) {
+        MMC_LOG_WARN("MMCMetaBackUpMgr back up net not start");
+        return;
+    }
 
-        if (!keys.empty()) {
-            request.ops_ = std::move(ops);
-            request.keys_ = std::move(keys);
-            request.blobs_ = std::move(blobs);
-            Result ret = metaNetServer_->SyncCall(rank, request, response, 60);
-            if (ret != MMC_OK) {
-                MMC_LOG_WARN("mmc meta unable to back up, bm rank " << rank << ", keys: " << request.KeysString());
+    // 锁内 splice 移出全部（O(1)），锁外按 rank 分组
+    std::map<uint32_t, std::vector<MetaBackUpOperate>> rankGroups;
+    std::list<MetaBackUpOperate> drained;
+    {
+        std::lock_guard<std::mutex> lg(backupThreadLock_);
+        drained.splice(drained.begin(), backupList_);
+    }
+    for (auto it = drained.begin(); it != drained.end();) {
+        auto &group = rankGroups[it->desc_.rank_];
+        if (!asyncFlushEnabled_ || group.size() < asyncFlushBatchLimit_) {
+            group.push_back(std::move(*it));
+            it = drained.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    if (!drained.empty()) {
+        std::lock_guard<std::mutex> lg(backupThreadLock_);
+        backupList_.splice(backupList_.begin(), drained);
+    }
+
+    if (rankGroups.empty()) {
+        return;
+    }
+
+    MMC_LOG_DEBUG("Backup sending " << rankGroups.size() << " rank groups, async=" << asyncFlushEnabled_);
+    if (rewarmPool_ != nullptr) {
+        std::vector<std::future<void>> futures;
+        for (auto &[rank, entries] : rankGroups) {
+            auto future = rewarmPool_->Enqueue([this, rank, &entries]() { SendBackupForRank(rank, entries); });
+            if (!future.valid()) {
+                // 线程池不可用（如正在停止），原地处理，保证备份/刷盘请求不丢
+                MMC_LOG_WARN("backup pool unavailable, send backup for rank=" << rank << " inline");
+                SendBackupForRank(rank, entries);
+                continue;
             }
+            futures.push_back(std::move(future));
+        }
+        for (auto &f : futures) {
+            f.wait();
+        }
+    } else {
+        for (auto &[rank, entries] : rankGroups) {
+            SendBackupForRank(rank, entries);
         }
     }
 }
 
-uint32_t MMCMetaBackUpMgrDefault::PopMetas2Backup(std::vector<uint32_t> &ops, std::vector<std::string> &keys,
-                                                  std::vector<MmcMemBlobDesc> &blobs)
+void MMCMetaBackUpMgrDefault::SendBackupForRank(uint32_t rank, std::vector<MetaBackUpOperate> &entries)
 {
-    // 清空数组
-    ops.clear();
-    keys.clear();
-    blobs.clear();
-
-    // 获取目标bm rank
-    uint32_t rank = UINT32_MAX;
-    if (!backupList_.empty()) {
-        rank = backupList_.front().desc_.rank_;
+    MetaReplicateRequest request;
+    request.ops_.reserve(entries.size());
+    request.keys_.reserve(entries.size());
+    request.blobs_.reserve(entries.size());
+    for (auto &e : entries) {
+        request.ops_.push_back(e.op_);
+        request.keys_.push_back(std::move(e.key_));
+        request.blobs_.push_back(e.desc_);
     }
 
-    // 根据目标bm rank，尝试获取1024个待备份meta对象
-    uint32_t count = 0;
-    auto it = backupList_.begin();
-    while (it != backupList_.end()) {
-        const auto &opInfo = *it;
-        if (opInfo.desc_.rank_ == rank) {
-            ops.push_back(opInfo.op_);
-            keys.push_back(opInfo.key_);
-            blobs.push_back(opInfo.desc_);
-            it = backupList_.erase(it);
-            count++;
-        } else {
-            ++it;
-        }
-        if (count >= BATCH_BACKUP_SIZE) {
-            break;
+    if (asyncFlushEnabled_ && isSsdAvailableFunc_) {
+        request.asyncFlush_ = isSsdAvailableFunc_(rank);
+    }
+
+    MMC_LOG_DEBUG("Backup flush rank=" << rank << " keys=" << request.keys_.size()
+                                       << " asyncFlush=" << request.asyncFlush_);
+
+    Response response;
+    TP_TRACE_BEGIN(TP_MMC_META_ASYNC_FLUSH_RPC);
+    Result ret = metaNetServer_->SyncCall(rank, request, response, 60);
+    TP_TRACE_END(TP_MMC_META_ASYNC_FLUSH_RPC, ret);
+
+    if (ret != MMC_OK) {
+        MMC_LOG_ERROR("mmc meta back up failed, bm rank " << rank << ", keys: " << request.KeysString());
+        return;
+    }
+
+    if (!onAsyncFlushComplete_) {
+        return;
+    }
+
+    if (response.keyResults_.size() != request.ops_.size()) {
+        MMC_LOG_ERROR("keyResults size mismatch, response=" << response.keyResults_.size()
+                                                            << ", request=" << request.ops_.size());
+        return;
+    }
+
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> flushedBlobs;
+    for (size_t i = 0; i < response.keyResults_.size(); ++i) {
+        if (request.ops_[i] == META_BACKUP_ADD) {
+            if (!request.asyncFlush_) {
+                // 非刷盘模式：ADD 成功仅表示元数据已记录，不构造 SSD 副本
+                if (response.keyResults_[i] != MMC_OK) {
+                    MMC_LOG_WARN("backup add failed for key=" << request.keys_[i]
+                                                              << ", ret=" << response.keyResults_[i]);
+                }
+                continue;
+            }
+            if (response.keyResults_[i] == MMC_OK) {
+                MmcMemBlobDesc ssdDesc = request.blobs_[i];
+                ssdDesc.mediaType_ = MEDIA_SSD;
+                ssdDesc.gva_ = 0;
+                flushedBlobs.emplace_back(request.keys_[i], ssdDesc);
+            } else {
+                MMC_LOG_WARN("async flush failed for key=" << request.keys_[i] << ", ret=" << response.keyResults_[i]);
+            }
+        } else if (response.keyResults_[i] != MMC_OK) {
+            MMC_LOG_WARN("backup op failed, op=" << request.ops_[i] << ", key=" << request.keys_[i]
+                                                 << ", ret=" << response.keyResults_[i]);
         }
     }
-    return rank;
+    if (!flushedBlobs.empty()) {
+        onAsyncFlushComplete_(rank, flushedBlobs);
+    }
 }
 
 } // namespace mmc

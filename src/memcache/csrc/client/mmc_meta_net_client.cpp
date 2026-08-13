@@ -194,17 +194,32 @@ Result MetaNetClient::UpdateServerUrl(const std::string &url)
 
 Result MetaNetClient::HandleMetaReplicate(const NetContextPtr &context)
 {
-    MetaReplicateRequest req;
-    Response resp;
-    context->GetRequest<MetaReplicateRequest>(req);
-    if (replicateHandler_ != nullptr) {
-        resp.ret_ = replicateHandler_(req.ops_, req.keys_, req.blobs_);
-    } else {
-        MMC_LOG_ERROR("replicateHandler_ is nullptr");
-        resp.ret_ = MMC_ERROR;
-    }
+    auto handleReplicate = [this](const NetContextPtr &ctx) {
+        MetaReplicateRequest req;
+        Response resp;
+        ctx->GetRequest<MetaReplicateRequest>(req);
+        if (replicateHandler_ != nullptr) {
+            std::vector<Result> keyResults;
+            resp.ret_ = replicateHandler_(req.ops_, req.keys_, req.blobs_, req.asyncFlush_, keyResults);
+            resp.keyResults_ = std::move(keyResults);
+        } else {
+            MMC_LOG_ERROR("replicateHandler_ is nullptr");
+            resp.ret_ = MMC_ERROR;
+        }
+        return ctx->Reply(req.msgId, resp);
+    };
 
-    return context->Reply(req.msgId, resp);
+    if (backupPool_ != nullptr) {
+        auto ctx = context;
+        auto future = backupPool_->Enqueue([handleReplicate, ctx]() { handleReplicate(ctx); });
+        if (!future.valid()) {
+            // 线程池不可用（如正在停止），原地处理，保证备份/刷盘请求不丢
+            MMC_LOG_WARN("backup pool unavailable, process meta replicate inline");
+            return handleReplicate(context);
+        }
+        return MMC_OK;
+    }
+    return handleReplicate(context);
 }
 
 Result MetaNetClient::HandleBlobCopy(const NetContextPtr &context)

@@ -13,15 +13,19 @@
 #ifndef MF_HYBRID_MMC_META_BACKUP_MGR_DEFAULT_H
 #define MF_HYBRID_MMC_META_BACKUP_MGR_DEFAULT_H
 
+#include <atomic>
 #include <mutex>
 #include <thread>
 #include <functional>
 #include <list>
 #include <condition_variable>
+#include <future>
+#include <map>
 #include "mmc_ref.h"
 #include "mmc_logger.h"
 #include "mmc_types.h"
 #include "mmc_blob_common.h"
+#include "mmc_thread_pool.h"
 #include "mmc_meta_net_server.h"
 #include "mmc_meta_backup_mgr.h"
 
@@ -37,8 +41,25 @@ struct MetaBackUpOperate {
 
 struct MMCMetaBackUpConfDefault : public MMCMetaBackUpConf {
     MetaNetServerPtr serverPtr_;
+    uint32_t asyncFlushIntervalMs = 0;
+    uint32_t asyncFlushBatchLimit = 0;
+    bool asyncFlushEnabled = false;
+    MmcThreadPoolPtr rewarmPool_;
+    std::function<bool(uint32_t)> isSsdAvailableFunc_;
+    std::function<void(uint32_t, const std::vector<std::pair<std::string, MmcMemBlobDesc>> &)> onAsyncFlushComplete_;
 
     explicit MMCMetaBackUpConfDefault(MetaNetServerPtr serverPtr) : serverPtr_(serverPtr) {}
+
+    void Setup(
+        uint32_t intervalMs, uint32_t batchLimit, bool enabled, std::function<bool(uint32_t)> isSsdAvailableFunc,
+        std::function<void(uint32_t, const std::vector<std::pair<std::string, MmcMemBlobDesc>> &)> onAsyncFlushComplete)
+    {
+        asyncFlushIntervalMs = intervalMs;
+        asyncFlushBatchLimit = batchLimit;
+        asyncFlushEnabled = enabled;
+        isSsdAvailableFunc_ = std::move(isSsdAvailableFunc);
+        onAsyncFlushComplete_ = std::move(onAsyncFlushComplete);
+    }
 };
 using MMCMetaBackUpConfDefaultPtr = MmcRef<MMCMetaBackUpConfDefault>;
 
@@ -64,6 +85,12 @@ public:
             return MMC_INVALID_PARAM;
         }
         metaNetServer_ = defaultPtr->serverPtr_;
+        asyncFlushIntervalMs_ = defaultPtr->asyncFlushIntervalMs;
+        asyncFlushBatchLimit_ = defaultPtr->asyncFlushBatchLimit;
+        asyncFlushEnabled_ = defaultPtr->asyncFlushEnabled;
+        rewarmPool_ = defaultPtr->rewarmPool_;
+        isSsdAvailableFunc_ = defaultPtr->isSsdAvailableFunc_;
+        onAsyncFlushComplete_ = defaultPtr->onAsyncFlushComplete_;
         started_ = true;
         backupThread_ = std::thread(std::bind(&MMCMetaBackUpMgrDefault::BackupThreadFunc, this));
         return MMC_OK;
@@ -87,16 +114,20 @@ public:
     }
     void BackupThreadFunc();
 
-    Result Add(const std::string &key, MmcMemBlobDesc &blobDesc) override
+    Result Add(const std::string &key, MmcMemBlobDesc &blobDesc, uint32_t op) override
     {
         if (!started_) {
-            return MMC_OK; // 未启动ha模式，不做备份
+            return MMC_OK;
         }
 
+        size_t size = 0;
         {
             std::lock_guard<std::mutex> lk(backupThreadLock_);
-            backupList_.push_back({META_BACKUP_ADD, key, blobDesc});
-            backupThreadCv_.notify_all();
+            backupList_.push_back({op, key, blobDesc});
+            size = backupList_.size();
+            if (ShouldNotify(size)) {
+                backupThreadCv_.notify_all();
+            }
         }
         return MMC_OK;
     }
@@ -104,12 +135,16 @@ public:
     Result Remove(const std::string &key, MmcMemBlobDesc &blobDesc) override
     {
         if (!started_) {
-            return MMC_OK; // 未启动ha模式，不做备份
+            return MMC_OK;
         }
+        size_t size = 0;
         {
             std::lock_guard<std::mutex> lk(backupThreadLock_);
             backupList_.push_back({META_BACKUP_REMOVE, key, blobDesc});
-            backupThreadCv_.notify_all();
+            size = backupList_.size();
+            if (ShouldNotify(size)) {
+                backupThreadCv_.notify_all();
+            }
         }
         return MMC_OK;
     }
@@ -119,18 +154,28 @@ public:
         return MMC_OK;
     }
 
+    bool ShouldNotify(size_t queueSize) const
+    {
+        return !asyncFlushEnabled_ || queueSize >= asyncFlushBatchLimit_;
+    }
+
 private:
-    uint32_t PopMetas2Backup(std::vector<uint32_t> &ops, std::vector<std::string> &keys,
-                             std::vector<MmcMemBlobDesc> &blobs);
     void SendBackup2Local();
+    void SendBackupForRank(uint32_t rank, std::vector<MetaBackUpOperate> &entries);
 
     MetaNetServerPtr metaNetServer_;
     std::mutex mutex_;
-    bool started_ = false;
+    std::atomic<bool> started_{false};
     std::thread backupThread_;
     std::mutex backupThreadLock_;
     std::condition_variable backupThreadCv_;
     std::list<MetaBackUpOperate> backupList_;
+    uint32_t asyncFlushIntervalMs_ = 0;
+    uint32_t asyncFlushBatchLimit_ = 0;
+    bool asyncFlushEnabled_ = false;
+    MmcThreadPoolPtr rewarmPool_;
+    std::function<bool(uint32_t)> isSsdAvailableFunc_;
+    std::function<void(uint32_t, const std::vector<std::pair<std::string, MmcMemBlobDesc>> &)> onAsyncFlushComplete_;
 };
 } // namespace mmc
 } // namespace ock

@@ -27,6 +27,7 @@
 #include "mmc_logger.h"
 #include "mmc_types.h"
 #include "mmc_ref.h"
+#include "mmc_ptracer.h"
 
 namespace ock {
 namespace mmc {
@@ -133,13 +134,18 @@ public:
         auto func = std::make_shared<std::packaged_task<returnType()>>(
             std::bind(std::forward<F>(f), std::forward<Args>(args)...));
         std::future<returnType> future = func->get_future();
+        uint64_t enqueueTimeNs = TP_CURRENT_TIME_NS;
         {
             std::unique_lock<std::mutex> uniqueLock(queueMutex);
             if (stop) {
                 MMC_LOG_ERROR("thread pool has stopped.");
                 return std::future<returnType>{}; // 返回无效的 future
             }
-            taskQueue.emplace([func]() { (*func)(); });
+            taskQueue.emplace([func, enqueueTimeNs]() {
+                uint64_t waitNs = TP_CURRENT_TIME_NS - enqueueTimeNs;
+                TP_TRACE_RECORD(TP_MMC_THREAD_POOL_WAIT, waitNs, 0);
+                (*func)();
+            });
         }
         queueCondition.notify_one();
         return future;

@@ -473,7 +473,10 @@ TEST_F(MmcMetaServiceHttpTest, MetricsContract)
         << " evict_to_ssd=" << snapshot.evictToSsdCount << " evict_ssd_delete=" << snapshot.evictSsdDeleteCount
         << " evict_mem_delete=" << snapshot.evictMemDeleteCount << " rewarm=" << snapshot.rewarmCount
         << " rewarm_fail=" << snapshot.rewarmFailCount << " rewarm_bytes_total=" << snapshot.rewarmBytesCount
-        << " rewarm_bytes_current=" << snapshot.rewarmBytesCurrent << " get_hit_dram=" << snapshot.getHitDramCount
+        << " rewarm_bytes_current=" << snapshot.rewarmBytesCurrent
+        << " async_flush_blobs_added=" << snapshot.asyncFlushBlobAdded
+        << " async_flush_bytes=" << snapshot.asyncFlushBlobBytes
+        << " async_flush_writes=" << snapshot.asyncFlushWriteCount << " get_hit_dram=" << snapshot.getHitDramCount
         << " get_hit_ssd=" << snapshot.getHitSsdCount << " hbm_used=" << SIZE_32K << "/" << kHttpSegmentCapacityBytes
         << " dram_used=" << kHttpZeroUsedBytes << "/" << kHttpSegmentCapacityBytes << " ssd_used=" << kHttpZeroUsedBytes
         << "/" << kHttpZeroUsedBytes << " alloc_req=" << snapshot.allocRequestCount

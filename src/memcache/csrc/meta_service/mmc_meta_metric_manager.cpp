@@ -117,7 +117,11 @@ MmcMetaMetricManager::MmcMetaMetricManager()
       getHitSsdCounter_("memcache_get_hits_ssd_total", "Total number of Get hits served from SSD (rewarm)"),
       rewarmBytesCounter_("memcache_rewarm_bytes_total", "Total bytes rewarmed from SSD to DRAM"),
       rewarmBytesCurrentGauge_("memcache_rewarm_bytes_current", "Current bytes occupied by rewarmed data"),
-      keyCountGauge_("memcache_stored_keys", "Current number of stored keys")
+      keyCountGauge_("memcache_stored_keys", "Current number of stored keys"),
+      asyncFlushBlobAddedCounter_("memcache_async_flush_blobs_added_total",
+                                  "Total number of SSD blobs registered via async flush"),
+      asyncFlushBlobBytesCounter_("memcache_async_flush_bytes_total", "Total bytes flushed to SSD via async flush"),
+      asyncFlushWriteCounter_("memcache_async_flush_writes_total", "Total number of async flush SSD write operations")
 // per-rank counters (pure data, metric names passed at serialization time)
 {}
 
@@ -193,6 +197,9 @@ MmcMetaMetricSnapshot MmcMetaMetricManager::GetSnapshot() const
     snapshot.rewarmBytesCount = static_cast<uint64_t>(rewarmBytesCounter_.value());
     snapshot.rewarmBytesCurrent = static_cast<uint64_t>(rewarmBytesCurrentGauge_.value());
     snapshot.keyCount = static_cast<uint64_t>(keyCountGauge_.value());
+    snapshot.asyncFlushBlobAdded = static_cast<uint64_t>(asyncFlushBlobAddedCounter_.value());
+    snapshot.asyncFlushBlobBytes = static_cast<uint64_t>(asyncFlushBlobBytesCounter_.value());
+    snapshot.asyncFlushWriteCount = static_cast<uint64_t>(asyncFlushWriteCounter_.value());
 
     // per-rank internal counters
     if (IsPerRankEnabled()) {
@@ -206,6 +213,9 @@ MmcMetaMetricSnapshot MmcMetaMetricManager::GetSnapshot() const
         snapshot.rewarmFailCountByRank = rewarmFailRankedCounter_.GetRankMap();
         snapshot.rewarmBytesByRank = rewarmBytesRankedCounter_.GetRankMap();
         snapshot.rewarmBytesCurrentByRank = rewarmBytesCurrentRankedCounter_.GetRankMap();
+        snapshot.asyncFlushBlobAddedByRank = asyncFlushBlobAddedRankedCounter_.GetRankMap();
+        snapshot.asyncFlushBlobBytesByRank = asyncFlushBlobBytesRankedCounter_.GetRankMap();
+        snapshot.asyncFlushWriteCountByRank = asyncFlushWriteRankedCounter_.GetRankMap();
     }
 
     return snapshot;

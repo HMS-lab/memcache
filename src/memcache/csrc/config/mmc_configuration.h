@@ -222,7 +222,16 @@ public:
         AddIntConf(OCK_MMC_REWARM_DRAM_WATERMARK,
                    VIntRange::Create(OCK_MMC_REWARM_DRAM_WATERMARK.first, MIN_DRAM_WATERMARK, MAX_DRAM_WATERMARK), 0);
         AddBoolConf(OCK_MMC_PREFETCH_ENABLED, VStrEnum::Create(OCK_MMC_PREFETCH_ENABLED.first, BOOL_ENUM_STR), 0);
-        AddIntConf(OCK_MMC_PENDING_WAIT_TIMEOUT_MS, VIntRange::Create(OCK_MMC_PENDING_WAIT_TIMEOUT_MS.first, 1, 60000U),
+        AddBoolConf(OCK_MMC_ASYNC_FLUSH_ENABLED, VStrEnum::Create(OCK_MMC_ASYNC_FLUSH_ENABLED.first, BOOL_ENUM_STR), 0);
+        AddIntConf(
+            OCK_MMC_ASYNC_FLUSH_INTERVAL_MS,
+            VIntRange::Create(OCK_MMC_ASYNC_FLUSH_INTERVAL_MS.first, MIN_FLUSH_INTERVAL_MS, MAX_FLUSH_INTERVAL_MS), 0);
+        AddIntConf(
+            OCK_MMC_ASYNC_FLUSH_BATCH_LIMIT,
+            VIntRange::Create(OCK_MMC_ASYNC_FLUSH_BATCH_LIMIT.first, MIN_FLUSH_BATCH_LIMIT, MAX_FLUSH_BATCH_LIMIT), 0);
+        AddIntConf(OCK_MMC_PENDING_WAIT_TIMEOUT_MS,
+                   VIntRange::Create(OCK_MMC_PENDING_WAIT_TIMEOUT_MS.first, MIN_PENDING_WAIT_TIMEOUT_MS,
+                                     MAX_PENDING_WAIT_TIMEOUT_MS),
                    0);
         AddIntConf(OCK_MMC_META_LEASE_TTL_MS,
                    VIntRange::Create(OCK_MMC_META_LEASE_TTL_MS.first, MIN_LEASE_TTL_MS, MAX_LEASE_TTL_MS), 0);
@@ -306,6 +315,9 @@ public:
         config.evictThresholdLow = GetInt(ConfConstant::OKC_MMC_EVICT_THRESHOLD_LOW);
         config.rewarmDramWatermark = GetInt(ConfConstant::OCK_MMC_REWARM_DRAM_WATERMARK);
         config.prefetchEnabled = GetBool(ConfConstant::OCK_MMC_PREFETCH_ENABLED);
+        config.asyncFlushEnabled = GetBool(ConfConstant::OCK_MMC_ASYNC_FLUSH_ENABLED);
+        config.asyncFlushIntervalMs = static_cast<uint32_t>(GetInt(ConfConstant::OCK_MMC_ASYNC_FLUSH_INTERVAL_MS));
+        config.asyncFlushBatchLimit = static_cast<uint32_t>(GetInt(ConfConstant::OCK_MMC_ASYNC_FLUSH_BATCH_LIMIT));
         config.pendingWaitTimeoutMs = static_cast<uint64_t>(GetInt(ConfConstant::OCK_MMC_PENDING_WAIT_TIMEOUT_MS));
         config.leaseTtlMs = static_cast<uint64_t>(GetInt(ConfConstant::OCK_MMC_META_LEASE_TTL_MS));
         config.evictYieldInterval = static_cast<uint32_t>(GetInt(ConfConstant::OKC_MMC_EVICT_YIELD_INTERVAL));
@@ -415,6 +427,7 @@ public:
                     VStrEnum::Create(OCK_MMC_LOCAL_SERVICE_STORAGE_ENABLED.first, BOOL_ENUM_STR), 0);
         AddBoolConf(OCK_MMC_LOCAL_SERVICE_DRAM_BEST_EFFORT,
                     VStrEnum::Create(OCK_MMC_LOCAL_SERVICE_DRAM_BEST_EFFORT.first, BOOL_ENUM_STR), 0);
+        AddBoolConf(OCK_MMC_ASYNC_FLUSH_ENABLED, VStrEnum::Create(OCK_MMC_ASYNC_FLUSH_ENABLED.first, BOOL_ENUM_STR), 0);
         AddIntConf(OCK_MMC_CLIENT_AGGREGATE_NUM,
                    VIntRange::Create(OCK_MMC_CLIENT_AGGREGATE_NUM.first, 1, MAX_AGGREGATE_NUM), 0);
         AddStrConf(OCK_MMC_CLIENT_BATCH_CHUNK_SIZE, VNoCheck::Create(), 0);

@@ -26,7 +26,7 @@
 namespace ock {
 namespace mmc {
 constexpr int TIMEOUT_THOUSAND = 1000;
-constexpr int UBSIO_EVENT_POOL_SIZE = 2;
+constexpr int UBSIO_EVENT_POOL_SIZE = 4;
 // Best-effort timeout for BM unregister during shutdown. MetaService auto-cleans
 // registration on link break (ClearResource), so a short timeout suffices.
 constexpr int BM_UNREGISTER_TIMEOUT_SECOND = 5;
@@ -51,7 +51,7 @@ public:
     Result DestroyBm();
 
     Result UpdateMetaBackup(const std::vector<uint32_t> &ops, const std::vector<std::string> &keys,
-                            const std::vector<MmcMemBlobDesc> &blobs);
+                            const std::vector<MmcMemBlobDesc> &blobs, bool asyncFlush, std::vector<Result> &keyResults);
 
     Result CopyBlob(const std::string &key, const MmcMemBlobDesc &src, const MmcMemBlobDesc &dst);
 
@@ -87,6 +87,20 @@ private:
     void ExecuteBatchIo(BatchIoParams &params, bool srcIsSsd, std::vector<Result> &results);
 
     void HandleUbsIoMetaEvents(int type, const std::vector<std::string> &keys);
+
+    std::vector<size_t> ProcessBackupMetadata(const std::vector<uint32_t> &ops, const std::vector<std::string> &keys,
+                                              const std::vector<MmcMemBlobDesc> &blobs, bool asyncFlush, size_t length,
+                                              std::vector<Result> &keyResults);
+
+    void CollectFlushParams(const std::vector<size_t> &indices, const std::vector<std::string> &keys,
+                            const std::vector<MmcMemBlobDesc> &blobs, std::vector<Result> &keyResults,
+                            BatchIoParams &out);
+
+    size_t ExecuteFlushBatch(BatchIoParams &params, const std::vector<MmcMemBlobDesc> &blobs,
+                             std::vector<Result> &keyResults);
+
+    void BatchFlushToSsd(const std::vector<size_t> &indices, const std::vector<std::string> &keys,
+                         const std::vector<MmcMemBlobDesc> &blobs, std::vector<Result> &keyResults);
 
     MetaNetClientPtr metaNetClient_;
     MmcBmProxyPtr bmProxyPtr_;

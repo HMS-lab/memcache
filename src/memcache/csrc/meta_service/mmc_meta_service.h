@@ -78,6 +78,7 @@ private:
     Result BmUnregisterWithoutLock(uint32_t rank, uint16_t mediaType);
     void PublishClearedForRanks(const std::vector<uint32_t> &ranks);
 
+private:
     MetaNetServerPtr metaNetServer_;
     MmcMetaMgrProxyPtr metaMgrProxy_;
     MMCMetaBackUpMgrPtr metaBackUpMgrPtr_;
@@ -99,6 +100,8 @@ private:
     std::atomic<bool> periodicEvictActive_{false};
 
     void StartMetricsReportTask();
+    bool IsSsdAvailable(uint32_t rank) const;
+    void OnAsyncFlushComplete(uint32_t rank, const std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobs);
 };
 inline const std::string &MmcMetaService::Name() const
 {

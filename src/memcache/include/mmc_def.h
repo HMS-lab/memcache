@@ -85,6 +85,9 @@ typedef struct {
     mmc_kv_events_config_t kvEvents;
     uint16_t rewarmDramWatermark;
     bool prefetchEnabled;
+    bool asyncFlushEnabled;
+    uint32_t asyncFlushIntervalMs;
+    uint32_t asyncFlushBatchLimit;
     /* ZMQ transport plugin config (independent of kv_events). */
     mmc_zmq_config_t zmq;
     uint64_t pendingWaitTimeoutMs;

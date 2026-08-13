@@ -76,6 +76,7 @@ void MmcUbsIoProxy::StaticMetaEventCallback(void *context, const UbsioMetaEventC
     if (proxy->metaEventCallback_ == nullptr) {
         return;
     }
+    TP_TRACE_BEGIN(TP_MMC_UBS_IO_META_EVENT_CB);
     std::vector<std::string> deleteKeys;
     for (uint32_t i = 0; i < count; ++i) {
         if (events[i].type == UBSIO_META_DELETE_C) {
@@ -85,6 +86,7 @@ void MmcUbsIoProxy::StaticMetaEventCallback(void *context, const UbsioMetaEventC
     if (!deleteKeys.empty()) {
         proxy->metaEventCallback_(UBSIO_META_DELETE_C, deleteKeys);
     }
+    TP_TRACE_END(TP_MMC_UBS_IO_META_EVENT_CB, deleteKeys.size());
 }
 
 Result MmcUbsIoProxy::GetResourceInfo(UbsioResourceInfo &info) const

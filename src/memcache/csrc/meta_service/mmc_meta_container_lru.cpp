@@ -184,6 +184,16 @@ public:
         return MMC_OK;
     }
 
+    MediaType GetMediaType(const Key &key) override
+    {
+        ock::mf::ReadGuard lockGuard(metaLock_);
+        auto iter = metaMap_.find(key);
+        if (iter == metaMap_.end()) {
+            return MEDIA_NONE;
+        }
+        return iter->second.mediaType_;
+    }
+
     Result InsertLru(const Key &key, MediaType type)
     {
         ock::mf::ReadGuard lockGuard(metaLock_);

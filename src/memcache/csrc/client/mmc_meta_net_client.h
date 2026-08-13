@@ -20,6 +20,7 @@
 #include "mmc_local_common.h"
 #include "mmc_net_engine.h"
 #include "mmc_blob_common.h"
+#include "mmc_thread_pool.h"
 
 namespace ock {
 namespace mmc {
@@ -30,8 +31,9 @@ constexpr int FIRST_RETRY = 1;
 constexpr int RETRY_LOG_INTERVAL = 10;
 
 using ClientRetryHandler = std::function<int32_t(void)>;
-using ClientReplicateHandler = std::function<int32_t(
-    const std::vector<uint32_t> &ops, const std::vector<std::string> &keys, const std::vector<MmcMemBlobDesc> &blobs)>;
+using ClientReplicateHandler =
+    std::function<int32_t(const std::vector<uint32_t> &ops, const std::vector<std::string> &keys,
+                          const std::vector<MmcMemBlobDesc> &blobs, bool asyncFlush, std::vector<Result> &keyResults)>;
 using ClientBlobCopyHandler =
     std::function<int32_t(const std::string &key, const MmcMemBlobDesc &src, const MmcMemBlobDesc &dst)>;
 using ClientBlobDeleteHandler = std::function<int32_t(const std::string &key, const MmcMemBlobDesc &blob)>;
@@ -167,6 +169,11 @@ public:
         batchBlobCopyHandler_ = batchBlobCopyHandler;
     }
 
+    void SetBackupPool(const MmcThreadPoolPtr &pool)
+    {
+        backupPool_ = pool;
+    }
+
     void RegisterDiscoverUrlFunc(DiscoverUrlFunc func)
     {
         discoverUrlFunc_ = std::move(func);
@@ -193,6 +200,7 @@ private:
     ClientBlobCopyHandler blobCopyHandler_ = nullptr;
     ClientBlobDeleteHandler blobDeleteHandler_ = nullptr;
     ClientBatchBlobCopyHandler batchBlobCopyHandler_ = nullptr;
+    MmcThreadPoolPtr backupPool_;
     DiscoverUrlFunc discoverUrlFunc_;
     std::string serverUrl_;
     UrlResolver resolver_;

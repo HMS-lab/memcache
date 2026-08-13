@@ -30,7 +30,7 @@ public:
 
     virtual void Stop() = 0;
 
-    virtual Result Add(const std::string &key, MmcMemBlobDesc &blobDesc) = 0;
+    virtual Result Add(const std::string &key, MmcMemBlobDesc &blobDesc, uint32_t op) = 0;
 
     virtual Result Remove(const std::string &key, MmcMemBlobDesc &blobDesc) = 0;
 
