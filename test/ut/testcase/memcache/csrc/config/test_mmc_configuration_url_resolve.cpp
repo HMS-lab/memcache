@@ -187,3 +187,45 @@ TEST_F(TestMmcConfigurationUrlResolve, Setup_LoadFromFile_ResolvesConfiguredUrls
 
     std::remove(filePath.c_str());
 }
+
+TEST_F(TestMmcConfigurationUrlResolve, LoadFromFile_ReloadsLogLevel)
+{
+    char fileNameTemplate[] = "/tmp/mmc_config_test_log_level_reload_XXXXXX";
+    int fd = mkstemp(fileNameTemplate);
+    if (fd == -1) {
+        GTEST_SKIP() << "Failed to create temp config file";
+    }
+    close(fd);
+    const std::string filePath = std::string(fileNameTemplate) + ".conf";
+    std::remove(fileNameTemplate);
+
+    auto writeConfig = [&filePath](const std::string &logLevel) {
+        std::ofstream ofs(filePath, std::ios::trunc);
+        if (!ofs.is_open()) {
+            return false;
+        }
+        ofs << "ock.mmc.meta_service_url=tcp://127.0.0.1:5000\n";
+        ofs << "ock.mmc.local_service.config_store_url=tcp://127.0.0.1:6000\n";
+        ofs << "ock.mmc.local_service.protocol=host_rdma\n";
+        ofs << "ock.mmc.local_service.dram.size=1GB\n";
+        ofs << "ock.mmc.log_level=" << logLevel << "\n";
+        ofs.close();
+        return true;
+    };
+
+    ASSERT_TRUE(writeConfig("info"));
+    ClientConfig clientConfig1;
+    ASSERT_TRUE(clientConfig1.LoadFromFile(filePath)) << "failed to load " << filePath;
+    mmc_local_service_config_t serviceConfig1{};
+    clientConfig1.GetLocalServiceConfig(serviceConfig1);
+    EXPECT_EQ(serviceConfig1.logLevel, INFO_LEVEL);
+
+    ASSERT_TRUE(writeConfig("warn"));
+    ClientConfig clientConfig2;
+    ASSERT_TRUE(clientConfig2.LoadFromFile(filePath)) << "failed to reload " << filePath;
+    mmc_local_service_config_t serviceConfig2{};
+    clientConfig2.GetLocalServiceConfig(serviceConfig2);
+    EXPECT_EQ(serviceConfig2.logLevel, WARN_LEVEL);
+
+    std::remove(filePath.c_str());
+}

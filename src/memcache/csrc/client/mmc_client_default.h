@@ -30,6 +30,18 @@
 
 namespace ock {
 namespace mmc {
+
+enum ClientConfigField : uint32_t {
+    CLIENT_CONFIG_FIELD_RPC_RETRY_TIMEOUT = 1U << 0,
+    CLIENT_CONFIG_FIELD_AGGREGATE_IO = 1U << 1,
+    CLIENT_CONFIG_FIELD_AGGREGATE_NUM = 1U << 2,
+    CLIENT_CONFIG_FIELD_BATCH_CHUNK_SIZE = 1U << 3,
+    CLIENT_CONFIG_FIELD_BATCH_CHUNK_COUNT = 1U << 4,
+    CLIENT_CONFIG_FIELD_ALL = CLIENT_CONFIG_FIELD_RPC_RETRY_TIMEOUT | CLIENT_CONFIG_FIELD_AGGREGATE_IO |
+                              CLIENT_CONFIG_FIELD_AGGREGATE_NUM | CLIENT_CONFIG_FIELD_BATCH_CHUNK_SIZE |
+                              CLIENT_CONFIG_FIELD_BATCH_CHUNK_COUNT,
+};
+
 class MmcClientDefault : public MmcReferable {
 public:
     ~MmcClientDefault() override = default;
@@ -37,6 +49,12 @@ public:
     Result Start(const mmc_client_config_t &config);
 
     void Stop();
+
+    // Hot-reload client runtime tunables (rpcRetryTimeOut, aggregate IO/num,
+    // batch chunk size/count) from a freshly loaded mmc_client_config_t.
+    // Thread-safe; only fields selected by fieldMask that differ from the cached
+    // values are applied. Returns true when at least one field was applied.
+    bool UpdateClientConfig(const mmc_client_config_t &config, uint32_t fieldMask = CLIENT_CONFIG_FIELD_ALL);
 
     const std::string &Name() const;
 
@@ -131,6 +149,27 @@ public:
         return gClientHandler;
     }
 
+    uint32_t GetRpcRetryTimeOut() const
+    {
+        return rpcRetryTimeOut_.load(std::memory_order_relaxed);
+    }
+    bool GetAggregateIO() const
+    {
+        return aggregateIO_.load(std::memory_order_relaxed);
+    }
+    size_t GetAggregateNum() const
+    {
+        return aggregateNum_.load(std::memory_order_relaxed);
+    }
+    uint64_t GetBatchChunkSize() const
+    {
+        return batchChunkSize_.load(std::memory_order_relaxed);
+    }
+    uint32_t GetBatchChunkCount() const
+    {
+        return batchChunkCount_.load(std::memory_order_relaxed);
+    }
+
 private:
     explicit MmcClientDefault(const std::string &name) : name_(name) {}
     explicit MmcClientDefault(const MmcClientDefault &) = delete;
@@ -188,15 +227,15 @@ private:
     MmcUbsIoProxyPtr ubsIoProxy_;
     std::string name_;
     uint32_t rankId_{UINT32_MAX};
-    uint32_t rpcRetryTimeOut_ = 0;
+    std::atomic<uint32_t> rpcRetryTimeOut_{0};
     uint64_t defaultTtlMs_ = MMC_DATA_TTL_MS;
     MmcThreadPoolPtr threadPool_;
     MmcThreadPoolPtr readThreadPool_;
-    bool aggregateIO_{false};
-    size_t aggregateNum_{0};
+    std::atomic<bool> aggregateIO_{false};
+    std::atomic<size_t> aggregateNum_{0};
     MmcThreadPoolPtr writeThreadPool_;
-    uint64_t batchChunkSize_ = 0;
-    uint32_t batchChunkCount_ = 0;
+    std::atomic<uint64_t> batchChunkSize_{0};
+    std::atomic<uint32_t> batchChunkCount_{0};
     LocalGvaBlobTracker gvaBlobTracker_{};
     BandwidthCollector *bandwidthCollector_ = nullptr;
 };

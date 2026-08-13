@@ -69,6 +69,14 @@ void SPDLOG_AuditLogMessage(const char *msg);
  */
 const char *SPDLOG_GetLastErrorMessage();
 
+/**
+ * @brief reset the min level of the normal ulog at runtime
+ *
+ * @param logLevel         - [IN] min level of message, same numbering as SPDLOG_Init
+ *                           (0:debug, 1:info, 2:warn, 3:error in the mmc numbering)
+ *
+ * @return 0 for success, non zero for failure
+ */
 int SPDLOG_ResetLogLevel(int logLevel);
 
 /**

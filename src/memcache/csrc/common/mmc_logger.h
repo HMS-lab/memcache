@@ -12,6 +12,7 @@
 #ifndef MEMFABRIC_HYBRID_MMC_LOGGER_H
 #define MEMFABRIC_HYBRID_MMC_LOGGER_H
 
+#include <atomic>
 #include <ctime>
 #include <cstring>
 #include <iostream>
@@ -53,7 +54,7 @@ public:
 
     inline LogLevel GetLogLevel() const
     {
-        return logLevel_;
+        return logLevel_.load(std::memory_order_relaxed);
     }
 
     inline ExternalLog GetLogExtraFunc() const
@@ -71,7 +72,7 @@ public:
         if (level < DEBUG_LEVEL || level >= BUTT_LEVEL) {
             return -1;
         }
-        logLevel_ = level;
+        logLevel_.store(level, std::memory_order_relaxed);
         return 0;
     }
 
@@ -91,7 +92,7 @@ public:
 
     inline void Log(int level, const std::ostringstream &oss)
     {
-        if (level < logLevel_) {
+        if (level < logLevel_.load(std::memory_order_relaxed)) {
             return;
         }
 
@@ -161,7 +162,7 @@ private:
     }
 
 private:
-    LogLevel logLevel_ = INFO_LEVEL;
+    std::atomic<LogLevel> logLevel_ = INFO_LEVEL;
     ExternalLog logFunc_ = nullptr;
     ExternalAuditLog auditLogFunc_ = nullptr;
 

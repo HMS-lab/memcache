@@ -44,7 +44,9 @@ const char *SPDLOG_GetLastErrorMessage()
 
 int SPDLOG_ResetLogLevel(int logLevel)
 {
-    return ock::mmc::log::SpdLogger::GetInstance().SetLogMinLevel(logLevel);
+    // Mirror SPDLOG_Init: the mmc log level (0~3: DEBUG/INFO/WARN/ERROR) is offset by 1 to skip
+    // spdlog's TRACE(0) so the reset threshold stays consistent with the initialized one.
+    return ock::mmc::log::SpdLogger::GetInstance().SetLogMinLevel(logLevel + 1);
 }
 
 void SPDLOG_CheckAndReopen()

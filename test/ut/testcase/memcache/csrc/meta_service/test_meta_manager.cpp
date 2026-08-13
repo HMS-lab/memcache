@@ -982,5 +982,72 @@ TEST_F(TestMmcMetaManager, GvaUnmount_CleansSegmentIndex)
     metaMng->Stop();
 }
 
+TEST_F(TestMmcMetaManager, UpdateConfigAppliesNewValues)
+{
+    constexpr uint64_t defaultTtl = 2000U;
+    constexpr uint64_t newTtl = 5000U;
+    constexpr uint16_t highWatermark = 70U;
+    constexpr uint16_t lowWatermark = 60U;
+    constexpr uint16_t newHighWatermark = 85U;
+    constexpr uint16_t newLowWatermark = 75U;
+    constexpr uint16_t rewarmWatermark = 100U;
+    MmcRef<MmcMetaManager> metaMng =
+        MmcMakeRef<MmcMetaManager>(defaultTtl, highWatermark, lowWatermark, rewarmWatermark);
+
+    ASSERT_EQ(metaMng->UpdateConfig(newTtl, newHighWatermark, newLowWatermark), MMC_OK);
+    EXPECT_EQ(metaMng->Ttl(), newTtl);
+    auto watermarks = metaMng->GetEvictWatermark();
+    ASSERT_GT(watermarks.size(), static_cast<size_t>(MEDIA_DRAM));
+    EXPECT_EQ(watermarks[MEDIA_DRAM].first, newHighWatermark);
+    EXPECT_EQ(watermarks[MEDIA_DRAM].second, newLowWatermark);
+
+    metaMng->Stop();
+}
+
+TEST_F(TestMmcMetaManager, UpdateConfigRejectsInvalidWatermark)
+{
+    constexpr uint64_t defaultTtl = 2000U;
+    constexpr uint16_t highWatermark = 70U;
+    constexpr uint16_t lowWatermark = 60U;
+    constexpr uint16_t rewarmWatermark = 100U;
+    constexpr uint16_t invalidHighWatermark = 50U;
+    constexpr uint16_t invalidLowWatermark = 60U;
+    MmcRef<MmcMetaManager> metaMng =
+        MmcMakeRef<MmcMetaManager>(defaultTtl, highWatermark, lowWatermark, rewarmWatermark);
+
+    // high <= low is rejected and keeps current values
+    ASSERT_EQ(metaMng->UpdateConfig(defaultTtl, invalidHighWatermark, invalidLowWatermark), MMC_INVALID_PARAM);
+    EXPECT_EQ(metaMng->Ttl(), defaultTtl);
+    auto watermarks = metaMng->GetEvictWatermark();
+    ASSERT_GT(watermarks.size(), static_cast<size_t>(MEDIA_DRAM));
+    EXPECT_EQ(watermarks[MEDIA_DRAM].first, highWatermark);
+    EXPECT_EQ(watermarks[MEDIA_DRAM].second, lowWatermark);
+
+    // zero TTL falls back to MMC_DATA_TTL_MS, not an error
+    ASSERT_EQ(metaMng->UpdateConfig(0, highWatermark, lowWatermark), MMC_OK);
+    EXPECT_EQ(metaMng->Ttl(), MMC_DATA_TTL_MS);
+
+    metaMng->Stop();
+}
+
+TEST_F(TestMmcMetaManager, UpdateConfigUnchangedKeepsValues)
+{
+    constexpr uint64_t defaultTtl = 2000U;
+    constexpr uint16_t highWatermark = 70U;
+    constexpr uint16_t lowWatermark = 60U;
+    constexpr uint16_t rewarmWatermark = 100U;
+    MmcRef<MmcMetaManager> metaMng =
+        MmcMakeRef<MmcMetaManager>(defaultTtl, highWatermark, lowWatermark, rewarmWatermark);
+
+    ASSERT_EQ(metaMng->UpdateConfig(defaultTtl, highWatermark, lowWatermark), MMC_OK);
+    EXPECT_EQ(metaMng->Ttl(), defaultTtl);
+    auto watermarks = metaMng->GetEvictWatermark();
+    ASSERT_GT(watermarks.size(), static_cast<size_t>(MEDIA_DRAM));
+    EXPECT_EQ(watermarks[MEDIA_DRAM].first, highWatermark);
+    EXPECT_EQ(watermarks[MEDIA_DRAM].second, lowWatermark);
+
+    metaMng->Stop();
+}
+
 } // namespace mmc
 } // namespace ock

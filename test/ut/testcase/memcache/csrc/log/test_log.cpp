@@ -10,6 +10,7 @@
  * See the Mulan PSL v2 for more details.
 */
 
+#include <fstream>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -39,6 +40,8 @@ static constexpr int VALID_ROTATION_FILE_COUNT = 10;
 static constexpr int ROTATION_FILE_COUNT_LARGE = 20;
 static constexpr int INVALID_ROTATION_FILE_SIZE = 1 * 1024;
 static constexpr int LOG_LEVEL_INFO = 2;
+static constexpr int MMC_LOG_LEVEL_INFO = 1;
+static constexpr int MMC_LOG_LEVEL_WARN = 2;
 
 class TestLog : public testing::Test {
 public:
@@ -276,4 +279,30 @@ TEST_F(TestLog, error_handler_captures_write_failure_test)
     auto errMsg = ock::mmc::log::SpdLogger::GetLastErrorMessage();
     ASSERT_TRUE(errMsg != nullptr);
     ASSERT_TRUE(std::string(errMsg).find("Failed") != std::string::npos);
+}
+
+TEST_F(TestLog, reset_log_level_keeps_threshold_aligned_with_init)
+{
+    // SPDLOG_Init offsets the mmc level by +1 (skipping spdlog TRACE) and the fixed
+    // SPDLOG_ResetLogLevel applies the same offset via SetLogMinLevel. A local logger
+    // mirrors both paths: after init+reset at WARN, INFO must be dropped and WARN kept.
+    ock::mmc::log::SpdLogger logger;
+    const std::string logPath = "/tmp/mmc_log_reset_level_test.log";
+    std::remove(logPath.c_str());
+    const int spdlogWarnLevel = MMC_LOG_LEVEL_WARN + 1;
+    ASSERT_EQ(logger.Initialize(logPath, spdlogWarnLevel, VALID_ROTATION_FILE_SIZE, VALID_ROTATION_FILE_COUNT,
+                                OUTPUT_TARGET_FILE),
+              0);
+    ASSERT_EQ(logger.SetLogMinLevel(spdlogWarnLevel), 0);
+
+    logger.LogMessage(MMC_LOG_LEVEL_INFO + 1, "mmc_reset_info_below_threshold");
+    logger.LogMessage(MMC_LOG_LEVEL_WARN + 1, "mmc_reset_warn_at_threshold");
+    logger.Flush();
+
+    std::ifstream ifs(logPath);
+    ASSERT_TRUE(ifs.is_open());
+    const std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+    EXPECT_NE(content.find("mmc_reset_warn_at_threshold"), std::string::npos);
+    EXPECT_EQ(content.find("mmc_reset_info_below_threshold"), std::string::npos);
+    std::remove(logPath.c_str());
 }

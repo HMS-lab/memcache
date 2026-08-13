@@ -13,9 +13,26 @@
 #include "mmc_functions.h"
 
 #include <string>
+#include <sys/stat.h>
+
+#include "mmc_logger.h"
 
 namespace ock {
 namespace mmc {
+bool IsConfigFileModified(const std::string &configFilePath, time_t &lastConfigMtime)
+{
+    struct stat fileStat {};
+    if (stat(configFilePath.c_str(), &fileStat) != 0) {
+        MMC_LOG_WARN("Failed to stat config file for dynamic config polling: " << configFilePath);
+        return false;
+    }
+    if (fileStat.st_mtime == lastConfigMtime) {
+        return false;
+    }
+    lastConfigMtime = fileStat.st_mtime;
+    return true;
+}
+
 void OckTrimString(std::string &str)
 {
     if (str.empty()) {

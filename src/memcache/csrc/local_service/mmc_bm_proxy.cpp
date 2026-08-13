@@ -167,6 +167,22 @@ Result MmcBmProxy::UpdateStoreUrl(const std::string &url)
     return MMC_OK;
 }
 
+Result MmcBmProxy::UpdateLogLevel(int32_t level)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!started_) {
+        MMC_LOG_WARN("MmcBmProxy not started, cannot update log level");
+        return MMC_NOT_STARTED;
+    }
+    auto ret = MFSmemApi::SmemSetLogLevel(level);
+    if (ret != 0) {
+        MMC_LOG_ERROR("Failed to update smem bm log level to " << level << ", ret: " << ret);
+        return MMC_ERROR;
+    }
+    MMC_LOG_INFO("Updated smem bm log level to: " << level);
+    return MMC_OK;
+}
+
 std::string MmcBmProxy::GetDataOpType() const
 {
     return createConfig_.dataOpType;

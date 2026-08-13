@@ -909,6 +909,19 @@ Result MmcLocalServiceDefault::UpdateConfig()
         }
     }
 
+    // Compare and update log_level: process-wide MmcOutLogger is owned by the process-level
+    // polling task; here we only push the new level to the BM/smem logger.
+    if (options_.logLevel != newServiceConfig.logLevel) {
+        MMC_LOG_INFO("log_level changed from " << options_.logLevel << " to " << newServiceConfig.logLevel);
+        if (bmProxyPtr_ == nullptr) {
+            MMC_LOG_WARN("BM proxy not started, log level update deferred");
+        } else if (auto ret = bmProxyPtr_->UpdateLogLevel(newServiceConfig.logLevel); ret == MMC_OK) {
+            options_.logLevel = newServiceConfig.logLevel;
+        } else {
+            MMC_LOG_WARN("Failed to update bm log level to " << newServiceConfig.logLevel << ", ret=" << ret);
+        }
+    }
+
     return MMC_OK;
 }
 

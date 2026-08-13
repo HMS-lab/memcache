@@ -143,6 +143,46 @@ Result MmcClientDefault::Start(const mmc_client_config_t &config)
     return MMC_OK;
 }
 
+bool MmcClientDefault::UpdateClientConfig(const mmc_client_config_t &config, uint32_t fieldMask)
+{
+    bool updated = false;
+    const uint32_t newRpcRetryTimeOut = config.rpcRetryTimeOut;
+    const uint32_t oldRpcRetryTimeout = rpcRetryTimeOut_.load(std::memory_order_relaxed);
+    if ((fieldMask & CLIENT_CONFIG_FIELD_RPC_RETRY_TIMEOUT) != 0 && oldRpcRetryTimeout != newRpcRetryTimeOut) {
+        MMC_LOG_INFO("client rpcRetryTimeOut hot-reloaded: " << oldRpcRetryTimeout << " to " << newRpcRetryTimeOut);
+        rpcRetryTimeOut_.store(newRpcRetryTimeOut, std::memory_order_relaxed);
+        updated = true;
+    }
+    if ((fieldMask & CLIENT_CONFIG_FIELD_AGGREGATE_IO) != 0 &&
+        aggregateIO_.load(std::memory_order_relaxed) != config.aggregateIO) {
+        const std::string oldAggregateIo = aggregateIO_.load(std::memory_order_relaxed) ? "true" : "false";
+        const std::string newAggregateIo = config.aggregateIO ? "true" : "false";
+        MMC_LOG_INFO("client aggregateIO hot-reloaded: " << oldAggregateIo << " to " << newAggregateIo);
+        aggregateIO_.store(config.aggregateIO, std::memory_order_relaxed);
+        updated = true;
+    }
+    const size_t newAggregateNum = static_cast<size_t>(config.aggregateNum);
+    const size_t oldAggregateNum = aggregateNum_.load(std::memory_order_relaxed);
+    if ((fieldMask & CLIENT_CONFIG_FIELD_AGGREGATE_NUM) != 0 && oldAggregateNum != newAggregateNum) {
+        MMC_LOG_INFO("client aggregateNum hot-reloaded: " << oldAggregateNum << " to " << newAggregateNum);
+        aggregateNum_.store(newAggregateNum, std::memory_order_relaxed);
+        updated = true;
+    }
+    const uint64_t oldChunkSize = batchChunkSize_.load(std::memory_order_relaxed);
+    if ((fieldMask & CLIENT_CONFIG_FIELD_BATCH_CHUNK_SIZE) != 0 && oldChunkSize != config.batchChunkSize) {
+        MMC_LOG_INFO("client batchChunkSize hot-reloaded: " << oldChunkSize << " to " << config.batchChunkSize);
+        batchChunkSize_.store(config.batchChunkSize, std::memory_order_relaxed);
+        updated = true;
+    }
+    const uint32_t oldChunkCount = batchChunkCount_.load(std::memory_order_relaxed);
+    if ((fieldMask & CLIENT_CONFIG_FIELD_BATCH_CHUNK_COUNT) != 0 && oldChunkCount != config.batchChunkCount) {
+        MMC_LOG_INFO("client batchChunkCount hot-reloaded: " << oldChunkCount << " to " << config.batchChunkCount);
+        batchChunkCount_.store(config.batchChunkCount, std::memory_order_relaxed);
+        updated = true;
+    }
+    return updated;
+}
+
 void MmcClientDefault::Stop()
 {
     {

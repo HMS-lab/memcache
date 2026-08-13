@@ -11,12 +11,17 @@
 */
 #include "mmc.h"
 
+#include <functional>
+
 #include "mmc_client.h"
 #include "mmc_common_includes.h"
+#include "mmc_config_reload_utils.h"
 #include "mmc_configuration.h"
 #include "mmc_def.h"
 #include "mmc_define.h"
 #include "mmc_env.h"
+#include "mmc_logger.h"
+#include "mmc_local_config_reload.h"
 #include "mmc_service.h"
 #include "mmc_thread_pool.h"
 #include "mmc_types.h"
@@ -31,6 +36,32 @@ static bool g_mmcSetup = false;
 static bool mmcInit = false;
 static ClientConfig g_clientConfig{};
 static mmc_local_service_config_t g_localServiceConfig{};
+
+// Process-wide config file polling: reloads hot-reloadable settings (log_level and client
+// tunables) from the local config file and applies them without restart. A single periodic
+// task parses the file once per poll and applies all setting groups.
+static const char *const K_CONFIG_POLL_TASK_NAME = "ProcessConfigPolling";
+static time_t g_lastConfigMtime = 0;
+
+static void StartConfigPolling(const char *taskName, time_t &lastConfigMtime,
+                               const std::function<bool(const std::string &, time_t &)> &reloadFunc)
+{
+    if (!g_localServiceConfig.dynamicConfigEnable || g_localServiceConfig.configFilePath[0] == '\0') {
+        return;
+    }
+    IsConfigFileModified(g_localServiceConfig.configFilePath, lastConfigMtime);
+    auto ret =
+        RegisterPeriodicTask(taskName, g_localServiceConfig.dynamicConfigInterval, [reloadFunc, &lastConfigMtime]() {
+            reloadFunc(g_localServiceConfig.configFilePath, lastConfigMtime);
+        });
+    if (ret != MMC_OK) {
+        MMC_LOG_ERROR("Failed to register config polling task: " << taskName);
+        return;
+    }
+    MMC_LOG_INFO("Config polling registered, task: " << taskName
+                                                     << ", interval: " << g_localServiceConfig.dynamicConfigInterval
+                                                     << "s, file: " << g_localServiceConfig.configFilePath);
+}
 
 mmc_meta_service_config_t create_default_meta_config()
 {
@@ -225,6 +256,9 @@ static int32_t LoadAndValidateConfig(const local_config *config)
         MmcOutLogger::Instance().SetExternalLogFunction(g_localServiceConfig.logFunc);
     }
 
+    // Record the fixed baseline (initialized config values + built-in defaults)
+    // for non-hot-reloadable change reporting.
+    SetNonHotReloadableBaseline(g_clientConfig.GetAllItems());
     return MMC_OK;
 }
 
@@ -292,6 +326,7 @@ MMC_API int32_t mmc_init(const mmc_init_config *config)
         return ret;
     }
     mmcInit = true;
+    StartConfigPolling(K_CONFIG_POLL_TASK_NAME, g_lastConfigMtime, ReloadLocalConfigFromFile);
     return ret;
 }
 
@@ -321,6 +356,7 @@ MMC_API void mmc_uninit()
         return;
     }
 
+    UnregisterPeriodicTask(K_CONFIG_POLL_TASK_NAME);
     MmcPeriodicTaskFactory::DestroyInstance();
     if (g_localService != nullptr) {
         mmcs_local_service_stop(g_localService);

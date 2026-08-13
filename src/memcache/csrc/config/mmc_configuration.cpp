@@ -296,6 +296,9 @@ bool Configuration::SetWithTypeAutoConvert(const std::string &key, const std::st
         std::cerr << "Invalid key <" << key << ">." << std::endl;
         return false;
     }
+    // Keep the raw file value of every parsed item so callers can use the
+    // initialized configuration as the fixed baseline for hot-reload checks.
+    mAllItems[key] = value;
     ConfValueType valueType = iter->second;
     if (valueType == ConfValueType::VINT) {
         long tmp = 0;

@@ -243,3 +243,10 @@ TEST_F(TestBmProxy, ConcurrentAccess)
 
     ASSERT_EQ(successCount, 5);
 }
+
+TEST_F(TestBmProxy, UpdateLogLevelNotStartedReturnsNotStarted)
+{
+    MmcBmProxyPtr bmProxy = MmcBmProxyFactory::GetInstance("bm_proxy_log_level_test");
+    ASSERT_NE(bmProxy.Get(), nullptr);
+    EXPECT_EQ(bmProxy->UpdateLogLevel(INFO_LEVEL), MMC_NOT_STARTED);
+}

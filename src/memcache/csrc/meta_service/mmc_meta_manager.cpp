@@ -753,8 +753,9 @@ Result MmcMetaManager::Alloc(const std::string &key, const AllocOptions &allocOp
         return ret;
     }
 
-    const uint64_t actualLeaseTtlMs = leaseTtlMs == 0 ? defaultTtlMs_ : leaseTtlMs;
-    MMC_LOG_DEBUG("Alloc key=" << key << ", leaseTtlMs=" << leaseTtlMs << ", defaultTtlMs_=" << defaultTtlMs_
+    const uint64_t actualLeaseTtlMs = leaseTtlMs == 0 ? defaultTtlMs_.load(std::memory_order_relaxed) : leaseTtlMs;
+    MMC_LOG_DEBUG("Alloc key=" << key << ", leaseTtlMs=" << leaseTtlMs
+                               << ", defaultTtlMs_=" << defaultTtlMs_.load(std::memory_order_relaxed)
                                << ", actualLeaseTtlMs=" << actualLeaseTtlMs);
     for (auto &blob : blobs) {
         blob->SetDefaultLeaseTtlMs(actualLeaseTtlMs);
@@ -1164,8 +1165,9 @@ Result MmcMetaManager::RebuildMeta(std::vector<std::pair<std::string, MmcMemBlob
         std::string key = blob.first;
         MmcMemBlobDesc desc = blob.second;
         BlobState state = (desc.state_ == NONE ? READABLE : desc.state_);
-        MmcMemBlobPtr blobPtr = MmcMakeRef<MmcMemBlob>(desc.rank_, desc.gva_, desc.size_,
-                                                       static_cast<MediaType>(desc.mediaType_), state, defaultTtlMs_);
+        MmcMemBlobPtr blobPtr =
+            MmcMakeRef<MmcMemBlob>(desc.rank_, desc.gva_, desc.size_, static_cast<MediaType>(desc.mediaType_), state,
+                                   defaultTtlMs_.load(std::memory_order_relaxed));
         MmcMemObjMetaPtr objMeta;
 
         if (metaContainer_->Get(key, objMeta) == MMC_OK) {
@@ -1324,7 +1326,7 @@ Result MmcMetaManager::Query(const std::string &key, uint64_t operateId, uint32_
 Result MmcMetaManager::AddLease(const std::string &key, uint64_t operateId, uint64_t leaseTtlMs,
                                 MemObjQueryInfo &queryInfo)
 {
-    const uint64_t actualLeaseTtlMs = leaseTtlMs == 0 ? defaultTtlMs_ : leaseTtlMs;
+    const uint64_t actualLeaseTtlMs = leaseTtlMs == 0 ? defaultTtlMs_.load(std::memory_order_relaxed) : leaseTtlMs;
     MmcMemObjMetaPtr objMeta;
     if (metaContainer_->Get(key, objMeta) != MMC_OK || objMeta == nullptr) {
         MMC_LOG_DEBUG("Cannot find MmcMemObjMeta with key : " << key);
@@ -1954,6 +1956,37 @@ Result MmcMetaManager::RewarmBlob(const std::string &key, const MmcMemObjMetaPtr
 
     RewarmFinalize(key, newBlob, dstMediaType, srcDesc.rank_);
 
+    return MMC_OK;
+}
+
+Result MmcMetaManager::UpdateConfig(uint64_t leaseTtlMs, uint16_t evictThresholdHigh, uint16_t evictThresholdLow)
+{
+    const uint64_t newLeaseTtlMs = leaseTtlMs == 0 ? MMC_DATA_TTL_MS : leaseTtlMs;
+    if (evictThresholdHigh <= evictThresholdLow) {
+        MMC_LOG_ERROR("invalid evict thresholds, high=" << evictThresholdHigh << ", low=" << evictThresholdLow
+                                                        << ", high must be greater than low");
+        return MMC_INVALID_PARAM;
+    }
+    if (newLeaseTtlMs == 0) {
+        MMC_LOG_ERROR("invalid leaseTtlMs, must be greater than 0, got " << leaseTtlMs);
+        return MMC_INVALID_PARAM;
+    }
+
+    if (defaultTtlMs_.load(std::memory_order_relaxed) != newLeaseTtlMs) {
+        MMC_LOG_INFO("meta leaseTtlMs hot-reloaded from " << defaultTtlMs_.load(std::memory_order_relaxed) << " to "
+                                                          << newLeaseTtlMs);
+        defaultTtlMs_.store(newLeaseTtlMs, std::memory_order_relaxed);
+    }
+    if (evictThresholdHigh_.load(std::memory_order_relaxed) != evictThresholdHigh) {
+        MMC_LOG_INFO("meta evictThresholdHigh hot-reloaded from " << evictThresholdHigh_.load(std::memory_order_relaxed)
+                                                                  << " to " << evictThresholdHigh);
+        evictThresholdHigh_.store(evictThresholdHigh, std::memory_order_relaxed);
+    }
+    if (evictThresholdLow_.load(std::memory_order_relaxed) != evictThresholdLow) {
+        MMC_LOG_INFO("meta evictThresholdLow hot-reloaded from " << evictThresholdLow_.load(std::memory_order_relaxed)
+                                                                 << " to " << evictThresholdLow);
+        evictThresholdLow_.store(evictThresholdLow, std::memory_order_relaxed);
+    }
     return MMC_OK;
 }
 

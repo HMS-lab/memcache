@@ -15,6 +15,7 @@
 #include <climits>
 #include <cmath>
 #include <cstring>
+#include <ctime>
 #include <fstream>
 #include <set>
 #include <string>
@@ -75,6 +76,11 @@ inline bool OckStof(const std::string &str, float &value)
 }
 
 const std::unordered_map<std::string, bool> Str2Bool{{"0", false}, {"1", true}, {"false", false}, {"true", true}};
+
+// Check whether a config file changed since the last poll. On success updates
+// lastConfigMtime to the current mtime. Returns false when stat fails or the
+// mtime is unchanged (in which case lastConfigMtime is left untouched).
+bool IsConfigFileModified(const std::string &configFilePath, time_t &lastConfigMtime);
 
 inline bool StartsWith(const std::string &str, const std::string &prefix)
 {

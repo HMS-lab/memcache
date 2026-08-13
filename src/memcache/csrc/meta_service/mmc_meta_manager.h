@@ -144,6 +144,11 @@ public:
         Stop();
     }
 
+    // Hot-reload lease TTL and evict high/low watermark without restart. Only applied when
+    // the values actually differ. Validation mirrors MmcMetaService::Start. Returns
+    // MMC_INVALID_PARAM and keeps current values on failure.
+    Result UpdateConfig(uint64_t leaseTtlMs, uint16_t evictThresholdHigh, uint16_t evictThresholdLow);
+
     Result Start()
     {
         std::lock_guard<std::mutex> guard(mutex_);
@@ -326,7 +331,7 @@ public:
 
     inline uint64_t Ttl()
     {
-        return defaultTtlMs_;
+        return defaultTtlMs_.load(std::memory_order_relaxed);
     }
 
     uint16_t GetRewarmWatermark(MediaType media) const
@@ -341,7 +346,8 @@ public:
             if (i == MEDIA_SSD) {
                 continue;
             }
-            result[i] = {evictThresholdHigh_, evictThresholdLow_};
+            result[i] = {evictThresholdHigh_.load(std::memory_order_relaxed),
+                         evictThresholdLow_.load(std::memory_order_relaxed)};
         }
         return result;
     }
@@ -510,9 +516,9 @@ private:
     // std::unordered_set<std::string> evictMap_;
     // ReadWriteLock evictMapLock_;
 
-    uint64_t defaultTtlMs_; /* default ttl in milliseconds */
-    uint16_t evictThresholdHigh_;
-    uint16_t evictThresholdLow_;
+    std::atomic<uint64_t> defaultTtlMs_; /* default ttl in milliseconds */
+    std::atomic<uint16_t> evictThresholdHigh_;
+    std::atomic<uint16_t> evictThresholdLow_;
     uint16_t rewarmDramWatermark_;
     MmcMetaExtConfig extConfig_;
     uint32_t evictYieldInterval_;   /* GC eviction yield interval (0=disabled) */

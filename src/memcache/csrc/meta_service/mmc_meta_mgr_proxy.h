@@ -55,6 +55,16 @@ public:
         return MMC_OK;
     }
 
+    Result UpdateMetaConfig(uint64_t leaseTtlMs, uint16_t evictThresholdHigh, uint16_t evictThresholdLow)
+    {
+        std::lock_guard<std::mutex> guard(mutex_);
+        if (!started_) {
+            MMC_LOG_WARN("MmcMetaMgrProxy not started, cannot update meta config");
+            return MMC_NOT_STARTED;
+        }
+        return metaMangerPtr_->UpdateConfig(leaseTtlMs, evictThresholdHigh, evictThresholdLow);
+    }
+
     void Stop()
     {
         std::lock_guard<std::mutex> guard(mutex_);

@@ -51,6 +51,7 @@ private:
     static void RegisterSignal();
     static void SignalInterruptHandler(const int signal);
     static int InitLogger(const mmc_meta_service_config_t &options);
+    void StartConfigPolling();
     static acc::AccTlsOption BuildMetricsTlsOption(const mmc_meta_service_config_t &config);
     int ValidateMetaServiceReady() const;
     int ResolveAndValidateHttpUrl(std::string &host, uint16_t &port) const;
@@ -63,6 +64,7 @@ private:
     MmcMetaService *metaService_{};
     MmcMetaServiceLeaderElection *leaderElection_{};
     MmcHttpServer *httpServer_{};
+    time_t lastConfigMtime_{0};
 };
 
 } // namespace mmc

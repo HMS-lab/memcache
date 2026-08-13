@@ -83,6 +83,9 @@ public:
     bool Setup(const local_config *config);
     bool LoadFromFile(const std::string &filePath);
 
+    static uint64_t ParseMemSize(const std::string &memStr);
+    static MemUnit ParseMemUnit(const std::string &unit);
+
     int32_t GetInt(const std::pair<const char *, int32_t> &item);
     float GetFloat(const std::pair<const char *, float> &item);
     std::string GetString(const std::pair<const char *, const char *> &item);
@@ -128,12 +131,14 @@ public:
     {
         return mInitialized;
     }
+    const std::map<std::string, std::string> &GetAllItems() const
+    {
+        return mAllItems;
+    }
     static std::string ResolveUrlField(const std::string &field, const std::string &fieldName = "");
 
 private:
     bool SetWithStrAutoConvert(const std::string &key, const std::string &value);
-    uint64_t ParseMemSize(const std::string &memStr);
-    MemUnit ParseMemUnit(const std::string &unit);
 
     void SetValidator(const std::string &key, const ValidatorPtr &validator, uint32_t flag);
 
@@ -242,6 +247,13 @@ public:
         AddIntConf(OKC_MMC_EVICT_YIELD_DURATION_US,
                    VIntRange::Create(OKC_MMC_EVICT_YIELD_DURATION_US.first, MIN_EVICT_YIELD_DURATION_US,
                                      MAX_EVICT_YIELD_DURATION_US),
+                   0);
+
+        AddBoolConf(OCK_MMC_DYNAMIC_CONFIG_ENABLE, VStrEnum::Create(OCK_MMC_DYNAMIC_CONFIG_ENABLE.first, BOOL_ENUM_STR),
+                    0);
+        AddIntConf(OCK_MMC_DYNAMIC_CONFIG_INTERVAL,
+                   VIntRange::Create(OCK_MMC_DYNAMIC_CONFIG_INTERVAL.first, MIN_DYNAMIC_CONFIG_INTERVAL,
+                                     MAX_DYNAMIC_CONFIG_INTERVAL),
                    0);
 
         AddBoolConf(OCK_MMC_TLS_ENABLE, VStrEnum::Create(OCK_MMC_TLS_ENABLE.first, BOOL_ENUM_STR), 0);

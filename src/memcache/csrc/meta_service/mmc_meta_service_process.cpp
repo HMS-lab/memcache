@@ -17,6 +17,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <iostream>
+#include <sys/stat.h>
 #include <thread>
 #include <unistd.h>
 
@@ -30,9 +31,11 @@
 #include "spdlogger.h"
 #include "mf_out_logger.h"
 
+#include "mmc_config_reload_utils.h"
 #include "mmc_configuration.h"
 #include "mmc_env.h"
 #include "mmc_logger.h"
+#include "mmc_meta_config_reload.h"
 #include "mmc_meta_service.h"
 #include "mmc_periodic_task.h"
 #include "mmc_ptracer.h"
@@ -112,6 +115,8 @@ int MmcMetaServiceProcess::MainForPython()
         Exit();
         return -1;
     }
+
+    StartConfigPolling();
 
     if (StartHttpServer() != MMC_OK) {
         std::cerr << "Error, failed to start the HTTP Service." << std::endl;
@@ -210,6 +215,9 @@ int MmcMetaServiceProcess::LoadConfig()
         std::cerr << "Error, invalid config." << std::endl;
         return -1;
     }
+    // Record the fixed baseline (initialized config values + built-in defaults)
+    // for non-hot-reloadable change reporting.
+    SetNonHotReloadableBaseline(configManager.GetAllItems());
     return 0;
 }
 
@@ -315,6 +323,41 @@ int MmcMetaServiceProcess::InitLogger(const mmc_meta_service_config_t &options)
     MmcOutLogger::Instance().SetExternalAuditLogFunction(SPDLOG_AuditLogMessage);
 
     return 0;
+}
+
+void MmcMetaServiceProcess::StartConfigPolling()
+{
+    if (MMC_META_CONF_PATH.empty()) {
+        return;
+    }
+    const auto &confPath = MMC_META_CONF_PATH;
+    MetaServiceConfig configManager;
+    if (!configManager.LoadFromFile(confPath)) {
+        MMC_LOG_WARN("Failed to load config for meta config polling: " << confPath);
+        return;
+    }
+    if (!configManager.GetBool(ConfConstant::OCK_MMC_DYNAMIC_CONFIG_ENABLE)) {
+        MMC_LOG_INFO("Dynamic config disabled, meta config polling skipped");
+        return;
+    }
+    const auto pollInterval =
+        static_cast<uint32_t>(configManager.GetInt(ConfConstant::OCK_MMC_DYNAMIC_CONFIG_INTERVAL));
+
+    struct stat fileStat {};
+    if (stat(confPath.c_str(), &fileStat) != 0) {
+        MMC_LOG_WARN("Failed to stat config file for meta config polling: " << confPath);
+        return;
+    }
+    lastConfigMtime_ = fileStat.st_mtime;
+
+    auto ret = RegisterPeriodicTask("MetaConfigPolling", pollInterval, [this, confPath]() {
+        ReloadMetaConfigFromFile(confPath, lastConfigMtime_, metaService_);
+    });
+    if (ret != MMC_OK) {
+        MMC_LOG_ERROR("Failed to register meta config polling task");
+        return;
+    }
+    MMC_LOG_INFO("Meta config polling registered, interval: " << pollInterval << "s, file: " << confPath);
 }
 
 int MmcMetaServiceProcess::ExtractIpPortFromUrl(const std::string &url, std::string &ip, uint16_t &port)
@@ -462,6 +505,7 @@ int MmcMetaServiceProcess::StartHttpServer()
 void MmcMetaServiceProcess::Exit()
 {
     UnregisterPeriodicTask("log_file_reopen");
+    UnregisterPeriodicTask("MetaConfigPolling");
     if (metaService_ != nullptr) {
         metaService_->Stop();
     }

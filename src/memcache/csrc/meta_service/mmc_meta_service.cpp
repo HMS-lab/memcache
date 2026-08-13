@@ -296,6 +296,42 @@ void MmcMetaService::SetPeriodicEvictActive(bool active)
     periodicEvictActive_.store(active, std::memory_order_relaxed);
 }
 
+Result MmcMetaService::UpdateConfig(const mmc_meta_service_config_t &options)
+{
+    std::lock_guard<std::mutex> guard(mutex_);
+    if (!started_) {
+        MMC_LOG_WARN("MmcMetaService not started, cannot update config");
+        return MMC_NOT_STARTED;
+    }
+    if (options.evictThresholdHigh <= options.evictThresholdLow) {
+        MMC_LOG_ERROR("invalid evict thresholds, high=" << options.evictThresholdHigh
+                                                        << ", low=" << options.evictThresholdLow
+                                                        << ", high must be greater than low");
+        return MMC_INVALID_PARAM;
+    }
+    const uint64_t newLeaseTtlMs = options.leaseTtlMs == 0 ? MMC_DATA_TTL_MS : options.leaseTtlMs;
+    if (newLeaseTtlMs == 0) {
+        MMC_LOG_ERROR("invalid leaseTtlMs, must be greater than 0, got " << options.leaseTtlMs);
+        return MMC_INVALID_PARAM;
+    }
+
+    if (metaMgrProxy_ == nullptr) {
+        MMC_LOG_WARN("Meta mgr proxy not initialized, cannot update config");
+        return MMC_NOT_INITIALIZED;
+    }
+    Result ret = metaMgrProxy_->UpdateMetaConfig(newLeaseTtlMs, options.evictThresholdHigh, options.evictThresholdLow);
+    if (ret != MMC_OK) {
+        MMC_LOG_WARN("Failed to update meta manager config, ret=" << ret);
+        return ret;
+    }
+    options_ = options;
+    options_.leaseTtlMs = newLeaseTtlMs;
+    MMC_LOG_INFO("Meta service config hot-reloaded, leaseTtlMs="
+                 << options_.leaseTtlMs << ", evictThresholdHigh=" << options_.evictThresholdHigh
+                 << ", evictThresholdLow=" << options_.evictThresholdLow);
+    return MMC_OK;
+}
+
 bool MmcMetaService::KvEventsEnabled() const
 {
     return kvEvents_.Enabled();
