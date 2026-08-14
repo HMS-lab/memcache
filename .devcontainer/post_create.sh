@@ -46,10 +46,56 @@ echo "============================================"
 # 1. third party development dependencies
 # ------------------------------------------------------------------
 
+# Network hardening for flaky/restricted CI networks — MUST run before any
+# submodule clone: force HTTP/1.1 (avoids "curl 16 HTTP2 framing" / "expected
+# flush after ref listing" aborts), raise the post buffer, disable the
+# slow-transfer timeout, and bypass SSL verification (corp networks often
+# MITM https). Reused by the pre-commit step below, so set once here.
+export GIT_SSL_NO_VERIFY=1
+git config --global http.sslVerify false
+git config --global http.version HTTP/1.1
+git config --global http.lowSpeedLimit 0
+git config --global http.postBuffer 524288000
+
+# Redirect github.com submodule URLs to gitcode.com mirrors via per-URL
+# insteadOf — rewriting happens at fetch time, so .gitmodules is left
+# untouched. Lets submodule clones avoid flaky/blocked github.com. gitcode
+# has no mirror for mockcpp / prometheus-cpp-lite; those stay on github and
+# rely on the retries below.
+_git_mirror_pairs=(
+    "https://github.com/google/googletest.git|https://gitcode.com/gh_mirrors/go/googletest.git"
+    "https://github.com/gabime/spdlog.git|https://gitcode.com/gh_mirrors/sp/spdlog.git"
+    "https://github.com/nlohmann/json.git|https://gitcode.com/gh_mirrors/js/json.git"
+    "https://github.com/msgpack/msgpack-c.git|https://gitcode.com/gh_mirrors/ms/msgpack-c.git"
+    "https://github.com/zeromq/libzmq.git|https://gitcode.com/gh_mirrors/li/libzmq.git"
+)
+for _pair in "${_git_mirror_pairs[@]}"; do
+    _src="${_pair%%|*}"
+    _dst="${_pair##*|}"
+    git config --global "url.${_dst}.insteadOf" "$_src"
+done
+unset _git_mirror_pairs _pair _src _dst
+
 echo "[1/5] Initializing git submodules …"
-if ! GIT_SSL_NO_VERIFY=1 git -c protocol.file.allow=always \
-    submodule update --init --recursive 3rdparty/ test/3rdparty/; then
-    echo "  ! submodule init failed — continuing; build/test may fail later if 3rdparty is missing."
+# Sync .gitmodules URLs (now gitcode.com mirrors) into .git/config and
+# .git/modules remotes — otherwise an existing checkout keeps the cached
+# github.com URLs and the update below still hits github.
+GIT_SSL_NO_VERIFY=1 git -c protocol.file.allow=always submodule sync 2>/dev/null || true
+# Retry: github.com is intermittently unreachable from some networks; a
+# transient clone failure should not abort setup. (Most submodules now clone
+# from gitcode.com mirrors via .gitmodules; retries cover the residual two.)
+SUBMODULE_OK=0
+for _attempt in 1 2 3; do
+    if GIT_SSL_NO_VERIFY=1 git -c protocol.file.allow=always \
+        submodule update --init --recursive 3rdparty/ test/3rdparty/; then
+        SUBMODULE_OK=1
+        break
+    fi
+    echo "  ! submodule init attempt $_attempt failed; retrying in 5s …"
+    sleep 5
+done
+if [[ $SUBMODULE_OK -ne 1 ]]; then
+    echo "  ! submodule init failed after retries — continuing; build/test may fail later if 3rdparty is missing."
 fi
 
 # ------------------------------------------------------------------
@@ -137,11 +183,7 @@ fi
 export GOPROXY="https://goproxy.cn,direct"
 export GOTOOLCHAIN="local"
 
-export GIT_SSL_NO_VERIFY=1
-git config --global http.sslVerify false
-git config --global http.version HTTP/1.1
-git config --global http.lowSpeedLimit 0
-git config --global http.postBuffer 524288000
+# (git http/SSL network hardening already configured in step 1 above.)
 
 cd "${PROJECT_DIR}"
 if [ -f ".pre-commit-config.yaml" ]; then

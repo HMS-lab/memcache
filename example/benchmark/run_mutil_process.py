@@ -34,6 +34,11 @@ if __name__ == "__main__":
     )
 
     sync = mp.Barrier(process_count)
+    # Base device: honors MMC_DEVICE_ID (set by run_all_examples.sh to an idle
+    # NPU) so single-process smoke tests don't land on a busy device 0. Defaults
+    # to 0 (the index-only behaviour) when unset, so multi-process runs still
+    # fan out across consecutive devices starting from the base.
+    base_device = int(os.environ.get("MMC_DEVICE_ID", 0))
     process = []
     # 创建两个子进程
     for index in range(process_count):
@@ -41,7 +46,7 @@ if __name__ == "__main__":
             p = mp.Process(
                 target=read_worker,
                 args=(
-                    index,
+                    base_device + index,
                     batch_size,
                     block_size,
                     call_count,
@@ -58,7 +63,7 @@ if __name__ == "__main__":
             p = mp.Process(
                 target=write_worker,
                 args=(
-                    index,
+                    base_device + index,
                     batch_size,
                     block_size,
                     call_count,

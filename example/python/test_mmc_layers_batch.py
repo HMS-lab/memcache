@@ -10,6 +10,7 @@
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
 
+import os
 from enum import Enum
 import unittest
 
@@ -22,7 +23,8 @@ import acl
 acl.init()
 count, ret = acl.rt.get_device_count()
 print("设备数量:", acl.rt.get_device_count())
-ret = acl.rt.set_device(count - 1)
+device_id = int(os.environ.get("MMC_DEVICE_ID", count - 1))
+ret = acl.rt.set_device(device_id)
 print("set_device returned: {}".format(ret))
 
 
@@ -42,7 +44,7 @@ class TestExample(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.store = DistributedObjectStore()
-        res = cls.store.init(count - 1)
+        res = cls.store.init(device_id)
         print(f"object store init res: {res}")
 
         cls.npu_tensor = torch.empty(

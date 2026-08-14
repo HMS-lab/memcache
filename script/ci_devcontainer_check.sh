@@ -30,6 +30,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 IMAGE_NAME="memcache-ci:latest"
+# A stable, script-specific container name so leftover containers from a killed
+# prior run (timeout/OOM/SIGKILL) can be identified and removed before the next
+# run. docker run --rm only reaps a container once its main process exits, so a
+# killed run leaves an orphan that --network=host lets hold port 5000, causing
+# version-mismatch alloc failures in the following run.
+CONTAINER_NAME="memcache-ci-check"
 
 # -- Helpers ------------------------------------------------------------------
 info()  { echo -e "  \e[36m[CI]\e[0m  $*"; }
@@ -110,6 +116,7 @@ run_in_container() {
     # Mounts, devices, env from .devcontainer/devcontainer.json
     local run_args=(
         run --rm
+        --name "$CONTAINER_NAME"
         --network=host
         --privileged
         --shm-size=2g
@@ -174,6 +181,23 @@ cleanup_stale_meta() {
     fi
 }
 
+# -- Cleanup stale CI containers ----------------------------------------------
+# A previous run killed by a timeout/OOM/SIGKILL before its inner bash exited
+# leaves the --rm container running on the daemon (--rm only fires on process
+# exit). With --network=host, that orphan's MetaService keeps port 5000 open, so
+# the next run reuses a mismatched build and every alloc RPC fails (error -1).
+# Remove any leftover container from a prior run before starting a new one.
+# Filtered by CONTAINER_NAME so unrelated dev containers (e.g. a manually
+# started one on the same image) are not touched.
+cleanup_stale_containers() {
+    local ids
+    ids=$(docker ps -aq --filter "name=${CONTAINER_NAME}" 2>/dev/null || true)
+    if [[ -n "$ids" ]]; then
+        info "Removing stale CI container (ID: $(echo $ids | tr '\n' ' '))"
+        docker rm -f $ids >/dev/null 2>&1 || true
+    fi
+}
+
 # -- Main ---------------------------------------------------------------------
 echo ""
 echo "============================================"
@@ -185,8 +209,9 @@ echo "============================================"
 header "Step 1: Check prerequisites"
 check_prerequisites
 
-header "Step 1.5: Cleanup stale MetaService on host"
+header "Step 1.5: Cleanup stale MetaService and containers"
 cleanup_stale_meta
+cleanup_stale_containers
 
 header "Step 2: Build Docker image (Dockerfile)"
 build_image

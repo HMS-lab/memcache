@@ -10,15 +10,18 @@
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
 
+import os
 import time
 import unittest
+
 from memcache_hybrid import DistributedObjectStore
 import acl
 
 acl.init()
 count, ret = acl.rt.get_device_count()
 print("设备数量:", acl.rt.get_device_count())
-ret = acl.rt.set_device(count - 1)
+device_id = int(os.environ.get("MMC_DEVICE_ID", count - 1))
+ret = acl.rt.set_device(device_id)
 print("set_device returned: {}".format(ret))
 
 
@@ -28,7 +31,7 @@ class TestExample(unittest.TestCase):
 
     def setUp(self):
         self._distributed_object_store = DistributedObjectStore()
-        res = self._distributed_object_store.init(count - 1)
+        res = self._distributed_object_store.init(device_id)
         self.assertEqual(res, 0)
 
     def test_1(self):

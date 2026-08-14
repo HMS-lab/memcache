@@ -98,15 +98,16 @@ skip()  { echo -e "  \e[33m[SKIP]\e[0m  $*"; SKIP=$((SKIP + 1)); }
 header(){ echo -e "\n\e[1;34m━━━ $* ━━━\e[0m"; }
 sub()   { echo -e "  \e[90m$ $*\e[0m"; }
 
-devices_idle() {
-    local ids="${NPU_IDLE_IDS:-,}"
-    local d
-    for d in "$@"; do
-        if [[ ",$ids," != *",$d,"* ]]; then
-            return 1
-        fi
-    done
-    return 0
+# Echo the first idle NPU ID from NPU_IDLE_IDS (comma-separated), or return 1
+# if none are idle. Exported as MMC_DEVICE_ID so the Python examples and the
+# benchmark run on a free card instead of a hardcoded one (they default to
+# count-1 / device 0, which may be busy and then fail with alloc-RPC errors
+# rather than being skipped). The C++ example discovers an idle device itself
+# via npu-smi, so it does not read this variable.
+pick_idle_device() {
+    local ids="${NPU_IDLE_IDS:-}"
+    [[ -n "$ids" ]] || return 1
+    echo "${ids%%,*}"
 }
 
 run_example() {
@@ -310,7 +311,36 @@ source_all_cpp_env() {
 build_project() {
     info "memcache_hybrid not found, building from source (this may take a while)..."
     trace "git submodule update --init 3rdparty/"
-    git submodule update --init 3rdparty/ 2>/dev/null || true
+    # Network hardening + retries (mirror post_create.sh): force HTTP/1.1 to
+    # avoid "curl 16 HTTP2 framing" aborts, bypass SSL for corp networks, and
+    # retry because github.com is intermittently unreachable. After
+    # post_create the global config is already set; setting again is idempotent
+    # and covers standalone runs.
+    git config --global http.version HTTP/1.1 2>/dev/null || true
+    git config --global http.postBuffer 524288000 2>/dev/null || true
+    git config --global http.sslVerify false 2>/dev/null || true
+    # Redirect github.com submodule URLs to gitcode.com mirrors via per-URL
+    # insteadOf (fetch-time rewrite, .gitmodules untouched) so clones don't
+    # hit flaky/blocked github.com. gitcode has no mirror for
+    # prometheus-cpp-lite; it stays on github and relies on retries.
+    for _pair in \
+        "https://github.com/google/googletest.git|https://gitcode.com/gh_mirrors/go/googletest.git" \
+        "https://github.com/gabime/spdlog.git|https://gitcode.com/gh_mirrors/sp/spdlog.git" \
+        "https://github.com/nlohmann/json.git|https://gitcode.com/gh_mirrors/js/json.git" \
+        "https://github.com/msgpack/msgpack-c.git|https://gitcode.com/gh_mirrors/ms/msgpack-c.git" \
+        "https://github.com/zeromq/libzmq.git|https://gitcode.com/gh_mirrors/li/libzmq.git"; do
+        git config --global "url.${_pair##*|}.insteadOf" "${_pair%%|*}" 2>/dev/null || true
+    done
+    # Sync .git/config remotes from .gitmodules; insteadOf still rewrites at fetch.
+    GIT_SSL_NO_VERIFY=1 git -c protocol.file.allow=always submodule sync 3rdparty/ 2>/dev/null || true
+    for _attempt in 1 2 3; do
+        if GIT_SSL_NO_VERIFY=1 git -c protocol.file.allow=always \
+            submodule update --init 3rdparty/; then
+            break
+        fi
+        info "submodule init attempt $_attempt failed; retrying in 5s"
+        sleep 5
+    done
     trace "build_and_pack_run.sh"
     bash "$SCRIPT_DIR/build_and_pack_run.sh" --build_mode RELEASE --build_test OFF
 }
@@ -555,6 +585,17 @@ NPU_IDLE_IDS=""
 read -r NPU_TOTAL NPU_IDLE NPU_IDLE_IDS < <(detect_npu_info)
 info "NPU: ${NPU_TOTAL} total, ${NPU_IDLE} idle (IDs: ${NPU_IDLE_IDS:-none})"
 
+# Pick one idle device for the examples to run on. Exported as MMC_DEVICE_ID
+# so child python processes (Python examples + benchmark) inherit it; the C++
+# example discovers an idle device itself via npu-smi. Sections below still
+# skip wholesale when NPU_IDLE -lt 1, so this only selects a device when at
+# least one card is free; otherwise examples fall back to their own default.
+if [[ "$NPU_IDLE" -ge 1 ]]; then
+    RUN_DEVICE_ID="$(pick_idle_device)"
+    export MMC_DEVICE_ID="$RUN_DEVICE_ID"
+    info "Using idle NPU device for examples: $RUN_DEVICE_ID (idle IDs: ${NPU_IDLE_IDS:-none})"
+fi
+
 # ── Auto-build Python deps if needed ──────────────────────────────────────────
 if $RUN_PYTHON && ! $DRY_RUN; then
     if ! ensure_python_deps; then
@@ -797,7 +838,7 @@ run_cpp_example() {
         fail "cpp run (exit=$cpp_exit)"
         if $VERBOSE; then
             echo -e "    \e[90m--- cpp test output ---\e[0m"
-            sed 's/^/    /' "$cpp_log" | head -30
+            head -30 "$cpp_log" | sed 's/^/    /'
             echo -e "    \e[90m--- end ---\e[0m"
         fi
     fi
@@ -858,7 +899,7 @@ run_bench() {
         fail "benchmark write (timeout after ${max_wait}s, no data written)"
         if $VERBOSE; then
             echo -e "    \e[90m--- bench write output ---\e[0m"
-            sed 's/^/    /' "$write_log" | head -30
+            head -30 "$write_log" | sed 's/^/    /'
             echo -e "    \e[90m--- end ---\e[0m"
         fi
         kill "$write_pid" 2>/dev/null || true
@@ -877,7 +918,7 @@ run_bench() {
         fail "benchmark read"
         if $VERBOSE; then
             echo -e "    \e[90m--- bench read output ---\e[0m"
-            sed 's/^/    /' "$read_log" | head -30
+            head -30 "$read_log" | sed 's/^/    /'
             echo -e "    \e[90m--- end ---\e[0m"
         fi
     fi
@@ -889,7 +930,7 @@ run_bench() {
 
     if $VERBOSE; then
         echo -e "    \e[90m--- bench write output ---\e[0m"
-        sed 's/^/    /' "$write_log" | head -30
+        head -30 "$write_log" | sed 's/^/    /'
         echo -e "    \e[90m--- end ---\e[0m"
     fi
     rm -f "$write_log" "$read_log"
