@@ -1,6 +1,6 @@
 [submodule "test/3rdparty/googletest"]
 	path = test/3rdparty/googletest
-	url = https://github.com/google/googletest.git
+	url = https://gitcode.com/GitHub_Trending/go/googletest.git
 	branch = tags/v1.12.0
 [submodule "test/3rdparty/mockcpp"]
 	path = test/3rdparty/mockcpp
@@ -12,11 +12,11 @@
 	branch = master
 [submodule "3rdparty/log/spdlog"]
 	path = 3rdparty/log/spdlog
-	url = https://github.com/gabime/spdlog.git
+	url = https://gitcode.com/GitHub_Trending/sp/spdlog.git
 	branch = tags/v1.15.3
 [submodule "3rdparty/nlohmann/json"]
 	path = 3rdparty/nlohmann/json
-	url = https://github.com/nlohmann/json.git
+	url = https://gitcode.com/GitHub_Trending/js/json.git
     branch = tags/v3.12.0
 [submodule "3rdparty/prometheus-cpp-lite"]
 	path = 3rdparty/prometheus-cpp-lite
@@ -24,11 +24,11 @@
 	branch = v1.0-13-g77deead
 [submodule "3rdparty/msgpack-c"]
 	path = 3rdparty/msgpack-c
-	url = https://github.com/msgpack/msgpack-c.git
+	url = https://gitcode.com/gh_mirrors/ms/msgpack-c.git
 	branch = tags/cpp-6.1.0
 [submodule "3rdparty/libzmq"]
 	path = 3rdparty/libzmq
-	url = https://github.com/zeromq/libzmq.git
+	url = https://gitcode.com/gh_mirrors/li/libzmq.git
 	branch = tags/v4.3.5
 [submodule "3rdparty/libsodium"]
 	path = 3rdparty/libsodium
