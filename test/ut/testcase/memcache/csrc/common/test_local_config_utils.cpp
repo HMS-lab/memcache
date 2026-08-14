@@ -76,6 +76,8 @@ TEST_F(TestLocalConfigUtils, CreateDefaultLocalConfigReturnsExpectedDefaults)
     EXPECT_STREQ(config.hcom_tls_key_path, "");
     EXPECT_STREQ(config.hcom_tls_key_pass_path, "");
     EXPECT_STREQ(config.hcom_tls_decrypter_path, "");
+
+    EXPECT_TRUE(config.dynamic_config_enable);
 }
 
 TEST_F(TestLocalConfigUtils, LocalConfigToStringReturnsExpectedFormat)

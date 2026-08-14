@@ -169,7 +169,7 @@ local_config create_default_local_config()
     cfg.tls_enable = false;
     cfg.config_store_tls_enable = false;
     cfg.hcom_tls_enable = false;
-    cfg.dynamic_config_enable = false;
+    cfg.dynamic_config_enable = true;
     cfg.dynamic_config_interval = DEFAULT_DYNAMIC_CONFIG_INTERVAL;
     return cfg;
 }

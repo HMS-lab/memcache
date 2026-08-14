@@ -131,7 +131,7 @@ constexpr auto OCK_MMC_ASYNC_FLUSH_BATCH_LIMIT = std::make_pair("ock.mmc.storage
 constexpr auto OCK_MMC_LOCAL_SERVICE_DRAM_BEST_EFFORT =
     std::make_pair("ock.mmc.local_service.dram.best_effort.enabled", false);
 
-constexpr auto OCK_MMC_DYNAMIC_CONFIG_ENABLE = std::make_pair("ock.mmc.dynamic_config.enable", false);
+constexpr auto OCK_MMC_DYNAMIC_CONFIG_ENABLE = std::make_pair("ock.mmc.dynamic_config.enable", true);
 constexpr auto OCK_MMC_DYNAMIC_CONFIG_INTERVAL =
     std::make_pair("ock.mmc.dynamic_config.interval", DEFAULT_DYNAMIC_CONFIG_INTERVAL);
 } // namespace ConfConstant

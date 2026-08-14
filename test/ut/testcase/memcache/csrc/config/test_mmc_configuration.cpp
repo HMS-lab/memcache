@@ -62,7 +62,7 @@ static local_config CreateLocalConfigWithCurrentDefaults()
     config.tls_enable = false;
     config.config_store_tls_enable = false;
     config.hcom_tls_enable = false;
-    config.dynamic_config_enable = false;
+    config.dynamic_config_enable = true;
     config.dynamic_config_interval = DEFAULT_DYNAMIC_CONFIG_INTERVAL;
     return config;
 }
@@ -575,7 +575,7 @@ TEST_F(TestMmcConfiguration, DynamicConfigDefaultsInLocalServiceConfig)
     mmc_local_service_config_t serviceConfig{};
     clientConfig.GetLocalServiceConfig(serviceConfig);
 
-    EXPECT_FALSE(serviceConfig.dynamicConfigEnable);
+    EXPECT_TRUE(serviceConfig.dynamicConfigEnable);
     EXPECT_EQ(serviceConfig.dynamicConfigInterval, DEFAULT_DYNAMIC_CONFIG_INTERVAL);
 }
 
@@ -584,13 +584,13 @@ TEST_F(TestMmcConfiguration, DynamicConfigSetupWithCustomValues)
     ClientConfig clientConfig;
     auto config = CreateLocalConfigWithCurrentDefaults();
 
-    config.dynamic_config_enable = true;
+    config.dynamic_config_enable = false;
     config.dynamic_config_interval = 10;
 
     const auto ret = clientConfig.Setup(&config);
     ASSERT_TRUE(ret);
 
-    EXPECT_TRUE(clientConfig.GetBool(ConfConstant::OCK_MMC_DYNAMIC_CONFIG_ENABLE));
+    EXPECT_FALSE(clientConfig.GetBool(ConfConstant::OCK_MMC_DYNAMIC_CONFIG_ENABLE));
     EXPECT_EQ(clientConfig.GetInt(ConfConstant::OCK_MMC_DYNAMIC_CONFIG_INTERVAL), 10);
 }
 
@@ -599,7 +599,7 @@ TEST_F(TestMmcConfiguration, DynamicConfigGetLocalServiceConfig)
     ClientConfig clientConfig;
     auto config = CreateLocalConfigWithCurrentDefaults();
 
-    config.dynamic_config_enable = true;
+    config.dynamic_config_enable = false;
     config.dynamic_config_interval = 15;
 
     const auto ret = clientConfig.Setup(&config);
@@ -608,7 +608,7 @@ TEST_F(TestMmcConfiguration, DynamicConfigGetLocalServiceConfig)
     mmc_local_service_config_t serviceConfig{};
     clientConfig.GetLocalServiceConfig(serviceConfig);
 
-    EXPECT_TRUE(serviceConfig.dynamicConfigEnable);
+    EXPECT_FALSE(serviceConfig.dynamicConfigEnable);
     EXPECT_EQ(serviceConfig.dynamicConfigInterval, 15U);
 }
 
