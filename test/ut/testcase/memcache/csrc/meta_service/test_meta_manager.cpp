@@ -1004,6 +1004,32 @@ TEST_F(TestMmcMetaManager, UpdateConfigAppliesNewValues)
     metaMng->Stop();
 }
 
+// PrefetchKeys with empty keys silently passes and returns MMC_OK
+TEST_F(TestMmcMetaManager, PrefetchKeys_EmptyKeys_ReturnsOk)
+{
+    uint64_t defaultTtl = 2000;
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 60U, REWARM_DRAM_WATERMARK);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+
+    std::vector<std::string> emptyKeys;
+    EXPECT_EQ(metaMng->PrefetchKeys(emptyKeys), MMC_OK);
+
+    metaMng->Stop();
+}
+
+// EvictKeys with empty keys returns MMC_INVALID_PARAM
+TEST_F(TestMmcMetaManager, EvictKeys_EmptyKeys_ReturnsError)
+{
+    uint64_t defaultTtl = 2000;
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 60U, REWARM_DRAM_WATERMARK);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+
+    std::vector<std::string> emptyKeys;
+    EXPECT_EQ(metaMng->EvictKeys(emptyKeys), MMC_INVALID_PARAM);
+
+    metaMng->Stop();
+}
+
 TEST_F(TestMmcMetaManager, UpdateConfigRejectsInvalidWatermark)
 {
     constexpr uint64_t defaultTtl = 2000U;
@@ -1045,6 +1071,116 @@ TEST_F(TestMmcMetaManager, UpdateConfigUnchangedKeepsValues)
     ASSERT_GT(watermarks.size(), static_cast<size_t>(MEDIA_DRAM));
     EXPECT_EQ(watermarks[MEDIA_DRAM].first, highWatermark);
     EXPECT_EQ(watermarks[MEDIA_DRAM].second, lowWatermark);
+
+    metaMng->Stop();
+}
+
+// PrefetchKeys with valid keys returns MMC_OK (async operation)
+TEST_F(TestMmcMetaManager, PrefetchKeys_ValidKeys_ReturnsOk)
+{
+    MmcLocation dramLoc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo dramInfo{0, 128 * 1024};
+
+    uint64_t defaultTtl = 2000;
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 60U, REWARM_DRAM_WATERMARK);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+
+    // Allocate a key in DRAM
+    std::string key = "prefetch_test_key";
+    AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+    MmcMemMetaDesc objMeta;
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->UpdateState(key, dramLoc, MMC_WRITE_OK, 1), MMC_OK);
+
+    // PrefetchKeys should return MMC_OK (async operation dispatched)
+    std::vector<std::string> keys = {key};
+    EXPECT_EQ(metaMng->PrefetchKeys(keys), MMC_OK);
+
+    // Wait for async operation
+    usleep(100000U);
+
+    metaMng->Stop();
+}
+
+// EvictKeys with valid keys returns MMC_OK (async operation)
+TEST_F(TestMmcMetaManager, EvictKeys_ValidKeys_ReturnsOk)
+{
+    MmcLocation dramLoc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo dramInfo{0, 128 * 1024};
+
+    uint64_t defaultTtl = 2000;
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 60U, REWARM_DRAM_WATERMARK);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+
+    // Allocate a key in DRAM
+    std::string key = "evict_test_key";
+    AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+    MmcMemMetaDesc objMeta;
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->UpdateState(key, dramLoc, MMC_WRITE_OK, 1), MMC_OK);
+
+    // EvictKeys should return MMC_OK (async operation dispatched)
+    std::vector<std::string> keys = {key};
+    EXPECT_EQ(metaMng->EvictKeys(keys), MMC_OK);
+
+    // Wait for async operation
+    usleep(100000U);
+
+    metaMng->Stop();
+}
+
+// PrefetchKey single-key variant works
+TEST_F(TestMmcMetaManager, PrefetchKey_SingleKey_ReturnsOk)
+{
+    MmcLocation dramLoc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo dramInfo{0, 128 * 1024};
+
+    uint64_t defaultTtl = 2000;
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 60U, REWARM_DRAM_WATERMARK);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+
+    std::string key = "prefetch_single_key";
+    AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+    MmcMemMetaDesc objMeta;
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->UpdateState(key, dramLoc, MMC_WRITE_OK, 1), MMC_OK);
+
+    EXPECT_EQ(metaMng->PrefetchKey(key), MMC_OK);
+    usleep(100000U);
+
+    metaMng->Stop();
+}
+
+// EvictKey single-key variant works
+TEST_F(TestMmcMetaManager, EvictKey_SingleKey_ReturnsOk)
+{
+    MmcLocation dramLoc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo dramInfo{0, 128 * 1024};
+
+    uint64_t defaultTtl = 2000;
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 60U, REWARM_DRAM_WATERMARK);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+
+    std::string key = "evict_single_key";
+    AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+    MmcMemMetaDesc objMeta;
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->UpdateState(key, dramLoc, MMC_WRITE_OK, 1), MMC_OK);
+
+    EXPECT_EQ(metaMng->EvictKey(key), MMC_OK);
+    usleep(100000U);
 
     metaMng->Stop();
 }

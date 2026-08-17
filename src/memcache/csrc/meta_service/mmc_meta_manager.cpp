@@ -1271,10 +1271,11 @@ nlohmann::json MmcMetaManager::GetAllSegmentInfo() const
     return globalAllocator_->GetAllSegmentInfo();
 }
 
-void MmcMetaManager::PrefetchKeys(const std::vector<std::string> &keys)
+Result MmcMetaManager::PrefetchKeys(const std::vector<std::string> &keys)
 {
     if (keys.empty()) {
-        return;
+        MMC_LOG_INFO("PrefetchKeys: keys is empty, silently passing the function");
+        return MMC_OK;
     }
     uint64_t operateId = GenerateOperateId(UINT32_MAX);
     std::vector<MmcMemMetaDesc> objMetas(keys.size());
@@ -1283,6 +1284,29 @@ void MmcMetaManager::PrefetchKeys(const std::vector<std::string> &keys)
     if (ret != MMC_OK) {
         MMC_LOG_ERROR("GetByRank failed ret:" << ret << " operatedId:" << operateId << " size:" << keys.size());
     }
+    return ret;
+}
+
+Result MmcMetaManager::EvictKeys(const std::vector<std::string> &keys)
+{
+    if (keys.empty()) {
+        MMC_LOG_INFO("EvictKeys called with empty keys");
+        return MMC_INVALID_PARAM;
+    }
+    for (const auto &key : keys) {
+        MmcMemObjMetaPtr objMeta;
+        auto ret = metaContainer_->Get(key, objMeta);
+        if (ret != MMC_OK || objMeta == nullptr) {
+            MMC_LOG_INFO("key not found: " << key << ", EvictKeys() skip");
+            continue;
+        }
+
+        // 先从 DRAM LRU 摘除，防止被自动淘汰并发处理
+        metaContainer_->RemoveFromLru(key, MEDIA_DRAM);
+
+        EvictCallBackFunction(key, objMeta, MEDIA_DRAM);
+    }
+    return MMC_OK;
 }
 
 Result MmcMetaManager::Query(const std::string &key, uint64_t operateId, uint32_t flags, MemObjQueryInfo &queryInfo)

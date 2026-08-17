@@ -168,6 +168,26 @@ public:
 
     Result BatchExistKey(const BatchIsExistRequest &req, BatchIsExistResponse &resp);
 
+    Result PrefetchKeys(const std::vector<std::string> &keys)
+    {
+        return metaMangerPtr_->PrefetchKeys(keys);
+    }
+
+    Result PrefetchKey(const std::string &key)
+    {
+        return metaMangerPtr_->PrefetchKey(key);
+    }
+
+    Result EvictKey(const std::string &key)
+    {
+        return metaMangerPtr_->EvictKey(key);
+    }
+
+    Result EvictKeys(const std::vector<std::string> &keys)
+    {
+        return metaMangerPtr_->EvictKeys(keys);
+    }
+
     Result Query(const QueryRequest &req, QueryResponse &resp)
     {
         MmcMetaMetricManager &metricManager = MmcMetaMetricManager::GetInstance();

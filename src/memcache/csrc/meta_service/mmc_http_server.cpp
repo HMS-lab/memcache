@@ -85,6 +85,18 @@ bool GetRequiredParam(ock::acc::AccHttpRequestContext &ctx, const std::string &p
     return true;
 }
 
+bool GetStringArray(const nlohmann::json &array, std::vector<std::string> &items)
+{
+    items.clear();
+    for (const auto &element : array) {
+        if (!element.is_string()) {
+            return false;
+        }
+        items.push_back(element.get<std::string>());
+    }
+    return true;
+}
+
 void SplitCommaSeparated(const std::string &source, std::vector<std::string> &items)
 {
     items.clear();
@@ -322,6 +334,83 @@ void MmcHttpServer::RegisterDataManagementEndpoints()
         return ReplyJsonOk(ctx, result);
     };
     server_->RegisterHttpHandler(acc::AccHttpMethod::GET, "/batch_query_keys", batchQueryKeysHandler);
+
+    // /memory/evict — JSON body: {"chunk_hashes": [...], "locations": [...]}
+    // locations absent/null → RemoveKey (global delete); otherwise → EvictKeys (move down one tier)
+    server_->RegisterHttpHandler(
+        acc::AccHttpMethod::POST, "/memory/evict", [this](acc::AccHttpRequestContext &ctx) -> int32_t {
+            if (restApiFacade_ == nullptr) {
+                return ReplyJsonError200(ctx, kErrorInternalServer);
+            }
+            nlohmann::json body;
+            try {
+                body = nlohmann::json::parse(BodyToString(ctx));
+            } catch (const nlohmann::json::parse_error &) {
+                return ReplyJsonError200(ctx, "Invalid JSON body");
+            }
+            if (!body.contains("chunk_hashes") || !body["chunk_hashes"].is_array()) {
+                return ReplyJsonError200(ctx, "Missing 'chunk_hashes' in request body");
+            }
+            std::vector<std::string> keys;
+            if (!GetStringArray(body["chunk_hashes"], keys)) {
+                return ReplyJsonError200(ctx, "'chunk_hashes' must be an array of strings");
+            }
+
+            const bool hasLocations = body.contains("locations") && !body["locations"].is_null();
+            size_t numEvicted = 0;
+            Result ret = MMC_OK;
+            if (!hasLocations) {
+                for (const auto &k : keys) {
+                    ret = restApiFacade_->RemoveKey(k);
+                    // MMC_UNMATCHED_KEY 说明 key 已被上层（如 LRU 淘汰）清除，属预期结果，
+                    // 与 MMC_OK 一样可继续处理后续 key；仅 MMC_ERROR 这类真实失败才终止。
+                    if (ret == MMC_ERROR) {
+                        break;
+                    }
+                    if (ret == MMC_OK) {
+                        ++numEvicted;
+                    }
+                }
+            } else {
+                ret = restApiFacade_->EvictKeys(keys);
+                if (ret == MMC_OK) {
+                    numEvicted = keys.size();
+                }
+            }
+            // MMC_UNMATCHED_KEY 视为成功（key 已被清除），静默通过；仅真实失败才返回错误
+            if (ret != MMC_OK && ret != MMC_UNMATCHED_KEY) {
+                return ReplyJsonError200(ctx, kErrorInternalServer);
+            }
+            return ReplyJsonOk(ctx, {{"status", "success"}, {"num_evicted", numEvicted}});
+        });
+
+    // /memory/prefetch — JSON body: {"chunk_hashes": [...], "lookup_id": "..."}
+    server_->RegisterHttpHandler(
+        acc::AccHttpMethod::POST, "/memory/prefetch", [this](acc::AccHttpRequestContext &ctx) -> int32_t {
+            if (restApiFacade_ == nullptr) {
+                return ReplyJsonError200(ctx, kErrorInternalServer);
+            }
+            nlohmann::json body;
+            try {
+                body = nlohmann::json::parse(BodyToString(ctx));
+            } catch (const nlohmann::json::parse_error &) {
+                return ReplyJsonError200(ctx, "Invalid JSON body");
+            }
+            if (!body.contains("chunk_hashes") || !body["chunk_hashes"].is_array()) {
+                return ReplyJsonError200(ctx, "Missing 'chunk_hashes' in request body");
+            }
+            std::vector<std::string> keys;
+            if (!GetStringArray(body["chunk_hashes"], keys)) {
+                return ReplyJsonError200(ctx, "'chunk_hashes' must be an array of strings");
+            }
+            std::string lookupId = body.value("lookup_id", "");
+            const Result ret = restApiFacade_->PrefetchKeys(keys);
+            if (ret != MMC_OK) {
+                return ReplyJsonError200(ctx, kErrorInternalServer);
+            }
+            return ReplyJsonOk(ctx,
+                               {{"status", "prefetch_started"}, {"lookup_id", lookupId}, {"num_chunks", keys.size()}});
+        });
 }
 
 void MmcHttpServer::RegisterSegmentManagementEndpoints()

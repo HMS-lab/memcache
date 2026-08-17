@@ -1703,3 +1703,136 @@ curl "http://127.0.0.1:8000/kv_events/status"
 | `success` | 请求是否成功；错误场景固定为 `false` | 全局统一错误返回规则 |
 | `error_message` | 实际错误原因；此处仅为格式示例 | 全局错误返回格式规则 |
 | `timestamp` | 错误返回格式中的时间戳字段 | 全局错误返回格式规则 |
+
+## 26 `POST /memory/evict`
+
+### 作用
+
+驱逐指定的 KV cache。根据 `locations` 字段决定行为：
+
+- **未指定 `locations` 或 `locations` 为 `null`**：全局删除 key（所有层级）
+- **指定了 `locations`**：将 key 从当前层级向下移动一层（如 DRAM → SSD）
+
+### curl
+
+```bash
+# 全局删除（不指定 locations）
+curl -X POST "http://127.0.0.1:8000/memory/evict" \
+  -H "Content-Type: application/json" \
+  -d '{"chunk_hashes": ["a1b2c3d4..."]}'
+
+# 向下移动一层（指定 locations）
+curl -X POST "http://127.0.0.1:8000/memory/evict" \
+  -H "Content-Type: application/json" \
+  -d '{"chunk_hashes": ["a1b2c3d4..."], "locations": ["LocalCPUBackend"]}'
+```
+
+### 请求参数
+
+请求体为 JSON 格式：
+
+| 参数名 | 类型 | 必填 | 描述 |
+|---|---|---|---|
+| `chunk_hashes` | Array[String] | 是 | 要驱逐的 chunk hash 列表 |
+| `locations` | Array[String] | 否 | 目标位置列表；不指定或为 `null` 时执行全局删除 |
+
+### 成功示例
+
+`application/json; charset=utf-8`：
+
+```json
+{
+  "status": "success",
+  "num_evicted": 1
+}
+```
+
+**解释**
+
+| 字段 | 含义 | 来源 |
+|---|---|---|
+| `status` | 操作状态；成功时固定为 `success` | 接口成功返回约定 |
+| `num_evicted` | 本次驱逐的 chunk 数量 | 接口成功返回约定 |
+
+### 错误示例
+
+`application/json; charset=utf-8`：
+
+```json
+{
+  "success": false,
+  "error_message": "actual error reason",
+  "timestamp": 0
+}
+```
+
+**解释**
+
+| 字段 | 含义 | 来源 |
+|---|---|---|
+| `success` | 请求是否成功；错误场景固定为 `false` | 全局统一错误返回规则 |
+| `error_message` | 实际错误原因；如 `Invalid JSON body`、`Missing 'chunk_hashes' in request body` 等 | 全局错误返回格式规则 |
+| `timestamp` | 错误返回格式中的时间戳字段 | 全局错误返回格式规则 |
+
+## 27 `POST /memory/prefetch`
+
+### 作用
+
+预取指定的 KV cache。将数据从低层级（如 SSD）提前加载到高层级（如 DRAM），以加速后续访问。
+
+### curl
+
+```bash
+curl -X POST "http://127.0.0.1:8000/memory/prefetch" \
+  -H "Content-Type: application/json" \
+  -d '{"chunk_hashes": ["a1b2c3d4...", "e5f6g7h8..."], "lookup_id": "req_001"}'
+```
+
+### 请求参数
+
+请求体为 JSON 格式：
+
+| 参数名 | 类型 | 必填 | 描述 |
+|---|---|---|---|
+| `chunk_hashes` | Array[String] | 是 | 要预取的 chunk hash 列表 |
+| `lookup_id` | String | 否 | 预取请求标识符，用于追踪；不指定时返回空字符串 |
+
+### 成功示例
+
+`application/json; charset=utf-8`：
+
+```json
+{
+  "status": "prefetch_started",
+  "lookup_id": "req_001",
+  "num_chunks": 2
+}
+```
+
+**解释**
+
+| 字段 | 含义 | 来源 |
+|---|---|---|
+| `status` | 操作状态；成功时固定为 `prefetch_started` | 接口成功返回约定 |
+| `lookup_id` | 请求标识符，回显客户端传入的值 | 请求参数回显 |
+| `num_chunks` | 本次预取的 chunk 数量 | 接口成功返回约定 |
+
+### 错误示例
+
+`application/json; charset=utf-8`：
+
+```json
+{
+  "success": false,
+  "error_message": "actual error reason",
+  "timestamp": 0
+}
+```
+
+**解释**
+
+| 字段 | 含义 | 来源 |
+|---|---|---|
+| `success` | 请求是否成功；错误场景固定为 `false` | 全局统一错误返回规则 |
+| `error_message` | 实际错误原因；如 `Invalid JSON body`、`Missing 'chunk_hashes' in request body` 等 | 全局错误返回格式规则 |
+| `timestamp` | 错误返回格式中的时间戳字段 | 全局错误返回格式规则 |

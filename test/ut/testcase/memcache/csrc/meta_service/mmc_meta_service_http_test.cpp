@@ -396,6 +396,9 @@ TEST_F(MmcMetaServiceHttpTest, RoutesContract)
     ASSERT_NE(allKeysAfterRemoveAllResponse, nullptr);
     EXPECT_EQ(allKeysAfterRemoveAllResponse->body, "");
 
+    // Wait for async blob cleanup from RemoveAll to finish
+    usleep(200000U);
+
     PrepareAllocatedKey();
 
     auto removeKeyResponse = client.Delete(std::string("/key?key=") + kHttpAllocKey);
@@ -846,4 +849,164 @@ TEST_F(MmcMetaServiceHttpTest, ProxyBatchOpsTrackCounters)
     EXPECT_EQ(afterSnapshot.batchRemoveSuccessCount, beforeSnapshot.batchRemoveSuccessCount + successDelta);
     EXPECT_EQ(afterSnapshot.batchRemoveNotFoundCount, beforeSnapshot.batchRemoveNotFoundCount);
     EXPECT_EQ(afterSnapshot.batchRemoveFailureCount, beforeSnapshot.batchRemoveFailureCount);
+}
+
+TEST_F(MmcMetaServiceHttpTest, MemoryEvict_WithoutLocations_RemovesKey)
+{
+    MockMmcHttpClient client(kHttpLocalHost, httpPort_);
+
+    // /memory/evict without locations → RemoveKey (global delete)
+    nlohmann::json requestBody;
+    requestBody["chunk_hashes"] = {kHttpAllocKey};
+    // No "locations" field → should trigger RemoveKey
+
+    auto response = client.Post("/memory/evict", requestBody.dump(), "application/json");
+    ASSERT_NE(response, nullptr);
+    ASSERT_EQ(response->status, kHttpStatusOk);
+    auto responseJson = nlohmann::json::parse(response->body);
+    EXPECT_EQ(responseJson.at("status"), "success");
+    EXPECT_EQ(responseJson.at("num_evicted").get<size_t>(), 1u);
+
+    // Wait for async operation
+    usleep(100000U);
+
+    // Verify key is removed
+    auto queryResponse = WaitForResponse(client, std::string("/query_key?key=") + kHttpAllocKey);
+    ASSERT_NE(queryResponse, nullptr);
+    auto queryJson = nlohmann::json::parse(queryResponse->body);
+    EXPECT_FALSE(queryJson.at("success").get<bool>());
+    EXPECT_EQ(queryJson.at("error_message"), "Key not found");
+}
+
+TEST_F(MmcMetaServiceHttpTest, MemoryEvict_WithLocations_EvictsKey)
+{
+    MockMmcHttpClient client(kHttpLocalHost, httpPort_);
+
+    // /memory/evict with locations → EvictKeys (move down one tier)
+    nlohmann::json requestBody;
+    requestBody["chunk_hashes"] = {kHttpAllocKey};
+    requestBody["locations"] = {"LocalCPUBackend"};
+
+    auto response = client.Post("/memory/evict", requestBody.dump(), "application/json");
+    ASSERT_NE(response, nullptr);
+    ASSERT_EQ(response->status, kHttpStatusOk);
+    auto responseJson = nlohmann::json::parse(response->body);
+    EXPECT_EQ(responseJson.at("status"), "success");
+    EXPECT_EQ(responseJson.at("num_evicted").get<size_t>(), 1u);
+
+    // Wait for async operation
+    usleep(100000U);
+}
+
+TEST_F(MmcMetaServiceHttpTest, MemoryEvict_NullLocations_RemovesKey)
+{
+    MockMmcHttpClient client(kHttpLocalHost, httpPort_);
+
+    // /memory/evict with locations=null → RemoveKey (global delete)
+    nlohmann::json requestBody;
+    requestBody["chunk_hashes"] = {kHttpAllocKey};
+    requestBody["locations"] = nullptr;
+
+    auto response = client.Post("/memory/evict", requestBody.dump(), "application/json");
+    ASSERT_NE(response, nullptr);
+    ASSERT_EQ(response->status, kHttpStatusOk);
+    auto responseJson = nlohmann::json::parse(response->body);
+    EXPECT_EQ(responseJson.at("status"), "success");
+
+    usleep(100000U);
+}
+
+TEST_F(MmcMetaServiceHttpTest, MemoryEvict_InvalidJson_ReturnsError)
+{
+    MockMmcHttpClient client(kHttpLocalHost, httpPort_);
+
+    auto response = client.Post("/memory/evict", "not valid json", "application/json");
+    ASSERT_NE(response, nullptr);
+    ASSERT_EQ(response->status, kHttpStatusOk);
+    auto responseJson = nlohmann::json::parse(response->body);
+    EXPECT_FALSE(responseJson.at("success").get<bool>());
+    EXPECT_EQ(responseJson.at("error_message"), "Invalid JSON body");
+}
+
+TEST_F(MmcMetaServiceHttpTest, MemoryEvict_MissingChunkHashes_ReturnsError)
+{
+    MockMmcHttpClient client(kHttpLocalHost, httpPort_);
+
+    nlohmann::json requestBody;
+    requestBody["locations"] = {"LocalCPUBackend"};
+    // Missing "chunk_hashes"
+
+    auto response = client.Post("/memory/evict", requestBody.dump(), "application/json");
+    ASSERT_NE(response, nullptr);
+    ASSERT_EQ(response->status, kHttpStatusOk);
+    auto responseJson = nlohmann::json::parse(response->body);
+    EXPECT_FALSE(responseJson.at("success").get<bool>());
+    EXPECT_EQ(responseJson.at("error_message"), "Missing 'chunk_hashes' in request body");
+}
+
+TEST_F(MmcMetaServiceHttpTest, MemoryPrefetch_ReturnsPrefetchStarted)
+{
+    MockMmcHttpClient client(kHttpLocalHost, httpPort_);
+
+    nlohmann::json requestBody;
+    requestBody["chunk_hashes"] = {kHttpAllocKey};
+    requestBody["lookup_id"] = "test_lookup_001";
+
+    auto response = client.Post("/memory/prefetch", requestBody.dump(), "application/json");
+    ASSERT_NE(response, nullptr);
+    ASSERT_EQ(response->status, kHttpStatusOk);
+    auto responseJson = nlohmann::json::parse(response->body);
+    EXPECT_EQ(responseJson.at("status"), "prefetch_started");
+    EXPECT_EQ(responseJson.at("lookup_id"), "test_lookup_001");
+    EXPECT_EQ(responseJson.at("num_chunks").get<size_t>(), 1u);
+
+    // Wait for async operation
+    usleep(100000U);
+}
+
+TEST_F(MmcMetaServiceHttpTest, MemoryPrefetch_WithoutLookupId_ReturnsEmptyLookupId)
+{
+    MockMmcHttpClient client(kHttpLocalHost, httpPort_);
+
+    nlohmann::json requestBody;
+    requestBody["chunk_hashes"] = {kHttpAllocKey};
+    // No "lookup_id" field
+
+    auto response = client.Post("/memory/prefetch", requestBody.dump(), "application/json");
+    ASSERT_NE(response, nullptr);
+    ASSERT_EQ(response->status, kHttpStatusOk);
+    auto responseJson = nlohmann::json::parse(response->body);
+    EXPECT_EQ(responseJson.at("status"), "prefetch_started");
+    EXPECT_EQ(responseJson.at("lookup_id"), "");
+    EXPECT_EQ(responseJson.at("num_chunks").get<size_t>(), 1u);
+
+    usleep(100000U);
+}
+
+TEST_F(MmcMetaServiceHttpTest, MemoryPrefetch_InvalidJson_ReturnsError)
+{
+    MockMmcHttpClient client(kHttpLocalHost, httpPort_);
+
+    auto response = client.Post("/memory/prefetch", "not valid json", "application/json");
+    ASSERT_NE(response, nullptr);
+    ASSERT_EQ(response->status, kHttpStatusOk);
+    auto responseJson = nlohmann::json::parse(response->body);
+    EXPECT_FALSE(responseJson.at("success").get<bool>());
+    EXPECT_EQ(responseJson.at("error_message"), "Invalid JSON body");
+}
+
+TEST_F(MmcMetaServiceHttpTest, MemoryPrefetch_MissingChunkHashes_ReturnsError)
+{
+    MockMmcHttpClient client(kHttpLocalHost, httpPort_);
+
+    nlohmann::json requestBody;
+    requestBody["lookup_id"] = "test_lookup_002";
+    // Missing "chunk_hashes"
+
+    auto response = client.Post("/memory/prefetch", requestBody.dump(), "application/json");
+    ASSERT_NE(response, nullptr);
+    ASSERT_EQ(response->status, kHttpStatusOk);
+    auto responseJson = nlohmann::json::parse(response->body);
+    EXPECT_FALSE(responseJson.at("success").get<bool>());
+    EXPECT_EQ(responseJson.at("error_message"), "Missing 'chunk_hashes' in request body");
 }

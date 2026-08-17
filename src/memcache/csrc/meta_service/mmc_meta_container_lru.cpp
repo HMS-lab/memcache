@@ -216,6 +216,23 @@ public:
         return MMC_UNMATCHED_KEY;
     }
 
+    Result RemoveFromLru(const Key &key, MediaType type)
+    {
+        ock::mf::ReadGuard lockGuard(metaLock_);
+        auto iter = metaMap_.find(key);
+        if (iter == metaMap_.end()) {
+            MMC_LOG_WARN("RemoveFromLru: Key " << key << " not found.");
+            return MMC_UNMATCHED_KEY;
+        }
+        if (iter->second.mediaType_ == type) {
+            ock::mf::WriteGuard lockGuard(lruLock_);
+            lruLists_[type].erase(iter->second.lruIter_);
+            iter->second.mediaType_ = MEDIA_NONE;
+            MMC_LOG_DEBUG("Removed LRU entry, key=" << key << ", type=" << type);
+        }
+        return MMC_OK;
+    }
+
     bool EvictOneLeastRecentlyUsed(std::function<EvictResult(const Key &, const Value &, MediaType)> moveFunc,
                                    const MediaType mediaType)
     {

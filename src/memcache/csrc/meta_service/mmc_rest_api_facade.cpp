@@ -406,6 +406,30 @@ Result MmcRestApiFacade::BatchQueryKeys(const std::vector<std::string> &keys, nl
     return MMC_OK;
 }
 
+Result MmcRestApiFacade::EvictKey(const std::string &key) const
+{
+    MMC_VALIDATE_RETURN(metaMgrProxy_ != nullptr, "meta manager proxy is nullptr", MMC_NOT_INITIALIZED);
+    return metaMgrProxy_->EvictKey(key);
+}
+
+Result MmcRestApiFacade::EvictKeys(const std::vector<std::string> &keys) const
+{
+    MMC_VALIDATE_RETURN(metaMgrProxy_ != nullptr, "meta manager proxy is nullptr", MMC_NOT_INITIALIZED);
+    return metaMgrProxy_->EvictKeys(keys);
+}
+
+Result MmcRestApiFacade::PrefetchKey(const std::string &key) const
+{
+    MMC_VALIDATE_RETURN(metaMgrProxy_ != nullptr, "meta manager proxy is nullptr", MMC_NOT_INITIALIZED);
+    return metaMgrProxy_->PrefetchKey(key);
+}
+
+Result MmcRestApiFacade::PrefetchKeys(const std::vector<std::string> &keys) const
+{
+    MMC_VALIDATE_RETURN(metaMgrProxy_ != nullptr, "meta manager proxy is nullptr", MMC_NOT_INITIALIZED);
+    return metaMgrProxy_->PrefetchKeys(keys);
+}
+
 Result MmcRestApiFacade::GetAllKeys(std::vector<std::string> &keys) const
 {
     MMC_VALIDATE_RETURN(metaManager_ != nullptr, "meta manager is nullptr", MMC_NOT_INITIALIZED);

@@ -270,7 +270,37 @@ public:
      */
     nlohmann::json GetAllSegmentInfo() const;
 
-    void PrefetchKeys(const std::vector<std::string> &keys);
+    /**
+     * @brief Prefetch keys from lower tier (e.g. SSD) to upper tier (e.g. DRAM)
+     * @param keys          [in] keys of the meta objects to be prefetched
+     */
+    Result PrefetchKeys(const std::vector<std::string> &keys);
+
+    /**
+     * @brief Prefetch a single key from lower tier to upper tier
+     * @param key           [in] key of the meta object to be prefetched
+     */
+    Result PrefetchKey(const std::string &key)
+    {
+        return PrefetchKeys({key});
+    }
+
+    /**
+     * @brief Evict keys from upper tier (e.g. DRAM) to lower tier (e.g. SSD),
+     *        or remove the upper tier blob directly when SSD is unavailable or
+     *        DRAM usage is above the rewarm watermark
+     * @param keys          [in] keys of the meta objects to be evicted
+     */
+    Result EvictKeys(const std::vector<std::string> &keys);
+
+    /**
+     * @brief Evict a single key from upper tier to lower tier
+     * @param key           [in] key of the meta object to be evicted
+     */
+    Result EvictKey(const std::string &key)
+    {
+        return EvictKeys({key});
+    }
 
     /**
      * @brief Check if a meta object (key) is in memory
