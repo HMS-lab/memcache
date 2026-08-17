@@ -26,6 +26,7 @@ namespace {
 
 constexpr int K_ZMQ_SEND_HWM = 10000;
 constexpr int K_ZMQ_LINGER_MS = 0;
+constexpr int K_ZMQ_IPV6_ENABLED = 1;
 constexpr size_t K_CURVE_KEY_BIN_SIZE = 32;
 constexpr size_t K_CURVE_KEY_Z85_LEN = 40;
 
@@ -192,6 +193,11 @@ std::unique_ptr<IKvEventTransport> MakeZmqPubTransport(const KvEventConfig &conf
     (void)zmq_setsockopt(socket, ZMQ_SNDHWM, &hwm, sizeof(hwm));
     int linger = K_ZMQ_LINGER_MS;
     (void)zmq_setsockopt(socket, ZMQ_LINGER, &linger, sizeof(linger));
+    // ZMQ_IPV6 must be set before bind. Enabling it makes the socket dual-stack:
+    // it accepts connections from both IPv4 and IPv6 hosts (see ZMQ_IPV6 in the
+    // zmq_setsockopt docs), so binding "tcp://*:port" covers both families.
+    int ipv6 = K_ZMQ_IPV6_ENABLED;
+    (void)zmq_setsockopt(socket, ZMQ_IPV6, &ipv6, sizeof(ipv6));
 
     ApplyCurveServer(socket, config);
 

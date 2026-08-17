@@ -23,6 +23,7 @@ Wire format (per ZMQ multipart message):
 
 Usage:
   python3 kv_event_sub.py [--endpoint tcp://127.0.0.1:5557] [--topic kv]
+  python3 kv_event_sub.py --endpoint "tcp://[::1]:5557"  # IPv6 works directly
 """
 
 import argparse
@@ -101,6 +102,9 @@ def main():
 
     ctx = zmq.Context.instance()
     sock = ctx.socket(zmq.SUB)
+    # Enable IPv6 (ZMQ_IPV6=1): the socket accepts both IPv4 and IPv6, so an
+    # IPv6 --endpoint like tcp://[::1]:5557 can be subscribed to directly.
+    sock.ipv6 = True
     encrypted = setup_curve(sock, SERVER_PUB_KEY)
     sock.connect(args.endpoint)
     if args.topic:
