@@ -361,7 +361,7 @@ Result MmcClientDefault::BatchPut(const std::vector<std::string> &keys, const st
 
     // put obj — 从此时开始计时, alloc 失败不会产生虚假指标
     batchResult.assign(keys.size(), MMC_OK);
-    BandwidthGuard guard(MetricOp::PUT, bandwidthCollector_, bufArrs, batchResult);
+    BandwidthGuard guard(MetricOp::BATCH_PUT, bandwidthCollector_, bufArrs, batchResult);
     auto ret = PutData2Blobs(keys, bufArrs, allocResponse, batchResult);
 
     // update blob state
@@ -481,7 +481,7 @@ Result MmcClientDefault::BatchGet(const std::vector<std::string> &keys, const st
         return MMC_ERROR;
     }
     // read data — 从此时开始计时, alloc 失败不会产生虚假指标
-    BandwidthGuard guard(MetricOp::GET, bandwidthCollector_, bufArrs, batchResult);
+    BandwidthGuard guard(MetricOp::BATCH_GET, bandwidthCollector_, bufArrs, batchResult);
     std::vector<uint64_t> localLeaseDeadlinesMs = ToLocalLeaseDeadlinesMs(response.blobs_);
     MediaType mediaType = MEDIA_NONE;
     std::vector<std::tuple<uint32_t, uint32_t, std::future<int32_t>>> futures;
@@ -642,6 +642,7 @@ Result MmcClientDefault::BatchIsExist(const std::vector<std::string> &keys, std:
 
     BatchIsExistRequest request{keys};
     BatchIsExistResponse response;
+    BandwidthGuard guard(MetricOp::BATCH_EXIST, bandwidthCollector_);
     MMC_RETURN_ERROR(metaNetClient_->SyncCall(request, response, rpcRetryTimeOut_),
                      "client " << name_ << " BatchIsExist failed");
 

@@ -34,7 +34,7 @@ struct BandwidthMetricData {
     double latencyP50{0.0};      // P50 延迟(秒)
     double latencyP90{0.0};      // P90 延迟(秒)
     double latencyP99{0.0};      // P99 延迟(秒)
-    double latencyAve{0.0};      // 平均延迟(秒)
+    double latencyAvg{0.0};      // 平均延迟(秒)
     double bytesPerSec{0.0};     // 瞬时速率(字节/秒)
     // 累计值
     uint64_t cumTotalBytes{0};      // 累计总字节
@@ -67,8 +67,8 @@ struct UbsIoMetricData {
 };
 
 // 所有区分操作的语义集中在此, 其余各层用数组索引, 通过 MetricOp::COUNT 自动适配
-enum class MetricOp : uint8_t { PUT = 0, GET, COUNT };
-constexpr const char *K_METRIC_OP_LABEL[] = {"put", "get"};
+enum class MetricOp : uint8_t { BATCH_PUT = 0, BATCH_GET, BATCH_EXIST, COUNT };
+constexpr const char *K_METRIC_OP_LABEL[] = {"batch_put", "batch_get", "batch_exist"};
 static_assert(sizeof(K_METRIC_OP_LABEL) / sizeof(K_METRIC_OP_LABEL[0]) == static_cast<size_t>(MetricOp::COUNT),
               "K_METRIC_OP_LABEL size must match MetricOp::COUNT");
 

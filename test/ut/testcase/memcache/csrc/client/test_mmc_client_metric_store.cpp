@@ -149,8 +149,8 @@ TEST_F(TestMmcClientMetricStore, DifferentOperationsHaveSeparateSlots)
     req.rank_ = testRank;
     constexpr uint64_t kPutBytes = 111U;
     constexpr uint64_t kGetBytes = 222U;
-    req.bandwidths_[static_cast<size_t>(MetricOp::PUT)].totalBytes = kPutBytes;
-    req.bandwidths_[static_cast<size_t>(MetricOp::GET)].totalBytes = kGetBytes;
+    req.bandwidths_[static_cast<size_t>(MetricOp::BATCH_PUT)].totalBytes = kPutBytes;
+    req.bandwidths_[static_cast<size_t>(MetricOp::BATCH_GET)].totalBytes = kGetBytes;
 
     EXPECT_EQ(store.Update(req), MMC_OK);
 
@@ -159,8 +159,8 @@ TEST_F(TestMmcClientMetricStore, DifferentOperationsHaveSeparateSlots)
         if (v.rank != testRank) {
             continue;
         }
-        EXPECT_EQ(v.bandwidths[static_cast<size_t>(MetricOp::PUT)].totalBytes, kPutBytes);
-        EXPECT_EQ(v.bandwidths[static_cast<size_t>(MetricOp::GET)].totalBytes, kGetBytes);
+        EXPECT_EQ(v.bandwidths[static_cast<size_t>(MetricOp::BATCH_PUT)].totalBytes, kPutBytes);
+        EXPECT_EQ(v.bandwidths[static_cast<size_t>(MetricOp::BATCH_GET)].totalBytes, kGetBytes);
         return;
     }
     FAIL() << "rank " << testRank << " not found";
@@ -170,12 +170,12 @@ TEST_F(TestMmcClientMetricStore, StatsReportRequestSerializeDeserializeRoundTrip
 {
     StatsReportRequest req;
     req.rank_ = 42U;
-    req.bandwidths_[static_cast<size_t>(MetricOp::PUT)].totalBytes = 100U;
-    req.bandwidths_[static_cast<size_t>(MetricOp::PUT)].totalDurationMs = 50U;
-    req.bandwidths_[static_cast<size_t>(MetricOp::PUT)].cumTotalBytes = 200U;
-    req.bandwidths_[static_cast<size_t>(MetricOp::PUT)].cumTotalDurationMs = 100U;
-    req.bandwidths_[static_cast<size_t>(MetricOp::GET)].totalBytes = 300U;
-    req.bandwidths_[static_cast<size_t>(MetricOp::GET)].totalDurationMs = 150U;
+    req.bandwidths_[static_cast<size_t>(MetricOp::BATCH_PUT)].totalBytes = 100U;
+    req.bandwidths_[static_cast<size_t>(MetricOp::BATCH_PUT)].totalDurationMs = 50U;
+    req.bandwidths_[static_cast<size_t>(MetricOp::BATCH_PUT)].cumTotalBytes = 200U;
+    req.bandwidths_[static_cast<size_t>(MetricOp::BATCH_PUT)].cumTotalDurationMs = 100U;
+    req.bandwidths_[static_cast<size_t>(MetricOp::BATCH_GET)].totalBytes = 300U;
+    req.bandwidths_[static_cast<size_t>(MetricOp::BATCH_GET)].totalDurationMs = 150U;
 
     NetMsgPacker packer;
     ASSERT_EQ(req.Serialize(packer), MMC_OK);
@@ -185,12 +185,12 @@ TEST_F(TestMmcClientMetricStore, StatsReportRequestSerializeDeserializeRoundTrip
     NetMsgUnpacker unpacker(serialized);
     ASSERT_EQ(req2.Deserialize(unpacker), MMC_OK);
     EXPECT_EQ(req2.rank_, 42U);
-    EXPECT_EQ(req2.bandwidths_[static_cast<size_t>(MetricOp::PUT)].totalBytes, 100U);
-    EXPECT_EQ(req2.bandwidths_[static_cast<size_t>(MetricOp::PUT)].totalDurationMs, 50U);
-    EXPECT_EQ(req2.bandwidths_[static_cast<size_t>(MetricOp::PUT)].cumTotalBytes, 200U);
-    EXPECT_EQ(req2.bandwidths_[static_cast<size_t>(MetricOp::PUT)].cumTotalDurationMs, 100U);
-    EXPECT_EQ(req2.bandwidths_[static_cast<size_t>(MetricOp::GET)].totalBytes, 300U);
-    EXPECT_EQ(req2.bandwidths_[static_cast<size_t>(MetricOp::GET)].totalDurationMs, 150U);
+    EXPECT_EQ(req2.bandwidths_[static_cast<size_t>(MetricOp::BATCH_PUT)].totalBytes, 100U);
+    EXPECT_EQ(req2.bandwidths_[static_cast<size_t>(MetricOp::BATCH_PUT)].totalDurationMs, 50U);
+    EXPECT_EQ(req2.bandwidths_[static_cast<size_t>(MetricOp::BATCH_PUT)].cumTotalBytes, 200U);
+    EXPECT_EQ(req2.bandwidths_[static_cast<size_t>(MetricOp::BATCH_PUT)].cumTotalDurationMs, 100U);
+    EXPECT_EQ(req2.bandwidths_[static_cast<size_t>(MetricOp::BATCH_GET)].totalBytes, 300U);
+    EXPECT_EQ(req2.bandwidths_[static_cast<size_t>(MetricOp::BATCH_GET)].totalDurationMs, 150U);
 }
 
 TEST_F(TestMmcClientMetricStore, StatsReportResponseSerializeDeserializeRoundTrip)

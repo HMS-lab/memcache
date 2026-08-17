@@ -131,6 +131,9 @@ void AppendBandwidthWindowGauges(std::ostringstream &oss, const std::vector<ock:
     for (const auto &view : freshViews) {
         const std::string r = std::to_string(view.rank);
         for (size_t opIdx = 0; opIdx < static_cast<size_t>(ock::mmc::MetricOp::COUNT); ++opIdx) {
+            if (view.bandwidths[opIdx].cumTotalBytes == 0) {
+                continue;
+            }
             oss << "memcache_bandwidth_bytes{rank=\"" << r << "\",operation=\"" << ock::mmc::K_METRIC_OP_LABEL[opIdx]
                 << "\"} " << view.bandwidths[opIdx].totalBytes << '\n';
         }
@@ -154,6 +157,9 @@ void AppendBandwidthCumulativeCounters(std::ostringstream &oss, const std::vecto
     for (const auto &view : freshViews) {
         const std::string r = std::to_string(view.rank);
         for (size_t opIdx = 0; opIdx < static_cast<size_t>(ock::mmc::MetricOp::COUNT); ++opIdx) {
+            if (view.bandwidths[opIdx].cumTotalBytes == 0) {
+                continue;
+            }
             oss << "memcache_bandwidth_bytes_cum_total{rank=\"" << r << "\",operation=\""
                 << ock::mmc::K_METRIC_OP_LABEL[opIdx] << "\"} " << view.bandwidths[opIdx].cumTotalBytes << '\n';
         }
@@ -186,7 +192,7 @@ void AppendBandwidthLatency(std::ostringstream &oss, const std::vector<ock::mmc:
             oss << "memcache_bandwidth_latency_seconds{rank=\"" << r << "\",operation=\"" << op
                 << "\",quantile=\"P99\"} " << bw.latencyP99 << '\n';
             oss << "memcache_bandwidth_latency_seconds{rank=\"" << r << "\",operation=\"" << op
-                << "\",quantile=\"Avg\"} " << bw.latencyAve << '\n';
+                << "\",quantile=\"Avg\"} " << bw.latencyAvg << '\n';
         }
     }
 }
@@ -198,6 +204,9 @@ void AppendBandwidthBytesPerSec(std::ostringstream &oss, const std::vector<ock::
     for (const auto &view : freshViews) {
         const std::string r = std::to_string(view.rank);
         for (size_t opIdx = 0; opIdx < static_cast<size_t>(ock::mmc::MetricOp::COUNT); ++opIdx) {
+            if (view.bandwidths[opIdx].cumTotalBytes == 0) {
+                continue;
+            }
             oss << "memcache_bandwidth_bytes_per_sec{rank=\"" << r << "\",operation=\""
                 << ock::mmc::K_METRIC_OP_LABEL[opIdx] << "\"} " << view.bandwidths[opIdx].bytesPerSec << '\n';
         }
@@ -875,6 +884,9 @@ Result MmcRestApiFacade::BuildPrometheusMetrics(bool serviceReady, std::string &
     AppendMetricHeader(oss, "memcache_evict_mem_delete_total", "Total number of memory tier eviction delete operations",
                        "counter");
     AppendMetricValue(oss, "memcache_evict_mem_delete_total", metricSnapshot.evictMemDeleteCount);
+    AppendMetricHeader(oss, "memcache_evict_running", "Whether eviction (GC) is currently running (1=yes, 0=no)",
+                       "gauge");
+    AppendMetricValue(oss, "memcache_evict_running", metaManager_ != nullptr && metaManager_->IsEvictRunning() ? 1 : 0);
     AppendMetricHeader(oss, "memcache_async_flush_blobs_added_total",
                        "Total number of SSD blobs registered via async flush", "counter");
     AppendMetricValue(oss, "memcache_async_flush_blobs_added_total", metricSnapshot.asyncFlushBlobAdded);

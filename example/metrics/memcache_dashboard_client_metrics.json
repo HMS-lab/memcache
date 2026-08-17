@@ -82,7 +82,7 @@
       },
       "targets": [
         {
-          "expr": "memcache_bandwidth_latency_seconds{rank=~\"$rank\", operation=\"get\", quantile=~\"$quantile\"}",
+          "expr": "memcache_bandwidth_latency_seconds{rank=~\"$rank\", operation=\"batch_get\", quantile=~\"$quantile\"}",
           "legendFormat": "{{rank}} @ {{quantile}}",
           "refId": "A"
         }
@@ -119,7 +119,7 @@
       },
       "targets": [
         {
-          "expr": "memcache_bandwidth_latency_seconds{rank=~\"$rank\", operation=\"put\", quantile=~\"$quantile\"}",
+          "expr": "memcache_bandwidth_latency_seconds{rank=~\"$rank\", operation=\"batch_put\", quantile=~\"$quantile\"}",
           "legendFormat": "{{rank}} @ {{quantile}}",
           "refId": "A"
         }
@@ -156,7 +156,7 @@
       },
       "targets": [
         {
-          "expr": "memcache_bandwidth_bytes{rank=~\"$rank\", operation=\"get\"}",
+          "expr": "memcache_bandwidth_bytes{rank=~\"$rank\", operation=\"batch_get\"}",
           "legendFormat": "{{rank}}",
           "refId": "A"
         }
@@ -193,7 +193,7 @@
       },
       "targets": [
         {
-          "expr": "memcache_bandwidth_bytes{rank=~\"$rank\", operation=\"put\"}",
+          "expr": "memcache_bandwidth_bytes{rank=~\"$rank\", operation=\"batch_put\"}",
           "legendFormat": "{{rank}}",
           "refId": "A"
         }
@@ -230,7 +230,7 @@
       },
       "targets": [
         {
-          "expr": "memcache_bandwidth_bytes_per_sec{rank=~\"$rank\", operation=\"get\"}",
+          "expr": "memcache_bandwidth_bytes_per_sec{rank=~\"$rank\", operation=\"batch_get\"}",
           "legendFormat": "{{rank}}",
           "refId": "A"
         }
@@ -267,7 +267,7 @@
       },
       "targets": [
         {
-          "expr": "memcache_bandwidth_bytes_per_sec{rank=~\"$rank\", operation=\"put\"}",
+          "expr": "memcache_bandwidth_bytes_per_sec{rank=~\"$rank\", operation=\"batch_put\"}",
           "legendFormat": "{{rank}}",
           "refId": "A"
         }
@@ -317,7 +317,7 @@
       },
       "targets": [
         {
-          "expr": "memcache_bandwidth_duration_ms_cum_total{rank=~\"$rank\"} / 1000",
+          "expr": "memcache_bandwidth_duration_ms_cum_total{rank=~\"$rank\",operation=~\"batch_put|batch_get\"} / 1000",
           "legendFormat": "{{rank}} @ {{operation}}",
           "refId": "A"
         }
@@ -391,7 +391,7 @@
       },
       "targets": [
         {
-          "expr": "memcache_bandwidth_bytes_cum_total{rank=~\"$rank\"} / (memcache_bandwidth_duration_ms_cum_total{rank=~\"$rank\"} / 1000)",
+          "expr": "memcache_bandwidth_bytes_cum_total{rank=~\"$rank\",operation=~\"batch_put|batch_get\"} / (memcache_bandwidth_duration_ms_cum_total{rank=~\"$rank\",operation=~\"batch_put|batch_get\"} / 1000)",
           "legendFormat": "{{rank}} @ {{operation}}",
           "refId": "A"
         }

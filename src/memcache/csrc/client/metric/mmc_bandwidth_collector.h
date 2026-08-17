@@ -34,27 +34,26 @@ public:
 
     void Observe(MetricOp op, uint64_t bytes, uint64_t durationUs)
     {
-        switch (op) {
-            case MetricOp::PUT:
-                samplers_[static_cast<size_t>(MetricOp::PUT)].Record(bytes, durationUs);
-                break;
-            case MetricOp::GET:
-                samplers_[static_cast<size_t>(MetricOp::GET)].Record(bytes, durationUs);
-                break;
-            default:
-                break;
+        if (op >= MetricOp::COUNT) {
+            return;
         }
+        samplers_[static_cast<size_t>(op)].Record(bytes, durationUs);
     }
 
 private:
     MmcBandwidthSampler samplers_[static_cast<size_t>(MetricOp::COUNT)];
 };
 
+// 供 latency-only 操作(无数据搬运, 如 EXIST)的 guard 默认参数引用, 程序级生命期, 避免引用悬空
+inline const std::vector<MmcBufferArray> kEmptyBufArrs;
+inline const std::vector<int> kEmptyResults;
+
 // RAII guard: 析构时自动计算耗时并按成功条目汇总字节, 上报到 BandwidthCollector
 class BandwidthGuard {
 public:
-    BandwidthGuard(MetricOp op, BandwidthCollector *collector, const std::vector<MmcBufferArray> &bufArrs,
-                   const std::vector<int> &results)
+    BandwidthGuard(MetricOp op, BandwidthCollector *collector,
+                   const std::vector<MmcBufferArray> &bufArrs = kEmptyBufArrs,
+                   const std::vector<int> &results = kEmptyResults)
         : start_(std::chrono::steady_clock::now()), op_(op), collector_(collector), bufArrs_(bufArrs), results_(results)
     {}
 

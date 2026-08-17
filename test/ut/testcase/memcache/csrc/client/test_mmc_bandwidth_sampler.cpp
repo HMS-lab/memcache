@@ -94,7 +94,7 @@ TEST_F(TestMmcBandwidthSampler, CollectWithoutDataReturnsZeros)
     EXPECT_EQ(out_.latencyP50, 0.0);
     EXPECT_EQ(out_.latencyP90, 0.0);
     EXPECT_EQ(out_.latencyP99, 0.0);
-    EXPECT_EQ(out_.latencyAve, 0.0);
+    EXPECT_EQ(out_.latencyAvg, 0.0);
     EXPECT_EQ(out_.bytesPerSec, 0.0);
 }
 
@@ -116,7 +116,7 @@ TEST_F(TestMmcBandwidthSampler, LatencyPercentilesWithSufficientData)
     EXPECT_GT(out_.latencyP50, 0.0);
     EXPECT_GT(out_.latencyP90, 0.0);
     EXPECT_GT(out_.latencyP99, 0.0);
-    EXPECT_GT(out_.latencyAve, 0.0);
+    EXPECT_GT(out_.latencyAvg, 0.0);
 }
 
 TEST_F(TestMmcBandwidthSampler, SmallLatencyIsNotZero)
@@ -125,7 +125,7 @@ TEST_F(TestMmcBandwidthSampler, SmallLatencyIsNotZero)
         sampler_.Record(100ULL, i * 5U + 10U);
     }
     sampler_.Collect(out_);
-    EXPECT_GT(out_.latencyAve, 0.0);
+    EXPECT_GT(out_.latencyAvg, 0.0);
 }
 
 TEST_F(TestMmcBandwidthSampler, MultiThreadedRecordAggregatesCorrectly)
@@ -160,7 +160,7 @@ TEST_F(TestMmcBandwidthSampler, ThreadExitPreservesPercentileData)
     shortLived.join();
     sampler_.Collect(out_);
     EXPECT_GT(out_.totalBytes, 0);
-    EXPECT_GT(out_.latencyAve, 0.0);
+    EXPECT_GT(out_.latencyAvg, 0.0);
 }
 
 TEST_F(TestMmcBandwidthSampler, CollectAfterThreadExitIsSafe)
@@ -180,7 +180,7 @@ TEST_F(TestMmcBandwidthSampler, FlushTlsToGlobalTriggeredByFullBucket)
     }
     sampler_.Collect(out_);
     EXPECT_GT(out_.totalBytes, 0);
-    EXPECT_GT(out_.latencyAve, 0.0);
+    EXPECT_GT(out_.latencyAvg, 0.0);
     EXPECT_GT(out_.latencyP50, 0.0);
 }
 

@@ -295,6 +295,9 @@ memcache_evict_ssd_delete_total 0
 # HELP memcache_evict_mem_delete_total Total number of memory tier eviction delete operations
 # TYPE memcache_evict_mem_delete_total counter
 memcache_evict_mem_delete_total 0
+# HELP memcache_evict_running Whether eviction (GC) is currently running (1=yes, 0=no)
+# TYPE memcache_evict_running gauge
+memcache_evict_running 0
 # HELP memcache_get_hits_dram_total Total number of Get hits served from DRAM
 # TYPE memcache_get_hits_dram_total counter
 memcache_get_hits_dram_total 0
@@ -354,22 +357,22 @@ memcache_kv_events_last_sequence 0
 memcache_metric_stale{rank="0"} 0
 # HELP memcache_bandwidth_bytes Client bandwidth window bytes transferred
 # TYPE memcache_bandwidth_bytes gauge
-memcache_bandwidth_bytes{rank="0",operation="put"} 0
+memcache_bandwidth_bytes{rank="0",operation="batch_put"} 0
 # HELP memcache_bandwidth_duration_ms Client bandwidth window duration in milliseconds
 # TYPE memcache_bandwidth_duration_ms gauge
-memcache_bandwidth_duration_ms{rank="0",operation="put"} 0
+memcache_bandwidth_duration_ms{rank="0",operation="batch_put"} 0
 # HELP memcache_bandwidth_bytes_cum_total Client bandwidth cumulative bytes transferred
 # TYPE memcache_bandwidth_bytes_cum_total counter
-memcache_bandwidth_bytes_cum_total{rank="0",operation="put"} 0
+memcache_bandwidth_bytes_cum_total{rank="0",operation="batch_put"} 0
 # HELP memcache_bandwidth_duration_ms_cum_total Client bandwidth cumulative duration in milliseconds
 # TYPE memcache_bandwidth_duration_ms_cum_total counter
-memcache_bandwidth_duration_ms_cum_total{rank="0",operation="put"} 0
+memcache_bandwidth_duration_ms_cum_total{rank="0",operation="batch_put"} 0
 # HELP memcache_bandwidth_latency_seconds Client bandwidth operation latency in seconds
 # TYPE memcache_bandwidth_latency_seconds gauge
-memcache_bandwidth_latency_seconds{rank="0",operation="put",quantile="P50"} 0
+memcache_bandwidth_latency_seconds{rank="0",operation="batch_put",quantile="P50"} 0
 # HELP memcache_bandwidth_bytes_per_sec Client bandwidth instantaneous bytes per second
 # TYPE memcache_bandwidth_bytes_per_sec gauge
-memcache_bandwidth_bytes_per_sec{rank="0",operation="put"} 0
+memcache_bandwidth_bytes_per_sec{rank="0",operation="batch_put"} 0
 # HELP memcache_ubs_io_disk_capacity_bytes Client UBS IO SSD total capacity in bytes
 # TYPE memcache_ubs_io_disk_capacity_bytes gauge
 memcache_ubs_io_disk_capacity_bytes{rank="0"} 0
@@ -430,6 +433,7 @@ memcache_ubs_io_disk_total_bandwidth_bytes_per_sec{rank="0",disk_path="/data/dis
 | `memcache_evict_to_ssd_total` | counter | — | `MmcMetaMetricSnapshot::evictToSsdCount` | 迁移到 SSD 的驱逐次数；支持 per-rank |
 | `memcache_evict_ssd_delete_total` | counter | — | `MmcMetaMetricSnapshot::evictSsdDeleteCount` | 驱逐时 SSD blob 删除数；支持 per-rank |
 | `memcache_evict_mem_delete_total` | counter | — | `MmcMetaMetricSnapshot::evictMemDeleteCount` | 驱逐时内存层 blob 删除数；支持 per-rank |
+| `memcache_evict_running` | gauge | — | `MmcMetaManager::evictCheck_` | 是否正在执行淘汰(GC)（1=是，0=否） |
 | `memcache_get_hits_dram_total` | counter | — | `MmcMetaMetricSnapshot::getHitDramCount` | 命中 DRAM 的 Get 次数；支持 per-rank |
 | `memcache_get_hits_ssd_total` | counter | — | `MmcMetaMetricSnapshot::getHitSsdCount` | 命中 SSD（触发回温）的 Get 次数；支持 per-rank |
 | `memcache_rewarm_total` | counter | — | `MmcMetaMetricSnapshot::rewarmCount` | SSD→DRAM 回温操作总数；支持 per-rank |
@@ -449,12 +453,12 @@ memcache_ubs_io_disk_total_bandwidth_bytes_per_sec{rank="0",disk_path="/data/dis
 | `memcache_kv_events_publisher_active` | gauge | — | `KvEventStats::publisherActive` | 发布线程是否运行（1/0） |
 | `memcache_kv_events_last_sequence` | gauge | — | `KvEventStats::lastSequence` | 最后发布的 ZMQ 序列号 |
 | `memcache_metric_stale` | gauge | `rank` | `RankMetricView::stale` | 客户端 metric 是否过期（1=过期，0=在线）；客户端指标仅在存在在线 `RankMetricView` 时输出 |
-| `memcache_bandwidth_bytes` | gauge | `rank`,`operation`=`put`\|`get` | `BandwidthMetricData::totalBytes` | 带宽窗口传输字节数（滑动窗口值）；`operation` 实际采集客户端 `BatchPut`/`BatchGet` 调用数据 |
-| `memcache_bandwidth_duration_ms` | gauge | `rank`,`operation`=`put`\|`get` | `BandwidthMetricData::totalDurationMs` | 带宽窗口时长（ms，滑动窗口值）；`operation` 实际采集 `BatchPut`/`BatchGet` |
-| `memcache_bandwidth_bytes_cum_total` | counter | `rank`,`operation`=`put`\|`get` | `BandwidthMetricData::cumTotalBytes` | 累计传输字节数（自启动起累计）；`operation` 实际采集 `BatchPut`/`BatchGet` |
-| `memcache_bandwidth_duration_ms_cum_total` | counter | `rank`,`operation`=`put`\|`get` | `BandwidthMetricData::cumTotalDurationMs` | 累计时长（ms，自启动起累计）；`operation` 实际采集 `BatchPut`/`BatchGet` |
-| `memcache_bandwidth_latency_seconds` | gauge | `rank`,`operation`=`put`\|`get`,`quantile`=`P50`\|`P90`\|`P99`\|`Avg` | `BandwidthMetricData::latencyP50`/`P90`/`P99`/`Ave` | 操作延迟分位（秒）；`operation` 实际采集 `BatchPut`/`BatchGet` |
-| `memcache_bandwidth_bytes_per_sec` | gauge | `rank`,`operation`=`put`\|`get` | `BandwidthMetricData::bytesPerSec` | 瞬时带宽（B/s）；`operation` 实际采集 `BatchPut`/`BatchGet` |
+| `memcache_bandwidth_bytes` | gauge | `rank`,`operation`=`batch_put`\|`batch_get` | `BandwidthMetricData::totalBytes` | 带宽窗口传输字节数（滑动窗口值） |
+| `memcache_bandwidth_duration_ms` | gauge | `rank`,`operation`=`batch_put`\|`batch_get`\|`batch_exist` | `BandwidthMetricData::totalDurationMs` | 带宽窗口时长（ms，滑动窗口值） |
+| `memcache_bandwidth_bytes_cum_total` | counter | `rank`,`operation`=`batch_put`\|`batch_get` | `BandwidthMetricData::cumTotalBytes` | 累计传输字节数（自启动起累计） |
+| `memcache_bandwidth_duration_ms_cum_total` | counter | `rank`,`operation`=`batch_put`\|`batch_get`\|`batch_exist` | `BandwidthMetricData::cumTotalDurationMs` | 累计时长（ms，自启动起累计） |
+| `memcache_bandwidth_latency_seconds` | gauge | `rank`,`operation`=`batch_put`\|`batch_get`\|`batch_exist`,`quantile`=`P50`\|`P90`\|`P99`\|`Avg` | `BandwidthMetricData::latencyP50`/`P90`/`P99`/`Avg` | 操作延迟分位（秒） |
+| `memcache_bandwidth_bytes_per_sec` | gauge | `rank`,`operation`=`batch_put`\|`batch_get` | `BandwidthMetricData::bytesPerSec` | 瞬时带宽（B/s） |
 | `memcache_ubs_io_disk_capacity_bytes` | gauge | `rank` | `UbsIoMetricData::diskCap` | SSD 总容量 |
 | `memcache_ubs_io_disk_used_bytes` | gauge | `rank` | `UbsIoMetricData::diskUsed` | SSD 已用容量 |
 | `memcache_ubs_io_mem_capacity_bytes` | gauge | `rank` | `UbsIoMetricData::memCap` | 内存总容量 |

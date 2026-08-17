@@ -40,34 +40,34 @@ TEST_F(TestMmcBandwidthCollector, NameReturnsBandwidth)
 
 TEST_F(TestMmcBandwidthCollector, ObservePutUpdatesPutSlot)
 {
-    collector_.Observe(MetricOp::PUT, 1024ULL, 1000ULL);
+    collector_.Observe(MetricOp::BATCH_PUT, 1024ULL, 1000ULL);
     collector_.Collect(snapshot_);
-    const auto &putData = snapshot_.bandwidths[static_cast<size_t>(MetricOp::PUT)];
+    const auto &putData = snapshot_.bandwidths[static_cast<size_t>(MetricOp::BATCH_PUT)];
     EXPECT_EQ(putData.totalBytes, 1024U);
     EXPECT_EQ(putData.totalDurationMs, 1U);
 }
 
 TEST_F(TestMmcBandwidthCollector, ObserveGetUpdatesGetSlot)
 {
-    collector_.Observe(MetricOp::GET, 2048ULL, 2000ULL);
+    collector_.Observe(MetricOp::BATCH_GET, 2048ULL, 2000ULL);
     collector_.Collect(snapshot_);
-    const auto &getData = snapshot_.bandwidths[static_cast<size_t>(MetricOp::GET)];
+    const auto &getData = snapshot_.bandwidths[static_cast<size_t>(MetricOp::BATCH_GET)];
     EXPECT_EQ(getData.totalBytes, 2048U);
     EXPECT_EQ(getData.totalDurationMs, 2U);
 }
 
 TEST_F(TestMmcBandwidthCollector, ObservePutDoesNotAffectGetSlot)
 {
-    collector_.Observe(MetricOp::PUT, 1024ULL, 1000ULL);
+    collector_.Observe(MetricOp::BATCH_PUT, 1024ULL, 1000ULL);
     collector_.Collect(snapshot_);
-    const auto &getData = snapshot_.bandwidths[static_cast<size_t>(MetricOp::GET)];
+    const auto &getData = snapshot_.bandwidths[static_cast<size_t>(MetricOp::BATCH_GET)];
     EXPECT_EQ(getData.totalBytes, 0);
 }
 
 TEST_F(TestMmcBandwidthCollector, ResetClearsAllSlots)
 {
-    collector_.Observe(MetricOp::PUT, 1024ULL, 500ULL);
-    collector_.Observe(MetricOp::GET, 512ULL, 300ULL);
+    collector_.Observe(MetricOp::BATCH_PUT, 1024ULL, 500ULL);
+    collector_.Observe(MetricOp::BATCH_GET, 512ULL, 300ULL);
     collector_.Reset();
     collector_.Collect(snapshot_);
     for (size_t i = 0; i < static_cast<size_t>(MetricOp::COUNT); ++i) {
@@ -77,11 +77,11 @@ TEST_F(TestMmcBandwidthCollector, ResetClearsAllSlots)
 
 TEST_F(TestMmcBandwidthCollector, MultipleObservesAggregate)
 {
-    collector_.Observe(MetricOp::PUT, 100ULL, 100ULL);
-    collector_.Observe(MetricOp::PUT, 200ULL, 200ULL);
-    collector_.Observe(MetricOp::PUT, 300ULL, 300ULL);
+    collector_.Observe(MetricOp::BATCH_PUT, 100ULL, 100ULL);
+    collector_.Observe(MetricOp::BATCH_PUT, 200ULL, 200ULL);
+    collector_.Observe(MetricOp::BATCH_PUT, 300ULL, 300ULL);
     collector_.Collect(snapshot_);
-    const auto &putData = snapshot_.bandwidths[static_cast<size_t>(MetricOp::PUT)];
+    const auto &putData = snapshot_.bandwidths[static_cast<size_t>(MetricOp::BATCH_PUT)];
     EXPECT_EQ(putData.totalBytes, 600U);
     EXPECT_EQ(putData.totalDurationMs, 0);
 }
@@ -115,11 +115,11 @@ TEST_F(TestMmcBandwidthCollector, GuardDestructorReportsBytesAndDuration)
     {
         std::vector<MmcBufferArray> bufs = {MakeBufArr(100U)};
         std::vector<int> results = {MMC_OK};
-        BandwidthGuard guard(MetricOp::PUT, &collector_, bufs, results);
+        BandwidthGuard guard(MetricOp::BATCH_PUT, &collector_, bufs, results);
         std::this_thread::sleep_for(std::chrono::milliseconds(5U));
     }
     collector_.Collect(snapshot_);
-    const auto &d = snapshot_.bandwidths[static_cast<size_t>(MetricOp::PUT)];
+    const auto &d = snapshot_.bandwidths[static_cast<size_t>(MetricOp::BATCH_PUT)];
     EXPECT_EQ(d.totalBytes, 100U);
     EXPECT_GT(d.totalDurationMs, 0U);
 }
@@ -128,7 +128,7 @@ TEST_F(TestMmcBandwidthCollector, GuardNullCollectorDoesNotCrash)
 {
     std::vector<MmcBufferArray> bufs = {MakeBufArr(100U)};
     std::vector<int> results = {MMC_OK};
-    EXPECT_NO_THROW({ BandwidthGuard guard(MetricOp::PUT, nullptr, bufs, results); });
+    EXPECT_NO_THROW({ BandwidthGuard guard(MetricOp::BATCH_PUT, nullptr, bufs, results); });
 }
 
 TEST_F(TestMmcBandwidthCollector, GuardOnlyCountsSuccessfulEntries)
@@ -136,11 +136,11 @@ TEST_F(TestMmcBandwidthCollector, GuardOnlyCountsSuccessfulEntries)
     {
         std::vector<MmcBufferArray> bufs = {MakeBufArr(100U), MakeBufArr(200U), MakeBufArr(300U)};
         std::vector<int> results = {MMC_OK, -1, MMC_OK};
-        BandwidthGuard guard(MetricOp::GET, &collector_, bufs, results);
+        BandwidthGuard guard(MetricOp::BATCH_GET, &collector_, bufs, results);
         std::this_thread::sleep_for(std::chrono::milliseconds(5U));
     }
     collector_.Collect(snapshot_);
-    const auto &d = snapshot_.bandwidths[static_cast<size_t>(MetricOp::GET)];
+    const auto &d = snapshot_.bandwidths[static_cast<size_t>(MetricOp::BATCH_GET)];
     EXPECT_EQ(d.totalBytes, 400U);
     EXPECT_GT(d.totalDurationMs, 0);
 }

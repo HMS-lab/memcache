@@ -329,6 +329,11 @@ public:
      */
     void CheckAndEvict(MediaType media, uint64_t wantAllocSize);
 
+    bool IsEvictRunning() const noexcept
+    {
+        return evictCheck_.load(std::memory_order_relaxed);
+    }
+
     inline uint64_t Ttl()
     {
         return defaultTtlMs_.load(std::memory_order_relaxed);

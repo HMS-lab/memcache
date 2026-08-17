@@ -114,7 +114,7 @@ void MmcBandwidthSampler::Collect(BandwidthMetricData &out) const
     out.latencyP99 = static_cast<double>(combined.GetPercentile(PCT_99)) / USEC_PER_SEC;
 
     if (totalCount > 0) {
-        out.latencyAve = static_cast<double>(totalUs) / static_cast<double>(totalCount) / USEC_PER_SEC;
+        out.latencyAvg = static_cast<double>(totalUs) / static_cast<double>(totalCount) / USEC_PER_SEC;
     }
 
     if (totalUs > 0) {

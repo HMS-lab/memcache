@@ -71,6 +71,7 @@ std::vector<MmcMemBlobPtr> MmcMemObjMeta::FreeBlobs(const std::string &key, MmcG
     if (NumBlobs() == 0) {
         return {};
     }
+    TP_TRACE_BEGIN(TP_MMC_META_FREE_BLOB);
     std::vector<MmcMemBlobPtr> blobs = GetBlobs(filter);
     RemoveBlobs(filter);
 
@@ -103,6 +104,7 @@ std::vector<MmcMemBlobPtr> MmcMemObjMeta::FreeBlobs(const std::string &key, MmcG
             MMC_LOG_ERROR("Error in free blobs! failed:" << ret);
         }
     }
+    TP_TRACE_END(TP_MMC_META_FREE_BLOB, MMC_OK);
     return blobs;
 }
 
