@@ -495,6 +495,9 @@ void MmcMetaManager::RollbackEntry(const std::string &key, const RewarmEntry &en
     std::unique_lock<std::mutex> guard(entry.memObj->Mutex());
     MmcBlobFilterPtr rbFilter = MmcMakeRef<MmcBlobFilter>(dstDesc.rank_, dstMedia, NONE);
     entry.memObj->FreeBlobs(key, globalAllocator_, rbFilter, false);
+    if (entry.memObj->NumBlobs() == 0) {
+        metaContainer_->Erase(key);
+    }
 
     if (entry.ssdBlob != nullptr) {
         auto finishRet = entry.ssdBlob->UpdateState(key, entry.opRankId, entry.opSeq, MMC_READ_FINISH);
@@ -531,6 +534,9 @@ Result MmcMetaManager::ApplyRewarm(const std::string &key, RewarmEntry &entry, M
         MMC_LOG_WARN("WRITE_OK failed for key=" << key << ", ret=" << ret);
         MmcBlobFilterPtr rbFilter = MmcMakeRef<MmcBlobFilter>(dstBlob->GetDesc().rank_, ctx.dstMedia, NONE);
         entry.memObj->FreeBlobs(key, globalAllocator_, rbFilter, false);
+        if (entry.memObj->NumBlobs() == 0) {
+            metaContainer_->Erase(key);
+        }
         releaseSsdLease("after WRITE_OK failed");
         return ret;
     }
@@ -540,6 +546,9 @@ Result MmcMetaManager::ApplyRewarm(const std::string &key, RewarmEntry &entry, M
         MMC_LOG_WARN("READ_START failed after WRITE_OK for key=" << key << ", ret=" << ret);
         MmcBlobFilterPtr rbFilter = MmcMakeRef<MmcBlobFilter>(dstBlob->GetDesc().rank_, ctx.dstMedia, NONE);
         entry.memObj->FreeBlobs(key, globalAllocator_, rbFilter, false);
+        if (entry.memObj->NumBlobs() == 0) {
+            metaContainer_->Erase(key);
+        }
         releaseSsdLease("after READ_START failed");
         return ret;
     }
