@@ -63,7 +63,7 @@ Result NetEngineAcc::Start(const NetEngineOptions &options)
         StopInner();
         UnInitialize();
         MMC_LOG_ERROR("Failed to start thread pool");
-        return ret;
+        return MMC_ERROR;
     }
 
     started_ = true;

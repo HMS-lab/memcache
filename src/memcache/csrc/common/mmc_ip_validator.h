@@ -202,6 +202,7 @@ private:
             "tcp://",
             "http://",
             "https://",
+            "etcd://",
         };
         return protocols;
     }

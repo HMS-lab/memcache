@@ -46,7 +46,7 @@ std::vector<uint32_t> CollectRanks(const std::unordered_map<uint32_t, std::unord
 Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
 {
     const int threadCountBase = 4;
-    std::lock_guard<std::mutex> guard(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     if (started_) {
         MMC_LOG_INFO("MetaService " << name_ << " already started");
         return MMC_OK;
@@ -101,7 +101,12 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
     }
 
     NetEngineOptions configStoreOpt{};
-    NetEngineOptions::ExtractIpPortFromUrl(options_.configStoreURL, configStoreOpt);
+    // etcd:// 等分布式后端由 MF 侧解析，此处仅解析 tcp/http/https。
+    const std::string configStoreUrl(options_.configStoreURL);
+    if (configStoreUrl.find("tcp://") == 0 || configStoreUrl.find("http://") == 0 ||
+        configStoreUrl.find("https://") == 0) {
+        NetEngineOptions::ExtractIpPortFromUrl(options_.configStoreURL, configStoreOpt);
+    }
     smem::StoreFactory::SetTlsInfo(MmcSmemBmHelper::TransSmemTlsConfig(options_.configStoreTlsConfig));
     confStore_ =
         ock::smem::StoreFactory::CreateStoreByUrl(options_.configStoreURL, ock::smem::ConfigStoreModel::CSM_SERVER);
@@ -121,7 +126,10 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
     });
     MMC_LOG_INFO("Config store server started, broken handler registered");
 
+    // 注册回调可能同步重发 leader 状态并重新加锁，先解锁避免死锁。
+    lock.unlock();
     RegisterHaLeaderCallback();
+    lock.lock();
 
     MmcMetaManager *metaManager = nullptr;
     if (metaMgrProxy_ != nullptr && metaMgrProxy_->GetMetaManager() != nullptr) {
@@ -472,8 +480,9 @@ Result MmcMetaService::DeleteMetadata(const std::string &key)
 
 void MmcMetaService::RegisterHaLeaderCallback()
 {
-    auto coreStore = confStore_->GetCoreStore();
-    auto *haStore = dynamic_cast<ock::smem::HaConfigStore *>(coreStore.Get());
+    // etcd:// 模式下 confStore_ 本身就是 HaConfigStore，直接做顶层转换，
+    // 而非 GetCoreStore()（其返回底层 TcpConfigStore，用于 join/leave 路径）。
+    auto *haStore = dynamic_cast<ock::smem::HaConfigStore *>(confStore_.Get());
     if (haStore == nullptr) {
         MMC_LOG_INFO("ConfigStore is not HaConfigStore, HA leader callback not registered");
         return;
@@ -499,10 +508,16 @@ Result MmcMetaService::StartMetaNetServer()
     }
 
     if (!metaServiceAddr_.empty()) {
-        NetEngineOptions::ExtractIpPortFromUrl("tcp://" + metaServiceAddr_, netOptions_);
+        auto ret = NetEngineOptions::ExtractIpPortFromUrl("tcp://" + metaServiceAddr_, netOptions_);
+        if (ret != MMC_OK) {
+            MMC_LOG_ERROR("Failed to extract ip and port from metaServiceAddr "
+                          << metaServiceAddr_ << ", fallback would bind " << netOptions_.ip << ":" << netOptions_.port);
+            return ret;
+        }
         MMC_LOG_INFO("Starting MetaNetServer on dynamically assigned address: " << metaServiceAddr_);
     }
 
+    MMC_LOG_INFO("MetaNetServer binding on " << netOptions_.ip << ":" << netOptions_.port);
     return metaNetServer_->Start(netOptions_);
 }
 
