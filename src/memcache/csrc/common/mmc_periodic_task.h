@@ -82,7 +82,7 @@ public:
 
         stop_.store(false);
         running_.store(true);
-        MMC_LOG_INFO("Starting periodic task scheduler, taskCount=" << tasks_.size());
+        MMC_LOG_TRACE("Starting periodic task scheduler, taskCount=" << tasks_.size());
         worker_ = std::thread([this]() { Run(); });
         return true;
     }
@@ -103,7 +103,7 @@ public:
             workerToJoin.join();
         }
         running_.store(false);
-        MMC_LOG_INFO("Periodic task scheduler stopped");
+        MMC_LOG_TRACE("Periodic task scheduler stopped");
     }
 
     bool IsRunning() const
@@ -120,7 +120,7 @@ public:
                                      [&name](const TaskEntry &entry) { return entry.name == name; });
             if (it != tasks_.end()) {
                 tasks_.erase(it, tasks_.end());
-                MMC_LOG_INFO("Unregistered periodic task: " << name);
+                MMC_LOG_TRACE("Unregistered periodic task: " << name);
             }
         }
         cv_.notify_all();

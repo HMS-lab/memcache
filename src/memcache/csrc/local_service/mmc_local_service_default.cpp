@@ -40,10 +40,10 @@ MmcLocalServiceDefault::~MmcLocalServiceDefault()
 
 Result MmcLocalServiceDefault::Start(const mmc_local_service_config_t &config)
 {
-    MMC_LOG_INFO("Starting meta service " << name_);
+    MMC_LOG_TRACE("Starting meta service " << name_);
     std::lock_guard<std::mutex> guard(mutex_);
     if (started_) {
-        MMC_LOG_INFO("MetaService " << name_ << " already started");
+        MMC_LOG_TRACE("MetaService " << name_ << " already started");
         return MMC_OK;
     }
 
@@ -74,14 +74,14 @@ Result MmcLocalServiceDefault::Start(const mmc_local_service_config_t &config)
         // 直接使用配置值（etcd HA 模式下由 HaConfigStore 动态分配 MetaService 端口，
         // 通过 smem_bm_get_meta_service_info 查询）。
         if (!IsEtcdStoreUrl(options_.bmIpPort)) {
-            MMC_LOG_INFO("non-etcd mode: connect MetaService via configured URL: " << connectUrl);
+            MMC_LOG_TRACE("non-etcd mode: connect MetaService via configured URL: " << connectUrl);
         } else {
             char metaIp[64] = {0};
             uint16_t metaPort = 0;
             if (ock::mmc::MFSmemApi::SmemBmGetMetaServiceInfo(metaIp, sizeof(metaIp), &metaPort) == 0 &&
                 metaIp[0] != '\0') {
                 connectUrl = "tcp://" + std::string(metaIp) + ":" + std::to_string(metaPort);
-                MMC_LOG_INFO("etcd HA: discovered MetaService leader via ConfigStore, " << connectUrl);
+                MMC_LOG_TRACE("etcd HA: discovered MetaService leader via ConfigStore, " << connectUrl);
             }
         }
 
@@ -152,8 +152,8 @@ Result MmcLocalServiceDefault::Start(const mmc_local_service_config_t &config)
     if (options_.dynamicConfigEnable && options_.configFilePath[0] != '\0') {
         StartConfigPolling();
     }
-    MMC_LOG_INFO("Started LocalService (" << name_ << ") server " << options_.discoveryURL
-                                          << ", rank: " << options_.rankId);
+    MMC_LOG_TRACE("Started LocalService (" << name_ << ") server " << options_.discoveryURL
+                                           << ", rank: " << options_.rankId);
     return MMC_OK;
 }
 
@@ -190,8 +190,8 @@ void MmcLocalServiceDefault::Stop()
     }
     std::lock_guard<std::mutex> guardBlob(blobMutex_);
     blobMap_.clear();
-    MMC_LOG_INFO("Stop MmcLocalServiceDefault (" << name_ << ") server " << options_.discoveryURL
-                                                 << ", rank: " << options_.rankId);
+    MMC_LOG_TRACE("Stop MmcLocalServiceDefault (" << name_ << ") server " << options_.discoveryURL
+                                                  << ", rank: " << options_.rankId);
 }
 
 Result MmcLocalServiceDefault::InitBm()
@@ -338,7 +338,7 @@ Result MmcLocalServiceDefault::RegisterBm()
     lockGuard.unlock();
     MMC_RETURN_ERROR(SyncCallMeta(req, resp, TIMEOUT_THIRTY), "bm register failed, bmRankId=" << req.rank_);
     MMC_RETURN_ERROR(resp.ret_, "bm register failed, bmRankId=" << req.rank_ << ", retCode=" << resp.ret_);
-    MMC_LOG_INFO("bm register succeed, bmRankId=" << req.rank_ << ", type num=" << req.mediaType_.size());
+    MMC_LOG_TRACE("bm register succeed, bmRankId=" << req.rank_ << ", type num=" << req.mediaType_.size());
     return MMC_OK;
 }
 
@@ -835,7 +835,7 @@ void MmcLocalServiceDefault::StartConfigPolling()
         lastConfigMtime_ = fileStat.st_mtime;
         if (fileModified) {
             // Full reload: re-read the file, re-resolve all URL domains, apply changes.
-            MMC_LOG_INFO("Config file modified, reloading...");
+            MMC_LOG_TRACE("Config file modified, reloading...");
             auto ret = UpdateConfig();
             if (ret != MMC_OK) {
                 MMC_LOG_WARN("Failed to update config, will retry next cycle, ret=" << ret);
@@ -855,8 +855,8 @@ void MmcLocalServiceDefault::StartConfigPolling()
         MMC_LOG_ERROR("Failed to start periodic task scheduler for config polling");
         return;
     }
-    MMC_LOG_INFO("Config polling task registered, interval: " << options_.dynamicConfigInterval
-                                                              << "s, file: " << options_.configFilePath);
+    MMC_LOG_TRACE("Config polling task registered, interval: " << options_.dynamicConfigInterval
+                                                               << "s, file: " << options_.configFilePath);
 }
 
 void MmcLocalServiceDefault::StopConfigPolling()
@@ -882,7 +882,7 @@ Result MmcLocalServiceDefault::UpdateConfig()
     std::string oldMetaUrl(options_.discoveryURL);
     std::string newMetaUrl(newServiceConfig.discoveryURL);
     if (oldMetaUrl != newMetaUrl) {
-        MMC_LOG_INFO("meta_service_url changed from " << oldMetaUrl << " to " << newMetaUrl);
+        MMC_LOG_TRACE("meta_service_url changed from " << oldMetaUrl << " to " << newMetaUrl);
         if (metaNetClient_ != nullptr) {
             if (auto ret = metaNetClient_->UpdateServerUrl(newMetaUrl); ret == MMC_OK) {
                 SafeCopy(newMetaUrl, options_.discoveryURL, DISCOVERY_URL_SIZE);
@@ -899,7 +899,7 @@ Result MmcLocalServiceDefault::UpdateConfig()
     // re-resolve the latest configured domain (covers a domain change in the file).
     SafeCopy(newServiceConfig.bmIpPortDomain, options_.bmIpPortDomain, DISCOVERY_URL_SIZE);
     if (oldStoreUrl != newStoreUrl) {
-        MMC_LOG_INFO("config_store_url changed from " << oldStoreUrl << " to " << newStoreUrl);
+        MMC_LOG_TRACE("config_store_url changed from " << oldStoreUrl << " to " << newStoreUrl);
         if (bmProxyPtr_ != nullptr) {
             if (auto ret = bmProxyPtr_->UpdateStoreUrl(newStoreUrl); ret == MMC_OK) {
                 SafeCopy(newStoreUrl, options_.bmIpPort, DISCOVERY_URL_SIZE);
@@ -912,7 +912,7 @@ Result MmcLocalServiceDefault::UpdateConfig()
     // Compare and update log_level: process-wide MmcOutLogger is owned by the process-level
     // polling task; here we only push the new level to the BM/smem logger.
     if (options_.logLevel != newServiceConfig.logLevel) {
-        MMC_LOG_INFO("log_level changed from " << options_.logLevel << " to " << newServiceConfig.logLevel);
+        MMC_LOG_TRACE("log_level changed from " << options_.logLevel << " to " << newServiceConfig.logLevel);
         if (bmProxyPtr_ == nullptr) {
             MMC_LOG_WARN("BM proxy not started, log level update deferred");
         } else if (auto ret = bmProxyPtr_->UpdateLogLevel(newServiceConfig.logLevel); ret == MMC_OK) {
@@ -938,7 +938,7 @@ void MmcLocalServiceDefault::ReResolveStoreUrl()
     if (resolved.empty() || resolved == domain || resolved == options_.bmIpPort) {
         return;
     }
-    MMC_LOG_INFO("config_store_url re-resolved from " << options_.bmIpPort << " to " << resolved);
+    MMC_LOG_TRACE("config_store_url re-resolved from " << options_.bmIpPort << " to " << resolved);
     if (bmProxyPtr_ == nullptr || bmProxyPtr_->UpdateStoreUrl(resolved) != MMC_OK) {
         MMC_LOG_WARN("Failed to update bm store URL to " << resolved << ", will retry next cycle");
         return;

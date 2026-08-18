@@ -31,7 +31,7 @@ Result NetEngineAcc::Start(const NetEngineOptions &options)
 {
     std::lock_guard<std::mutex> guard(mutex_);
     if (started_) {
-        MMC_LOG_INFO("NetEngineAcc " << options.name << " already started");
+        MMC_LOG_TRACE("NetEngineAcc " << options.name << " already started");
         return MMC_OK;
     }
 
@@ -358,7 +358,7 @@ NetEngineAcc::~NetEngineAcc()
 Result NetEngineAcc::Initialize(const NetEngineOptions &options)
 {
     if (inited_) {
-        MMC_LOG_INFO("NetEngine [" << options.name << "] already initialized");
+        MMC_LOG_TRACE("NetEngine [" << options.name << "] already initialized");
         return MMC_OK;
     }
 
@@ -446,7 +446,7 @@ Result NetEngineAcc::HandleNewLink(const TcpConnReq &req, const TcpLinkPtr &link
 
     /* add into peer link map */
     peerLinkMap_->Add(peerId, newLinkAcc);
-    MMC_LOG_INFO("HandleNewLink with peer rankId: " << req.rankId);
+    MMC_LOG_TRACE("HandleNewLink with peer rankId: " << req.rankId);
     Result ret = MMC_OK;
     if (newLinkHandler_ != nullptr) {
         ret = newLinkHandler_(newLinkAcc.Get());

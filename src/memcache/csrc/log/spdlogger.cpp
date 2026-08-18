@@ -113,6 +113,7 @@ void SpdLogger::BuildSinks(const InitOptions &options, bool needFile, bool needS
 
 void SpdLogger::ConfigureLogger(int minLogLevel)
 {
+    (void)minLogLevel;
     spdlog::register_logger(mSPDLogger);
     mSPDLogger->set_pattern("%v");
     mSPDLogger->info("", "");
@@ -120,7 +121,7 @@ void SpdLogger::ConfigureLogger(int minLogLevel)
     mSPDLogger->info("Log default format: yyyy-mm-dd hh:mm:ss.uuuuuu threadid loglevel msg");
     mSPDLogger->set_pattern("%Y-%m-%d %H:%M:%S.%f %t %l %v");
     spdlog::flush_every(std::chrono::seconds(1));
-    mSPDLogger->set_level(static_cast<spdlog::level::level_enum>(minLogLevel));
+    mSPDLogger->set_level(static_cast<spdlog::level::level_enum>(LogLevel::TRACE));
     mSPDLogger->flush_on(spdlog::level::err);
     mSPDLogger->set_error_handler(&HandleSinkError);
 }

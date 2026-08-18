@@ -166,7 +166,7 @@ public:
 
         allocators_[loc] = MmcBlobAllocator::Create(loc, localMemInitInfo);
 
-        MMC_LOG_INFO("Mount bm on " << loc << ", capacity:" << localMemInitInfo.capacity_ << "  successfully");
+        MMC_LOG_TRACE("Mount bm on " << loc << ", capacity:" << localMemInitInfo.capacity_ << "  successfully");
         globalAllocLock_.UnlockWrite();
         return MMC_OK;
     }
@@ -209,7 +209,7 @@ public:
             return MMC_ERROR;
         }
         allocator->Stop();
-        MMC_LOG_INFO("Stop one bm successfully, loc: " << loc);
+        MMC_LOG_TRACE("Stop one bm successfully, loc: " << loc);
         globalAllocLock_.UnlockRead();
         return MMC_OK;
     }

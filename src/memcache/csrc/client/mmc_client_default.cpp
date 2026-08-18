@@ -82,10 +82,10 @@ std::mutex MmcClientDefault::gClientHandlerMtx;
 
 Result MmcClientDefault::Start(const mmc_client_config_t &config)
 {
-    MMC_LOG_INFO("Starting client " << name_);
+    MMC_LOG_TRACE("Starting client " << name_);
     std::lock_guard<std::mutex> guard(mutex_);
     if (started_) {
-        MMC_LOG_INFO("MetaService " << name_ << " already started");
+        MMC_LOG_TRACE("MetaService " << name_ << " already started");
         return MMC_OK;
     }
     bmProxy_ = MmcBmProxyFactory::GetInstance("bmProxyDefault");
@@ -149,7 +149,7 @@ bool MmcClientDefault::UpdateClientConfig(const mmc_client_config_t &config, uin
     const uint32_t newRpcRetryTimeOut = config.rpcRetryTimeOut;
     const uint32_t oldRpcRetryTimeout = rpcRetryTimeOut_.load(std::memory_order_relaxed);
     if ((fieldMask & CLIENT_CONFIG_FIELD_RPC_RETRY_TIMEOUT) != 0 && oldRpcRetryTimeout != newRpcRetryTimeOut) {
-        MMC_LOG_INFO("client rpcRetryTimeOut hot-reloaded: " << oldRpcRetryTimeout << " to " << newRpcRetryTimeOut);
+        MMC_LOG_TRACE("client rpcRetryTimeOut hot-reloaded: " << oldRpcRetryTimeout << " to " << newRpcRetryTimeOut);
         rpcRetryTimeOut_.store(newRpcRetryTimeOut, std::memory_order_relaxed);
         updated = true;
     }
@@ -157,26 +157,26 @@ bool MmcClientDefault::UpdateClientConfig(const mmc_client_config_t &config, uin
         aggregateIO_.load(std::memory_order_relaxed) != config.aggregateIO) {
         const std::string oldAggregateIo = aggregateIO_.load(std::memory_order_relaxed) ? "true" : "false";
         const std::string newAggregateIo = config.aggregateIO ? "true" : "false";
-        MMC_LOG_INFO("client aggregateIO hot-reloaded: " << oldAggregateIo << " to " << newAggregateIo);
+        MMC_LOG_TRACE("client aggregateIO hot-reloaded: " << oldAggregateIo << " to " << newAggregateIo);
         aggregateIO_.store(config.aggregateIO, std::memory_order_relaxed);
         updated = true;
     }
     const size_t newAggregateNum = static_cast<size_t>(config.aggregateNum);
     const size_t oldAggregateNum = aggregateNum_.load(std::memory_order_relaxed);
     if ((fieldMask & CLIENT_CONFIG_FIELD_AGGREGATE_NUM) != 0 && oldAggregateNum != newAggregateNum) {
-        MMC_LOG_INFO("client aggregateNum hot-reloaded: " << oldAggregateNum << " to " << newAggregateNum);
+        MMC_LOG_TRACE("client aggregateNum hot-reloaded: " << oldAggregateNum << " to " << newAggregateNum);
         aggregateNum_.store(newAggregateNum, std::memory_order_relaxed);
         updated = true;
     }
     const uint64_t oldChunkSize = batchChunkSize_.load(std::memory_order_relaxed);
     if ((fieldMask & CLIENT_CONFIG_FIELD_BATCH_CHUNK_SIZE) != 0 && oldChunkSize != config.batchChunkSize) {
-        MMC_LOG_INFO("client batchChunkSize hot-reloaded: " << oldChunkSize << " to " << config.batchChunkSize);
+        MMC_LOG_TRACE("client batchChunkSize hot-reloaded: " << oldChunkSize << " to " << config.batchChunkSize);
         batchChunkSize_.store(config.batchChunkSize, std::memory_order_relaxed);
         updated = true;
     }
     const uint32_t oldChunkCount = batchChunkCount_.load(std::memory_order_relaxed);
     if ((fieldMask & CLIENT_CONFIG_FIELD_BATCH_CHUNK_COUNT) != 0 && oldChunkCount != config.batchChunkCount) {
-        MMC_LOG_INFO("client batchChunkCount hot-reloaded: " << oldChunkCount << " to " << config.batchChunkCount);
+        MMC_LOG_TRACE("client batchChunkCount hot-reloaded: " << oldChunkCount << " to " << config.batchChunkCount);
         batchChunkCount_.store(config.batchChunkCount, std::memory_order_relaxed);
         updated = true;
     }
@@ -206,7 +206,7 @@ void MmcClientDefault::Stop()
     if (metaNetClient_ != nullptr) {
         metaNetClient_->Stop();
         metaNetClient_ = nullptr;
-        MMC_LOG_INFO("MetaNetClient stopped.");
+        MMC_LOG_TRACE("MetaNetClient stopped.");
     }
     gvaBlobTracker_.Clear();
 }

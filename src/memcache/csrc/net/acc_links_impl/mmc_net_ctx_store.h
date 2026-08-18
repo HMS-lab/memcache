@@ -65,9 +65,9 @@ public:
         for (auto &i : mHashCtxMap) {
             i.reserve(N1024);
         }
-        MMC_LOG_INFO("Initialized context store, flatten capacity "
-                     << mFlatCapacity << ", versionAndSeqMask " << mSeqNoAndVersionMask << ", seqNoMask " << mSeqNoMask
-                     << ", seqNoAndVersionIndex " << mSeqNoAndVersionIndex);
+        MMC_LOG_TRACE("Initialized context store, flatten capacity "
+                      << mFlatCapacity << ", versionAndSeqMask " << mSeqNoAndVersionMask << ", seqNoMask " << mSeqNoMask
+                      << ", seqNoAndVersionIndex " << mSeqNoAndVersionIndex);
 
         return MMC_OK;
     }

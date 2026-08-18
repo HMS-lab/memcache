@@ -12,6 +12,7 @@
 
 #include "spdlogger.h"
 #include "spdlogger4c.h"
+#include "mmc_logger.h"
 namespace ock {
 namespace mmc {
 int SPDLOG_Init(const char *path, int minLogLevel, int rotationFileSize, int rotationFileCount, int32_t outputTarget)
@@ -29,7 +30,7 @@ int SPDLOG_AuditInit(const char *path, int rotationFileSize, int rotationFileCou
 
 void SPDLOG_LogMessage(int32_t level, const char *msg)
 {
-    ock::mmc::log::SpdLogger::GetInstance().LogMessage(level + 1, msg);
+    ock::mmc::log::SpdLogger::GetInstance().LogMessage((level + 1) % BUTT_LEVEL, msg);
 }
 
 void SPDLOG_AuditLogMessage(const char *msg)
@@ -44,9 +45,9 @@ const char *SPDLOG_GetLastErrorMessage()
 
 int SPDLOG_ResetLogLevel(int logLevel)
 {
-    // Mirror SPDLOG_Init: the mmc log level (0~3: DEBUG/INFO/WARN/ERROR) is offset by 1 to skip
-    // spdlog's TRACE(0) so the reset threshold stays consistent with the initialized one.
-    return ock::mmc::log::SpdLogger::GetInstance().SetLogMinLevel(logLevel + 1);
+    // Mirror SPDLOG_LogMessage: mmc TRACE(4) wraps to spdlog TRACE(0) so the reset threshold
+    // stays consistent with the level mapping used when emitting log lines.
+    return ock::mmc::log::SpdLogger::GetInstance().SetLogMinLevel((logLevel + 1) % BUTT_LEVEL);
 }
 
 void SPDLOG_CheckAndReopen()

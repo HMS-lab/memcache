@@ -1114,7 +1114,7 @@ Result MmcMetaManager::Mount(const MmcLocation &loc, const MmcLocalMemlInitInfo 
     if (storageEnabled) {
         std::lock_guard<std::mutex> guard(ssdMutex_);
         ssdEnabledRanks_.insert(loc.rank_);
-        MMC_LOG_INFO("SSD storage enabled for rank=" << loc.rank_);
+        MMC_LOG_TRACE("SSD storage enabled for rank=" << loc.rank_);
     }
     if (blobList.empty()) {
         ret = globalAllocator_->Start(loc);
@@ -1241,8 +1241,8 @@ Result MmcMetaManager::RemoveBlobs(uint32_t rank, MediaType mediaType)
             changeCallbacks_.cleared(rank, mediaType);
         }
     }
-    MMC_LOG_INFO("Remove blobs for rank=" << rank << ", media=" << static_cast<int>(mediaType)
-                                          << " done, freedBlobs=" << freedBlobs << ", erasedKeys=" << erasedKeys);
+    MMC_LOG_TRACE("Remove blobs for rank=" << rank << ", media=" << static_cast<int>(mediaType)
+                                           << " done, freedBlobs=" << freedBlobs << ", erasedKeys=" << erasedKeys);
     return MMC_OK;
 }
 
@@ -1694,8 +1694,8 @@ Result MmcMetaManager::MoveBlob(const std::string &key, const MmcLocation &src, 
         }
 
         auto blobs = objMeta->FreeBlobs(key, globalAllocator_, filter);
-        MMC_LOG_INFO("move " << key << " from " << src << " to " << dstSameRank << " " << srcInfo.blobDesc << ", "
-                             << objMeta);
+        MMC_LOG_TRACE("move " << key << " from " << src << " to " << dstSameRank << " " << srcInfo.blobDesc << ", "
+                              << objMeta);
         guard.unlock();
         {
             std::lock_guard<std::mutex> cbLock(changeCallbacks_.mutex);
@@ -1939,7 +1939,7 @@ void MmcMetaManager::RewarmFinalize(const std::string &key, const MmcMemBlobPtr 
 {
     metaContainer_->InsertLru(key, dstMediaType);
     MmcMetaMetricManager::GetInstance().IncrementRewarmCounter(srcRank);
-    MMC_LOG_INFO("rewarmed key=" << key << " to " << dstMediaType << ", size=" << blob->Size());
+    MMC_LOG_TRACE("rewarmed key=" << key << " to " << dstMediaType << ", size=" << blob->Size());
 }
 
 Result MmcMetaManager::RewarmBlob(const std::string &key, const MmcMemObjMetaPtr &objMeta,
@@ -2006,18 +2006,18 @@ Result MmcMetaManager::UpdateConfig(uint64_t leaseTtlMs, uint16_t evictThreshold
     }
 
     if (defaultTtlMs_.load(std::memory_order_relaxed) != newLeaseTtlMs) {
-        MMC_LOG_INFO("meta leaseTtlMs hot-reloaded from " << defaultTtlMs_.load(std::memory_order_relaxed) << " to "
-                                                          << newLeaseTtlMs);
+        MMC_LOG_TRACE("meta leaseTtlMs hot-reloaded from " << defaultTtlMs_.load(std::memory_order_relaxed) << " to "
+                                                           << newLeaseTtlMs);
         defaultTtlMs_.store(newLeaseTtlMs, std::memory_order_relaxed);
     }
     if (evictThresholdHigh_.load(std::memory_order_relaxed) != evictThresholdHigh) {
-        MMC_LOG_INFO("meta evictThresholdHigh hot-reloaded from " << evictThresholdHigh_.load(std::memory_order_relaxed)
-                                                                  << " to " << evictThresholdHigh);
+        MMC_LOG_TRACE("meta evictThresholdHigh hot-reloaded from "
+                      << evictThresholdHigh_.load(std::memory_order_relaxed) << " to " << evictThresholdHigh);
         evictThresholdHigh_.store(evictThresholdHigh, std::memory_order_relaxed);
     }
     if (evictThresholdLow_.load(std::memory_order_relaxed) != evictThresholdLow) {
-        MMC_LOG_INFO("meta evictThresholdLow hot-reloaded from " << evictThresholdLow_.load(std::memory_order_relaxed)
-                                                                 << " to " << evictThresholdLow);
+        MMC_LOG_TRACE("meta evictThresholdLow hot-reloaded from " << evictThresholdLow_.load(std::memory_order_relaxed)
+                                                                  << " to " << evictThresholdLow);
         evictThresholdLow_.store(evictThresholdLow, std::memory_order_relaxed);
     }
     return MMC_OK;

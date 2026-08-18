@@ -26,7 +26,7 @@ Result MmcBmProxy::InitBm(const mmc_bm_init_config_t &initConfig, const mmc_bm_c
 {
     std::lock_guard<std::mutex> lock(mutex_);
     if (started_ && handle_ != nullptr) {
-        MMC_LOG_INFO("MmcBmProxy " << name_ << " already init");
+        MMC_LOG_TRACE("MmcBmProxy " << name_ << " already init");
         return MMC_OK;
     }
 
@@ -81,8 +81,8 @@ Result MmcBmProxy::InitBm(const mmc_bm_init_config_t &initConfig, const mmc_bm_c
     spaces_[MEDIA_DRAM] = MFSmemApi::SmemBmGetLocalMemSizeByMemType(handle_, SMEM_MEM_TYPE_HOST);
     started_ = true;
 
-    MMC_LOG_INFO("init bm success, rank:" << bmRankId_ << ", worldSize:" << initConfig.worldSize << ", hbm{"
-                                          << spaces_[MEDIA_HBM] << "}, dram{" << spaces_[MEDIA_DRAM] << "}");
+    MMC_LOG_TRACE("init bm success, rank:" << bmRankId_ << ", worldSize:" << initConfig.worldSize << ", hbm{"
+                                           << spaces_[MEDIA_HBM] << "}, dram{" << spaces_[MEDIA_DRAM] << "}");
     return MMC_OK;
 }
 
@@ -148,7 +148,7 @@ void MmcBmProxy::DestroyBm()
     MFSmemApi::SmemUninit();
     MFSmemApi::CleanupLibrary();
     started_ = false;
-    MMC_LOG_INFO("MmcBmProxy (" << name_ << ") is destroyed successfully");
+    MMC_LOG_TRACE("MmcBmProxy (" << name_ << ") is destroyed successfully");
 }
 
 Result MmcBmProxy::UpdateStoreUrl(const std::string &url)
@@ -163,7 +163,7 @@ Result MmcBmProxy::UpdateStoreUrl(const std::string &url)
         MMC_LOG_ERROR("Failed to update smem bm store URL, ret: " << ret);
         return MMC_ERROR;
     }
-    MMC_LOG_INFO("Updated smem bm store URL to: " << url);
+    MMC_LOG_TRACE("Updated smem bm store URL to: " << url);
     return MMC_OK;
 }
 
@@ -179,7 +179,7 @@ Result MmcBmProxy::UpdateLogLevel(int32_t level)
         MMC_LOG_ERROR("Failed to update smem bm log level to " << level << ", ret: " << ret);
         return MMC_ERROR;
     }
-    MMC_LOG_INFO("Updated smem bm log level to: " << level);
+    MMC_LOG_TRACE("Updated smem bm log level to: " << level);
     return MMC_OK;
 }
 

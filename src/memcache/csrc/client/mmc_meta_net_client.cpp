@@ -33,7 +33,7 @@ Result MetaNetClient::Start(const NetEngineOptions &config)
 {
     std::lock_guard<std::mutex> guard(mutex_);
     if (started_) {
-        MMC_LOG_INFO("MetaNetClient [" << name_ << "] already started");
+        MMC_LOG_TRACE("MetaNetClient [" << name_ << "] already started");
         return MMC_OK;
     }
 
@@ -77,7 +77,7 @@ Result MetaNetClient::Start(const NetEngineOptions &config)
     rankId_ = config.rankId;
     started_ = true;
     stopping_ = false;
-    MMC_LOG_INFO("initialize meta net server success [" << name_ << "]");
+    MMC_LOG_TRACE("initialize meta net server success [" << name_ << "]");
     return MMC_OK;
 }
 
@@ -179,11 +179,11 @@ Result MetaNetClient::UpdateServerUrl(const std::string &url)
         return MMC_INVALID_PARAM;
     }
     if (ip_ == ip && port_ == port) {
-        MMC_LOG_INFO("server URL is the same, skip update: " << url);
+        MMC_LOG_TRACE("server URL is the same, skip update: " << url);
         return MMC_OK;
     }
 
-    MMC_LOG_INFO("update server URL from " << ip_ << ":" << port_ << " to " << ip << ":" << port);
+    MMC_LOG_TRACE("update server URL from " << ip_ << ":" << port_ << " to " << ip << ":" << port);
     serverUrl_ = url;
     ip_ = ip;
     port_ = port;
@@ -257,11 +257,11 @@ Result MetaNetClient::HandlePing(const NetContextPtr &context)
 
 Result MetaNetClient::HandleLinkBroken(const NetLinkPtr &link)
 {
-    MMC_LOG_INFO(name_ << " link broken");
+    MMC_LOG_TRACE(name_ << " link broken");
     MMC_ASSERT_LOG_AND_RETURN(engine_ != nullptr, "engine_ is nullptr", MMC_NOT_INITIALIZED);
     for (uint32_t count = 0; count < retryCount_; count++) {
         if (stopping_) {
-            MMC_LOG_INFO(name_ << " stopping, abort reconnect");
+            MMC_LOG_TRACE(name_ << " stopping, abort reconnect");
             return MMC_ERROR;
         }
         if (discoverUrlFunc_) {
@@ -287,7 +287,7 @@ Result MetaNetClient::HandleLinkBroken(const NetLinkPtr &link)
             MMC_LOG_ERROR("MetaNetClient reconnect attempt " << count << " failed, ret: " << ret);
         } else {
             if (retryHandler_ != nullptr) {
-                MMC_LOG_INFO("call retry handler when reconnect to " << ip_ << ", port " << port_);
+                MMC_LOG_TRACE("call retry handler when reconnect to " << ip_ << ", port " << port_);
                 return retryHandler_();
             }
             return MMC_OK;

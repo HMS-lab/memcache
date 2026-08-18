@@ -30,7 +30,7 @@ static bool ApplyLogLevelFromConfig(int32_t newLogLevel)
         MMC_LOG_ERROR("Invalid log level " << newLogLevel);
         return false;
     }
-    MMC_LOG_INFO("log_level hot-reloaded to " << newLogLevel);
+    MMC_LOG_TRACE("log_level hot-reloaded to " << newLogLevel);
     return true;
 }
 

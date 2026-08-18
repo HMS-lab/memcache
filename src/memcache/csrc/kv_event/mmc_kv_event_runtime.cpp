@@ -123,9 +123,9 @@ void MmcKvEventRuntime::Start(const mmc_meta_service_config_t &options,
     auto transport = MakeTransport(kvConfig);
     impl_->publisher = std::make_unique<kv_event::KvEventPublisher>(kvConfig, std::move(transport));
     impl_->publisher->SetActive(!options.haEnable);
-    MMC_LOG_INFO("kv_events publisher created, transport_type="
-                 << static_cast<int>(kvConfig.transportType) << " enabled=" << impl_->publisher->Enabled()
-                 << " curve=" << (kvConfig.curveEnable ? "on" : "off") << " ha=" << options.haEnable);
+    MMC_LOG_TRACE("kv_events publisher created, transport_type="
+                  << static_cast<int>(kvConfig.transportType) << " enabled=" << impl_->publisher->Enabled()
+                  << " curve=" << (kvConfig.curveEnable ? "on" : "off") << " ha=" << options.haEnable);
 #else
     (void)options;
 #endif

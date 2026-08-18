@@ -58,9 +58,9 @@ static void StartConfigPolling(const char *taskName, time_t &lastConfigMtime,
         MMC_LOG_ERROR("Failed to register config polling task: " << taskName);
         return;
     }
-    MMC_LOG_INFO("Config polling registered, task: " << taskName
-                                                     << ", interval: " << g_localServiceConfig.dynamicConfigInterval
-                                                     << "s, file: " << g_localServiceConfig.configFilePath);
+    MMC_LOG_TRACE("Config polling registered, task: " << taskName
+                                                      << ", interval: " << g_localServiceConfig.dynamicConfigInterval
+                                                      << "s, file: " << g_localServiceConfig.configFilePath);
 }
 
 mmc_meta_service_config_t create_default_meta_config()
@@ -267,7 +267,7 @@ MMC_API int32_t mmc_setup(const local_config *config)
     MMC_VALIDATE_RETURN(config != nullptr, "local config is null", MMC_INVALID_PARAM);
     std::lock_guard<std::mutex> lock(gMmcMutex);
     if (g_mmcSetup) {
-        MMC_LOG_INFO("mmc is already setup");
+        MMC_LOG_TRACE("mmc is already setup");
         return MMC_OK;
     }
 
@@ -277,7 +277,7 @@ MMC_API int32_t mmc_setup(const local_config *config)
     }
 
     g_mmcSetup = true;
-    MMC_LOG_INFO("mmc setup success");
+    MMC_LOG_TRACE("mmc setup success");
     return MMC_OK;
 }
 
@@ -290,7 +290,7 @@ MMC_API int32_t mmc_init(const mmc_init_config *config)
                         MMC_INVALID_PARAM);
     std::lock_guard<std::mutex> lock(gMmcMutex);
     if (mmcInit) {
-        MMC_LOG_INFO("mmc is already init");
+        MMC_LOG_TRACE("mmc is already init");
         return MMC_OK;
     }
 
@@ -352,7 +352,7 @@ MMC_API void mmc_uninit()
 {
     std::lock_guard<std::mutex> lock(gMmcMutex);
     if (!mmcInit) {
-        MMC_LOG_INFO("mmc is not init");
+        MMC_LOG_TRACE("mmc is not init");
         return;
     }
 

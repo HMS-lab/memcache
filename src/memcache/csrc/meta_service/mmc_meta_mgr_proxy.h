@@ -39,7 +39,7 @@ public:
     {
         std::lock_guard<std::mutex> guard(mutex_);
         if (started_) {
-            MMC_LOG_INFO("MmcMetaMgrProxyDefault already started");
+            MMC_LOG_TRACE("MmcMetaMgrProxyDefault already started");
             return MMC_OK;
         }
         metaMangerPtr_ =

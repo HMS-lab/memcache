@@ -112,7 +112,7 @@ Result MFSmemApi::LoadLibrary()
         return MMC_OK;
     }
 
-    MMC_LOG_INFO("MFSmemApi LoadLibrary: dlopen " << gSmemLibName);
+    MMC_LOG_TRACE("MFSmemApi LoadLibrary: dlopen " << gSmemLibName);
     gSmemHandle = dlopen(gSmemLibName, RTLD_NOW | RTLD_LOCAL);
     if (gSmemHandle == nullptr) {
         MMC_LOG_ERROR("MFSmemApi LoadLibrary: dlopen failed, lib: " << gSmemLibName << ", error: " << dlerror());
@@ -127,7 +127,7 @@ Result MFSmemApi::LoadLibrary()
     }
 
     gLoaded = true;
-    MMC_LOG_INFO("MFSmemApi LoadLibrary: loaded 22 smem_bm symbols from " << gSmemLibName);
+    MMC_LOG_TRACE("MFSmemApi LoadLibrary: loaded 22 smem_bm symbols from " << gSmemLibName);
     return MMC_OK;
 }
 
@@ -170,7 +170,7 @@ void MFSmemApi::CleanupLibrary()
         gSmemHandle = nullptr;
     }
     gLoaded = false;
-    MMC_LOG_INFO("MFSmemApi CleanupLibrary: unloaded " << gSmemLibName);
+    MMC_LOG_TRACE("MFSmemApi CleanupLibrary: unloaded " << gSmemLibName);
 }
 } // namespace mmc
 } // namespace ock

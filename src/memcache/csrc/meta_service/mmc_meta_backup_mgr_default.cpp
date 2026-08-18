@@ -31,7 +31,7 @@ void MMCMetaBackUpMgrDefault::BackupThreadFunc()
             backupThreadCv_.wait_for(lock, interval, [this] { return !backupList_.empty() || !started_; });
         }
         if (!started_) {
-            MMC_LOG_INFO("backup thread destroy, thread id " << pthread_self());
+            MMC_LOG_TRACE("backup thread destroy, thread id " << pthread_self());
             break;
         }
 

@@ -48,7 +48,7 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
     const int threadCountBase = 4;
     std::unique_lock<std::mutex> lock(mutex_);
     if (started_) {
-        MMC_LOG_INFO("MetaService " << name_ << " already started");
+        MMC_LOG_TRACE("MetaService " << name_ << " already started");
         return MMC_OK;
     }
     options_ = options;
@@ -87,8 +87,8 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
     MMC_ASSERT_LOG_AND_RETURN(metaBackUpMgrPtr_ != nullptr, "metaBackUpMgrPtr_ is nullptr", MMC_MALLOC_FAILED);
     // async flush 复用 backup 通道，可独立拉起，不再要求 HA/backup 同时开启
     if (options_.haEnable || options_.backupEnable || options_.asyncFlushEnabled) {
-        MMC_LOG_INFO("Meta backup channel starting, ha=" << options_.haEnable << ", backup=" << options_.backupEnable
-                                                         << ", async_flush=" << options_.asyncFlushEnabled);
+        MMC_LOG_TRACE("Meta backup channel starting, ha=" << options_.haEnable << ", backup=" << options_.backupEnable
+                                                          << ", async_flush=" << options_.asyncFlushEnabled);
         backupConf->Setup(
             options.asyncFlushIntervalMs, options.asyncFlushBatchLimit, options.asyncFlushEnabled,
             std::bind(&MmcMetaService::IsSsdAvailable, this, std::placeholders::_1),
@@ -124,7 +124,7 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
         }
         return MMC_OK;
     });
-    MMC_LOG_INFO("Config store server started, broken handler registered");
+    MMC_LOG_TRACE("Config store server started, broken handler registered");
 
     // 注册回调可能同步重发 leader 状态并重新加锁，先解锁避免死锁。
     lock.unlock();
@@ -156,8 +156,8 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
     }
 
     started_ = true;
-    MMC_LOG_INFO("Started MetaService (" << name_ << ") at " << options_.discoveryURL
-                                         << ", metaNetServerPending=" << metaNetServerPending_);
+    MMC_LOG_TRACE("Started MetaService (" << name_ << ") at " << options_.discoveryURL
+                                          << ", metaNetServerPending=" << metaNetServerPending_);
 
     StartMetricsReportTask();
     if (options_.evictCheckIntervalSeconds == 0) {
@@ -208,8 +208,8 @@ Result MmcMetaService::BmRegister(uint32_t rank, std::vector<uint16_t> mediaType
     MMC_RETURN_ERROR(metaBackUpMgrPtr_->Load(blobList), "Mount loc { " << rank << " } load backup failed");
     MMC_RETURN_ERROR(metaMgrProxy_->Mount(locs, infos, blobList, storageEnabled),
                      "Mount loc { " << rank << " } failed");
-    MMC_LOG_INFO("Mount loc {rank:" << rank << ", rebuild size:" << blobList.size() << ", mediaNum:" << typeNum
-                                    << "} finish");
+    MMC_LOG_TRACE("Mount loc {rank:" << rank << ", rebuild size:" << blobList.size() << ", mediaNum:" << typeNum
+                                     << "} finish");
     if (blobList.size() == 0) {
         if (rankMediaTypeMap_.find(rank) == rankMediaTypeMap_.end()) {
             rankMediaTypeMap_.insert({rank, {}});
@@ -275,7 +275,7 @@ Result MmcMetaService::ClearResource(uint32_t rank)
     }
 
     for (const auto &mediaType : mediaTypes) {
-        MMC_LOG_INFO("Clear resource {rank, mediaType} -> { " << rank << ", " << mediaType << " }");
+        MMC_LOG_TRACE("Clear resource {rank, mediaType} -> { " << rank << ", " << mediaType << " }");
         (void)BmUnregisterWithoutLock(rank, mediaType);
     }
 
@@ -288,7 +288,7 @@ Result MmcMetaService::ClearResource(uint32_t rank)
     }
     // 断链后客户端已不在，清除其上报的指标，ssd_used 等聚合立即归零，不再保留旧值
     MmcClientMetricStore::GetInstance().Remove(rank);
-    MMC_LOG_INFO("Remove client metrics for rank=" << rank);
+    MMC_LOG_TRACE("Remove client metrics for rank=" << rank);
     return MMC_OK;
 }
 
@@ -334,9 +334,9 @@ Result MmcMetaService::UpdateConfig(const mmc_meta_service_config_t &options)
     }
     options_ = options;
     options_.leaseTtlMs = newLeaseTtlMs;
-    MMC_LOG_INFO("Meta service config hot-reloaded, leaseTtlMs="
-                 << options_.leaseTtlMs << ", evictThresholdHigh=" << options_.evictThresholdHigh
-                 << ", evictThresholdLow=" << options_.evictThresholdLow);
+    MMC_LOG_TRACE("Meta service config hot-reloaded, leaseTtlMs="
+                  << options_.leaseTtlMs << ", evictThresholdHigh=" << options_.evictThresholdHigh
+                  << ", evictThresholdLow=" << options_.evictThresholdLow);
     return MMC_OK;
 }
 
@@ -384,7 +384,7 @@ void MmcMetaService::Stop()
     confStore_ = nullptr;
     metadata_.clear();
     ock::smem::StoreFactory::DestroyStore(options_.configStoreURL);
-    MMC_LOG_INFO("Stop MmcMetaServiceDefault (" << name_ << ") at " << options_.discoveryURL);
+    MMC_LOG_TRACE("Stop MmcMetaServiceDefault (" << name_ << ") at " << options_.discoveryURL);
 }
 
 void MmcMetaService::PublishClearedForRanks(const std::vector<uint32_t> &ranks)
@@ -484,7 +484,7 @@ void MmcMetaService::RegisterHaLeaderCallback()
     // 而非 GetCoreStore()（其返回底层 TcpConfigStore，用于 join/leave 路径）。
     auto *haStore = dynamic_cast<ock::smem::HaConfigStore *>(confStore_.Get());
     if (haStore == nullptr) {
-        MMC_LOG_INFO("ConfigStore is not HaConfigStore, HA leader callback not registered");
+        MMC_LOG_TRACE("ConfigStore is not HaConfigStore, HA leader callback not registered");
         return;
     }
 
@@ -497,7 +497,7 @@ void MmcMetaService::RegisterHaLeaderCallback()
             OnBecomeStandby();
         }
     });
-    MMC_LOG_INFO("Registered HA leader change callback on HaConfigStore");
+    MMC_LOG_TRACE("Registered HA leader change callback on HaConfigStore");
 }
 
 Result MmcMetaService::StartMetaNetServer()
@@ -514,7 +514,7 @@ Result MmcMetaService::StartMetaNetServer()
                           << metaServiceAddr_ << ", fallback would bind " << netOptions_.ip << ":" << netOptions_.port);
             return ret;
         }
-        MMC_LOG_INFO("Starting MetaNetServer on dynamically assigned address: " << metaServiceAddr_);
+        MMC_LOG_TRACE("Starting MetaNetServer on dynamically assigned address: " << metaServiceAddr_);
     }
 
     MMC_LOG_INFO("MetaNetServer binding on " << netOptions_.ip << ":" << netOptions_.port);
@@ -530,19 +530,19 @@ void MmcMetaService::StopMetaNetServer()
 
 void MmcMetaService::OnBecomeLeader()
 {
-    MMC_LOG_INFO("HaConfigStore elected as leader, starting MetaNetServer and enabling KvEvents");
+    MMC_LOG_TRACE("HaConfigStore elected as leader, starting MetaNetServer and enabling KvEvents");
     if (StartMetaNetServer() != MMC_OK) {
         MMC_LOG_ERROR("Failed to start MetaNetServer after becoming leader");
         return;
     }
     SetPublishActive(true);
     SetPeriodicEvictActive(true);
-    MMC_LOG_INFO("MetaService leader ready, MetaNetServer listening on " << options_.discoveryURL);
+    MMC_LOG_TRACE("MetaService leader ready, MetaNetServer listening on " << options_.discoveryURL);
 }
 
 void MmcMetaService::OnBecomeStandby()
 {
-    MMC_LOG_INFO("HaConfigStore became standby/follower, stopping MetaNetServer and disabling KvEvents");
+    MMC_LOG_TRACE("HaConfigStore became standby/follower, stopping MetaNetServer and disabling KvEvents");
     SetPeriodicEvictActive(false);
     SetPublishActive(false);
     StopMetaNetServer();

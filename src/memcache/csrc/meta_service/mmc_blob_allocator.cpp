@@ -181,7 +181,7 @@ Result MmcBlobAllocator::BuildFromBlobs(std::vector<std::pair<std::string, MmcMe
             it = blobList.erase(it);
             continue;
         }
-        MMC_LOG_INFO("rebuild block successful, rank: " << it->second);
+        MMC_LOG_TRACE("rebuild block successful, rank: " << it->second);
         ++it;
     }
     spinlock_.unlock();

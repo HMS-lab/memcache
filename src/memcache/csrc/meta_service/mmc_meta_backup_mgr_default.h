@@ -76,7 +76,7 @@ public:
     {
         std::lock_guard<std::mutex> guard(mutex_);
         if (started_) {
-            MMC_LOG_INFO("MMCMetaBackUpMgr already started");
+            MMC_LOG_TRACE("MMCMetaBackUpMgr already started");
             return MMC_OK;
         }
         MMCMetaBackUpConfDefaultPtr defaultPtr = Convert<MMCMetaBackUpConf, MMCMetaBackUpConfDefault>(confPtr);
@@ -110,7 +110,7 @@ public:
         backupThread_.join();
         metaNetServer_ = nullptr;
         backupList_.clear();
-        MMC_LOG_INFO("Stop MMCMetaBackUpMgr");
+        MMC_LOG_TRACE("Stop MMCMetaBackUpMgr");
     }
     void BackupThreadFunc();
 

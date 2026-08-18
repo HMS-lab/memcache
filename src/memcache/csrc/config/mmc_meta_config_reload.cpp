@@ -40,7 +40,7 @@ static bool ApplyMetaLogLevelFromConfig(int32_t newLogLevel)
         mf::OutLogger::Instance().SetLogLevel(static_cast<mf::LogLevel>(oldLogLevel));
         return false;
     }
-    MMC_LOG_INFO("meta log_level hot-reloaded to " << newLogLevel);
+    MMC_LOG_TRACE("meta log_level hot-reloaded to " << newLogLevel);
     return true;
 }
 

@@ -52,11 +52,11 @@ bool Configuration::Setup(const local_config *config)
         return false;
     }
     if (config->config_path[0] != '\0') {
-        MMC_LOG_INFO("Try to load config from file " << config->config_path);
+        MMC_LOG_TRACE("Try to load config from file " << config->config_path);
         return LoadFromFile(config->config_path);
     }
 
-    MMC_LOG_INFO("Try to setup config");
+    MMC_LOG_TRACE("Try to setup config");
     LoadConfigurations();
     if (!Initialized()) {
         return false;

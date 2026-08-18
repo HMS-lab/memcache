@@ -40,7 +40,7 @@ Result ock::mmc::MetaNetServer::Start(NetEngineOptions &options)
 {
     std::lock_guard<std::mutex> guard(mutex_);
     if (started_) {
-        MMC_LOG_INFO("MetaNetServer [" << name_ << "] already started");
+        MMC_LOG_TRACE("MetaNetServer [" << name_ << "] already started");
         return MMC_OK;
     }
 
@@ -99,7 +99,7 @@ Result ock::mmc::MetaNetServer::Start(NetEngineOptions &options)
 
     engine_ = server;
     started_ = true;
-    MMC_LOG_INFO("initialize meta net server success [" << name_ << "]");
+    MMC_LOG_TRACE("initialize meta net server success [" << name_ << "]");
     return MMC_OK;
 }
 
@@ -113,8 +113,8 @@ Result MetaNetServer::HandleBmRegister(const NetContextPtr &context)
     auto result = metaService_->BmRegister(req.rank_, req.mediaType_, req.addr_, req.capacity_, req.blobList_,
                                            req.storageEnabled_, req.backendId_);
     TP_TRACE_END(TP_MMC_META_BM_REGISTER, result);
-    MMC_LOG_INFO("HandleBmRegister rank: " << req.rank_ << ", storageEnabled: " << req.storageEnabled_
-                                           << ", rebuild blob size: " << req.blobList_.size() << ", ret: " << result);
+    MMC_LOG_TRACE("HandleBmRegister rank: " << req.rank_ << ", storageEnabled: " << req.storageEnabled_
+                                            << ", rebuild blob size: " << req.blobList_.size() << ", ret: " << result);
     Response resp;
     resp.ret_ = result;
     return context->Reply(req.msgId, resp);
@@ -131,8 +131,8 @@ Result MetaNetServer::HandleBmUnregister(const NetContextPtr &context)
         TP_TRACE_BEGIN(TP_MMC_META_BM_UNREGISTER);
         auto result = metaService_->BmUnregister(req.rank_, type);
         TP_TRACE_END(TP_MMC_META_BM_UNREGISTER, result);
-        MMC_LOG_INFO("HandleBmUnregister: " << MmcLocation(req.rank_, static_cast<MediaType>(type))
-                                            << ", ret:" << result);
+        MMC_LOG_TRACE("HandleBmUnregister: " << MmcLocation(req.rank_, static_cast<MediaType>(type))
+                                             << ", ret:" << result);
         if (result != MMC_OK) {
             MMC_LOG_ERROR("HandleBmUnregister rank:" << req.rank_ << ", media:" << type << ", ret:" << result);
             resp.ret_ = result;
@@ -159,7 +159,7 @@ Result MetaNetServer::HandlePing(const NetContextPtr &context)
 
 Result MetaNetServer::HandleNewLink(const NetLinkPtr &link)
 {
-    MMC_LOG_INFO(name_ << " new link, id: " << link->Id());
+    MMC_LOG_TRACE(name_ << " new link, id: " << link->Id());
     return MMC_OK;
 }
 

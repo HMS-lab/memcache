@@ -28,7 +28,7 @@ Result MmcUbsIoProxy::InitUbsIo(int32_t deviceId, const std::string &confPath)
 {
     std::lock_guard<std::mutex> lock(mutex_);
     if (started_) {
-        MMC_LOG_INFO("MmcUbsIoProxy " << name_ << " already init");
+        MMC_LOG_TRACE("MmcUbsIoProxy " << name_ << " already init");
         return MMC_OK;
     }
 
@@ -54,7 +54,7 @@ Result MmcUbsIoProxy::InitUbsIo(int32_t deviceId, const std::string &confPath)
     }
 
     started_ = true;
-    MMC_LOG_INFO("InitUbsIo success, deviceId=" << deviceId);
+    MMC_LOG_TRACE("InitUbsIo success, deviceId=" << deviceId);
     return MMC_OK;
 }
 
@@ -63,7 +63,7 @@ void MmcUbsIoProxy::DestroyUbsIo()
     if (started_) {
         DlUbsioApi::CleanupLibrary();
         started_ = false;
-        MMC_LOG_INFO("DestroyUbsIo completed");
+        MMC_LOG_TRACE("DestroyUbsIo completed");
     }
 }
 

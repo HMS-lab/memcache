@@ -31,6 +31,8 @@ inline std::string MetaLogLevelToString(const int32_t logLevel)
             return "warn";
         case ERROR_LEVEL:
             return "error";
+        case TRACE_LEVEL:
+            return "trace";
         default:
             return "info";
     }
