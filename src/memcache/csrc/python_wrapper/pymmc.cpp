@@ -1031,6 +1031,10 @@ PYBIND11_MODULE(_pymmc, m)
                 results.reserve(keys.size());
 
                 for (size_t i = 0; i < keys.size(); ++i) {
+                    if (bufferArray.empty()) {
+                        results.emplace_back(kNullString);
+                        continue;
+                    }
                     mmc_buffer buffer = bufferArray[i];
                     if (buffer.addr == 0) {
                         results.emplace_back(kNullString);
