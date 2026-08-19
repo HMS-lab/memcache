@@ -24,13 +24,17 @@ if __name__ == "__main__":
     batch_size = int(sys.argv[3])
     block_size = int(sys.argv[4])
     call_count = int(sys.argv[5])
-    data_dim = int(sys.argv[6])
-    backend = sys.argv[7]
-    local_type = sys.argv[8]
+    warmup_count = int(sys.argv[6])
+    data_dim = int(sys.argv[7])
+    backend = sys.argv[8]
+    local_type = sys.argv[9]
+
+    if call_count <= 0 or warmup_count < 0:
+        raise ValueError("call_count must be positive and warmup_count must not be negative")
 
     print(
         f"主进程 PID: {os.getpid()}, {testcase=}, {process_count=}, {batch_size=}, {block_size=}, "
-        f"{call_count=}, {data_dim=}, {backend=}, {local_type=}"
+        f"{call_count=}, {warmup_count=}, {data_dim=}, {backend=}, {local_type=}"
     )
 
     sync = mp.Barrier(process_count)
@@ -50,6 +54,7 @@ if __name__ == "__main__":
                     batch_size,
                     block_size,
                     call_count,
+                    warmup_count,
                     data_dim,
                     backend,
                     local_type,
@@ -67,6 +72,7 @@ if __name__ == "__main__":
                     batch_size,
                     block_size,
                     call_count,
+                    warmup_count,
                     data_dim,
                     backend,
                     local_type,

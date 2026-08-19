@@ -14,12 +14,13 @@ PROCESS_COUNT=1
 BATCH_SIZE=16
 BLOCK_SIZE=1048576
 CALL_COUNT=100
+WARMUP_COUNT=2
 DATA_DIM=1
 BACKEND="memcache"
 LOCAL_TYPE="npu"
 
 # 参数检查
-while getopts 'p:b:s:n:d:e:t:l:' OPT; do
+while getopts 'p:b:s:n:w:d:e:t:l:' OPT; do
     case $OPT in
     t)
         TEST_CASE="$OPTARG"
@@ -36,6 +37,9 @@ while getopts 'p:b:s:n:d:e:t:l:' OPT; do
     n)
         CALL_COUNT="$OPTARG"
         ;;
+    w)
+        WARMUP_COUNT="$OPTARG"
+        ;;
     d)
         DATA_DIM="$OPTARG"
         ;;
@@ -46,12 +50,12 @@ while getopts 'p:b:s:n:d:e:t:l:' OPT; do
         LOCAL_TYPE="$OPTARG"
         ;;
     ?)
-        echo "params: -t <read|write> -p <process count> -b <batch size> -s <block size> -n <call count> -d <data dim, 1|2> -e <memcache|mooncake> -l <npu|cpu>"
-        echo 'eg: bash read_start.sh -t read -p 8 -b 32 -s 1048576 -n 1000 -d 1'
+        echo "params: -t <read|write> -p <process count> -b <batch size> -s <block size> -n <call count> -w <write warmup count> -d <data dim, 1|2> -e <memcache|mooncake> -l <npu|cpu>"
+        echo 'eg: bash bench_start.sh -t read -p 8 -b 32 -s 1048576 -n 1000 -w 10 -d 1'
         exit 1
         ;;
     esac
 done
 
 set -x
-python3 run_mutil_process.py ${TEST_CASE} ${PROCESS_COUNT} ${BATCH_SIZE} ${BLOCK_SIZE} ${CALL_COUNT} ${DATA_DIM} ${BACKEND} ${LOCAL_TYPE}
+python3 run_mutil_process.py ${TEST_CASE} ${PROCESS_COUNT} ${BATCH_SIZE} ${BLOCK_SIZE} ${CALL_COUNT} ${WARMUP_COUNT} ${DATA_DIM} ${BACKEND} ${LOCAL_TYPE}

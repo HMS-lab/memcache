@@ -111,12 +111,13 @@ def write_worker(*args):
     batch_size = args[1]
     block_size = [args[2]]
     call_count = args[3]
-    data_dim = args[4]
-    backend = args[5]
+    warmup_count = args[4]
+    data_dim = args[5]
+    backend = args[6]
     global g_local_type
-    g_local_type = args[6]
-    process_count = args[7]
-    sync = args[8]
+    g_local_type = args[7]
+    process_count = args[8]
+    sync = args[9]
 
     set_device(device_id)
     print(f"npu:{device_id} 开始，PID: {os.getpid()}")
@@ -177,6 +178,17 @@ def write_worker(*args):
         buffs_list.append(buffs)
         sizes_list.append(sizes)
 
+    for warmup_index in range(warmup_count):
+        keys = [f"warmup_{device_id}_{warmup_index}_{batch_index}" for batch_index in range(batch_size)]
+        buffs = buffs_list[warmup_index % call_count]
+        sizes = sizes_list[warmup_index % call_count]
+        write_ret = store.batch_put_from_layers(keys, buffs, sizes, L2G)
+        if any(x != 0 for x in write_ret):
+            raise RuntimeError(f"warmup put failed for device {device_id}")
+        remove_ret = store.remove_batch(keys)
+        if any(x != 0 for x in remove_ret):
+            raise RuntimeError(f"warmup remove failed for device {device_id}")
+
     sync.wait()
     start = time.perf_counter()
     for keys, buffs, sizes in zip(keys_list, buffs_list, sizes_list):
@@ -193,6 +205,7 @@ def write_worker(*args):
     print(
         f"\033[91mdevice_id:{device_id} write_total_size:{total_size_bytes} bytes, "
         f"single_size:{total_size_bytes / call_count:.0f} bytes, call count:{call_count}, "
+        f"warmup count:{warmup_count}, "
         f"total_time:{duration_us:.2f} us, avg_time:{duration_us / call_count:.2f} us, "
         f"bw:{bandwidth_gb_per_sec:.3f} GB/s\033[0m\n"
     )
@@ -210,12 +223,13 @@ def read_worker(*args):
     batch_size = args[1]
     block_size = [args[2]]
     call_count = args[3]
-    data_dim = args[4]
-    backend = args[5]
+    warmup_count = args[4]
+    data_dim = args[5]
+    backend = args[6]
     global g_local_type
-    g_local_type = args[6]
-    process_count = args[7]
-    sync = args[8]
+    g_local_type = args[7]
+    process_count = args[8]
+    sync = args[9]
 
     set_device(device_id)
     print(f"npu:{device_id} 开始，PID: {os.getpid()}")
