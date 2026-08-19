@@ -29,7 +29,7 @@ ret = acl.rt.set_device(count - 1)
 print("set_device returned: {}".format(ret))
 
 STORE = DistributedObjectStore()
-DEFAULT_REPLICA_NUMBER = 2
+DEFAULT_REPLICA_NUMBER = 1
 AVAILABLE_COMMANDS = "'put <key> <value>', 'get <key>', 'remove <key>' or 'quit'/'exit'"
 
 
