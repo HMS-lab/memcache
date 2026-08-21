@@ -158,7 +158,7 @@ local_config create_default_local_config()
     SafeCopy("tcp://127.0.0.1:7000", cfg.hcom_url, sizeof(cfg.hcom_url));
     SafeCopy("1GB", cfg.dram_size, sizeof(cfg.dram_size));
     SafeCopy("0", cfg.hbm_size, sizeof(cfg.hbm_size));
-    SafeCopy("64GB", cfg.max_dram_size, sizeof(cfg.max_dram_size));
+    SafeCopy("1TB", cfg.max_dram_size, sizeof(cfg.max_dram_size));
     SafeCopy("0", cfg.max_hbm_size, sizeof(cfg.max_hbm_size));
     cfg.client_retry_milliseconds = 0;
     cfg.client_timeout_seconds = 60UL;

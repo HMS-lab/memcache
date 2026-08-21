@@ -18,6 +18,8 @@
 #include <string>
 #include <unistd.h>
 
+#include <mockcpp/mockcpp.hpp>
+
 #include "mmc_configuration.h"
 #include "common/mmc_functions.h"
 #include "common/mmc_ip_validator.h"
@@ -102,7 +104,10 @@ std::string WriteTempConfigFile()
 class TestMmcConfigurationUrlResolve : public testing::Test {
 public:
     void SetUp() override {}
-    void TearDown() override {}
+    void TearDown() override
+    {
+        GlobalMockObject::reset();
+    }
 };
 
 TEST_F(TestMmcConfigurationUrlResolve, ResolveUrlField_Success)
@@ -127,6 +132,7 @@ TEST_F(TestMmcConfigurationUrlResolve, ResolveUrlField_EmptyUrl_ReturnsEmpty)
 
 TEST_F(TestMmcConfigurationUrlResolve, ResolveUrlField_InvalidDomain_KeepsOriginalValue)
 {
+    MOCKER(getaddrinfo).stubs().will(returnValue(EAI_NONAME));
     const std::string resolvedUrl = Configuration::ResolveUrlField(INVALID_META_URL);
     EXPECT_EQ(resolvedUrl, INVALID_META_URL);
 }
@@ -158,6 +164,7 @@ TEST_F(TestMmcConfigurationUrlResolve, Setup_InvalidUrlKeepsOriginalValue)
     SafeCopy(INVALID_CFG_URL, config.config_store_url, sizeof(config.config_store_url));
     SafeCopy(INVALID_HCOM_URL, config.hcom_url, sizeof(config.hcom_url));
 
+    MOCKER(getaddrinfo).stubs().will(returnValue(EAI_NONAME));
     const bool ret = clientConfig.Setup(&config);
     ASSERT_TRUE(ret);
 

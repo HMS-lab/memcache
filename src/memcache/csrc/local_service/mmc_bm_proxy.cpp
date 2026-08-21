@@ -59,7 +59,7 @@ Result MmcBmProxy::InitBm(const mmc_bm_init_config_t &initConfig, const mmc_bm_c
 
     bmRankId_ = MFSmemApi::SmemBmGetRankId();
 
-    auto ret = InternalCreateBm(createConfig, initConfig.worldSize);
+    auto ret = InternalCreateBm(createConfig);
     if (ret != MMC_OK) {
         MMC_LOG_ERROR("Internal create bm failed");
         MFSmemApi::SmemBmUninit(0);
@@ -86,7 +86,7 @@ Result MmcBmProxy::InitBm(const mmc_bm_init_config_t &initConfig, const mmc_bm_c
     return MMC_OK;
 }
 
-Result MmcBmProxy::InternalCreateBm(const mmc_bm_create_config_t &createConfig, uint32_t worldSize)
+Result MmcBmProxy::InternalCreateBm(const mmc_bm_create_config_t &createConfig)
 {
     if (createConfig.localHBMSize > 0 && createConfig.localDRAMSize == 0) {
         mediaType_ = MEDIA_HBM;
@@ -108,17 +108,7 @@ Result MmcBmProxy::InternalCreateBm(const mmc_bm_create_config_t &createConfig, 
     option.localDRAMSize = createConfig.localDRAMSize;
     option.localHBMSize = createConfig.localHBMSize;
     option.dataOpType = opType;
-
-    constexpr uint64_t mmcAuto56BitsGvaThreshold = 32ULL << 40ULL; // 32TB
-    const uint64_t totalPoolSize =
-        (createConfig.localMaxDRAMSize + createConfig.localMaxHBMSize) * static_cast<uint64_t>(worldSize);
-    option.enable56BitsGva = totalPoolSize > mmcAuto56BitsGvaThreshold;
-    if (option.enable56BitsGva) {
-        MMC_LOG_INFO("56 bits GVA is enabled since the total address space size ("
-                     << totalPoolSize << ") is larger than threshold(" << mmcAuto56BitsGvaThreshold
-                     << "), localMaxDramSize(" << createConfig.localMaxDRAMSize << "), localMaxHbmSize("
-                     << createConfig.localMaxHBMSize << "), worldSize(" << worldSize << ").");
-    }
+    option.enable56BitsGva = true;
     option.flags = createConfig.flags;
     option.tag[0] = '\0';
     option.tagOpInfo[0] = '\0';

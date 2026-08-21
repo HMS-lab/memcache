@@ -62,9 +62,6 @@ virtual int Setup(const local_config &config);
 
 初始化并校验本地配置，供后续 `Init` 使用。
 
-> [!NOTE] 说明
-> 如果开启device_urma或device_uboe协议，则`max dram * world_size`的池化总大小必须大于32T。
-
 **参数**
 
 `config`：本地配置（`local_config`）。

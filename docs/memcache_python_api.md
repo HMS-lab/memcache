@@ -213,7 +213,7 @@ LocalConfig是分布式内存缓存的配置类，用于设置客户端的各种
 | hcom_url | str | "tcp://127.0.0.1:7000" | HCOM URL for RDMA network |
 | dram_size | str | "1GB" | DRAM空间使用，支持格式如1GB, 2MB等 |
 | hbm_size | str | "0" | HBM空间使用 |
-| max_dram_size | str | "64GB" | 所有本地进程中dram_size的最大值 |
+| max_dram_size | str | "1TB" | 所有本地进程中dram_size的最大值 |
 | max_hbm_size | str | "0" | 所有本地进程中hbm_size的最大值 |
 | client_retry_milliseconds | int | 0 | 客户端请求meta service时的总重试时间（毫秒） |
 | client_timeout_seconds | int | 60 | 客户端请求超时时间(秒) |
@@ -281,9 +281,6 @@ result = store.setup(config)
 **功能**
 
 设置分布式内存缓存客户端配置。
-
-> [!NOTE] 说明
-> 如果开启device_urma或device_uboe协议，则`max dram * world_size`的池化总大小必须大于32T。
 
 **参数**
 

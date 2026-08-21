@@ -14,6 +14,8 @@
 
 #include <string>
 
+#include <mockcpp/mockcpp.hpp>
+
 #include "common/mmc_ip_validator.h"
 #include "mmc_configuration.h"
 
@@ -32,7 +34,10 @@ constexpr const char *IPV6_DIRECT_URL = "tcp://[::1]:5000";
 class TestMetaServiceUrlResolve : public testing::Test {
 public:
     void SetUp() override {}
-    void TearDown() override {}
+    void TearDown() override
+    {
+        GlobalMockObject::reset();
+    }
 };
 
 TEST_F(TestMetaServiceUrlResolve, ResolveDomainToIp_Localhost_ResolvesSuccessfully)
@@ -47,6 +52,7 @@ TEST_F(TestMetaServiceUrlResolve, ResolveDomainToIp_Localhost_ResolvesSuccessful
 
 TEST_F(TestMetaServiceUrlResolve, ResolveDomainToIp_InvalidDomain_ReturnsEmpty)
 {
+    MOCKER(getaddrinfo).stubs().will(returnValue(EAI_NONAME));
     UrlParser parser;
     const std::string resolvedUrl = parser.ResolveDomainToIp(INVALID_META_URL);
     EXPECT_TRUE(resolvedUrl.empty());
@@ -98,6 +104,7 @@ TEST_F(TestMetaServiceUrlResolve, ResolveUrlField_WithLocalhost_ResolvesToIp)
 
 TEST_F(TestMetaServiceUrlResolve, ResolveUrlField_WithInvalidDomain_KeepsOriginal)
 {
+    MOCKER(getaddrinfo).stubs().will(returnValue(EAI_NONAME));
     const std::string resolvedUrl = Configuration::ResolveUrlField(INVALID_META_URL);
     EXPECT_EQ(resolvedUrl, INVALID_META_URL);
 }

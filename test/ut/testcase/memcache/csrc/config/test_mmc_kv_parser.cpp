@@ -16,6 +16,8 @@
 #include <fstream>
 #include <string>
 #include <unistd.h>
+#include <utility>
+#include <vector>
 
 #define private public
 #include "mmc_kv_parser.h"
@@ -89,6 +91,26 @@ TEST_F(TestKVParser, ParseLine_KeyWithOnlyMmcPrefixNoDot)
 
 namespace {
 
+constexpr size_t MAX_LINE_NUMBER = 10000U;
+constexpr std::streamoff MAX_CONFIG_FILE_SIZE = 10U * 1024U * 1024U;
+
+class ScopedPathCleanup {
+public:
+    explicit ScopedPathCleanup(string path) : path_(std::move(path)) {}
+    ~ScopedPathCleanup()
+    {
+        if (!path_.empty()) {
+            remove(path_.c_str());
+        }
+    }
+
+    ScopedPathCleanup(const ScopedPathCleanup &) = delete;
+    ScopedPathCleanup &operator=(const ScopedPathCleanup &) = delete;
+
+private:
+    string path_;
+};
+
 string WriteTempConfigFile(const string &content)
 {
     char tmpl[] = "/tmp/mmc_kv_parser_test_XXXXXX";
@@ -131,6 +153,7 @@ TEST_F(TestKVParser, FromFile_MixedKeys_OnlyMmcLoaded)
     string key, value;
     parser.GetI(0, key, value);
     EXPECT_EQ(key, "ock.mmc.meta_service_url");
+    EXPECT_EQ(value, "tcp://127.0.0.1:5000");
     parser.GetI(1, key, value);
     EXPECT_EQ(key, "ock.mmc.log_level");
     parser.GetI(2, key, value);
@@ -303,4 +326,171 @@ TEST_F(TestKVParser, Size_ReturnsCorrectCount)
     string line2 = "ock.mmc.key2 = value2";
     parser.ParseLine(line2);
     EXPECT_EQ(parser.Size(), 2U);
+}
+TEST_F(TestKVParser, FromFile_NonexistentPath_ReturnsError)
+{
+    string filePath = WriteTempConfigFile("");
+    ASSERT_FALSE(filePath.empty());
+    ASSERT_EQ(remove(filePath.c_str()), 0);
+
+    KVParser parser;
+    EXPECT_EQ(parser.FromFile(filePath), MMC_ERROR);
+}
+
+TEST_F(TestKVParser, FromFile_SymlinkPath_ReturnsError)
+{
+    string targetPath = WriteTempConfigFile("ock.mmc.key = value\n");
+    ASSERT_FALSE(targetPath.empty());
+    ScopedPathCleanup targetCleanup(targetPath);
+
+    string linkPath = targetPath + ".link";
+    ScopedPathCleanup linkCleanup(linkPath);
+    ASSERT_EQ(symlink(targetPath.c_str(), linkPath.c_str()), 0);
+
+    KVParser parser;
+    EXPECT_EQ(parser.FromFile(linkPath), MMC_ERROR);
+}
+
+TEST_F(TestKVParser, FromFile_CrlfLine_ParsesKeyAndValue)
+{
+    string filePath = WriteTempConfigFile("ock.mmc.crlf_key = crlf_value\r\n");
+    ASSERT_FALSE(filePath.empty());
+    ScopedPathCleanup fileCleanup(filePath);
+
+    KVParser parser;
+    ASSERT_EQ(parser.FromFile(filePath), MMC_OK);
+
+    string value;
+    EXPECT_EQ(parser.GetItem("ock.mmc.crlf_key", value), MMC_OK);
+    EXPECT_EQ(value, "crlf_value");
+}
+
+TEST_F(TestKVParser, FromFile_EmptyFile_ReturnsSuccess)
+{
+    string filePath = WriteTempConfigFile("");
+    ASSERT_FALSE(filePath.empty());
+    ScopedPathCleanup fileCleanup(filePath);
+
+    KVParser parser;
+    EXPECT_EQ(parser.FromFile(filePath), MMC_OK);
+    EXPECT_EQ(parser.Size(), 0U);
+}
+
+TEST_F(TestKVParser, FromFile_LineTooLong_ReturnsError)
+{
+    constexpr size_t kMaxLineLength = 4096U;
+    string content(kMaxLineLength + 1U, 'x');
+    string filePath = WriteTempConfigFile(content);
+    ASSERT_FALSE(filePath.empty());
+    ScopedPathCleanup fileCleanup(filePath);
+
+    KVParser parser;
+    EXPECT_EQ(parser.FromFile(filePath), MMC_ERROR);
+}
+
+TEST_F(TestKVParser, FromFile_EmptyKey_ReturnsError)
+{
+    string filePath = WriteTempConfigFile(" = value\n");
+    ASSERT_FALSE(filePath.empty());
+    ScopedPathCleanup fileCleanup(filePath);
+
+    KVParser parser;
+    EXPECT_EQ(parser.FromFile(filePath), MMC_ERROR);
+}
+
+TEST_F(TestKVParser, FromFile_LineWithoutEqual_IsIgnored)
+{
+    string filePath = WriteTempConfigFile("not a key value\nock.mmc.key = value\n");
+    ASSERT_FALSE(filePath.empty());
+    ScopedPathCleanup fileCleanup(filePath);
+
+    KVParser parser;
+    EXPECT_EQ(parser.FromFile(filePath), MMC_OK);
+    EXPECT_EQ(parser.Size(), 1U);
+}
+
+TEST_F(TestKVParser, FromFile_ValidLineThenEmptyKey_ReturnsError)
+{
+    string content = "ock.mmc.key = value\n = invalid\n";
+    string filePath = WriteTempConfigFile(content);
+    ASSERT_FALSE(filePath.empty());
+    ScopedPathCleanup fileCleanup(filePath);
+
+    KVParser parser;
+    EXPECT_EQ(parser.FromFile(filePath), MMC_ERROR);
+    EXPECT_EQ(parser.Size(), 1U);
+}
+
+TEST_F(TestKVParser, FromFile_TooManyLines_ReturnsError)
+{
+    string content(MAX_LINE_NUMBER + 1U, '\n');
+    string filePath = WriteTempConfigFile(content);
+    ASSERT_FALSE(filePath.empty());
+    ScopedPathCleanup fileCleanup(filePath);
+
+    KVParser parser;
+    EXPECT_EQ(parser.FromFile(filePath), MMC_ERROR);
+}
+
+TEST_F(TestKVParser, FromFile_FileSizeExceedsLimit_ReturnsError)
+{
+    string filePath = WriteTempConfigFile("");
+    ASSERT_FALSE(filePath.empty());
+    ScopedPathCleanup fileCleanup(filePath);
+
+    ofstream ofs(filePath, ios::binary | ios::trunc);
+    ASSERT_TRUE(ofs.is_open());
+    ofs.seekp(MAX_CONFIG_FILE_SIZE);
+    ASSERT_TRUE(ofs.good());
+    ofs.put('\0');
+    ASSERT_TRUE(ofs.good());
+    ofs.close();
+
+    KVParser parser;
+    EXPECT_EQ(parser.FromFile(filePath), MMC_ERROR);
+}
+
+TEST_F(TestKVParser, GetItem_ReturnsValueOrError)
+{
+    KVParser parser;
+    ASSERT_EQ(parser.SetItem("ock.mmc.key", "value"), MMC_OK);
+
+    string value;
+    EXPECT_EQ(parser.GetItem("ock.mmc.key", value), MMC_OK);
+    EXPECT_EQ(value, "value");
+    EXPECT_EQ(parser.GetItem("ock.mmc.missing", value), MMC_ERROR);
+}
+
+TEST_F(TestKVParser, GetI_OutOfRange_LeavesOutputUnchanged)
+{
+    KVParser parser;
+    ASSERT_EQ(parser.SetItem("ock.mmc.key", "value"), MMC_OK);
+
+    string key = "initial_key";
+    string value = "initial_value";
+    parser.GetI(1U, key, value);
+
+    EXPECT_EQ(key, "initial_key");
+    EXPECT_EQ(value, "initial_value");
+}
+
+TEST_F(TestKVParser, CheckSet_ReportsMissingAndResetsState)
+{
+    KVParser parser;
+    ASSERT_EQ(parser.SetItem("ock.mmc.present", "value"), MMC_OK);
+
+    vector<string> keys = {"ock.mmc.present", "ock.mmc.missing"};
+    EXPECT_FALSE(parser.CheckSet(keys));
+
+    vector<string> missingKey = {"ock.mmc.present"};
+    EXPECT_FALSE(parser.CheckSet(missingKey));
+}
+
+TEST_F(TestKVParser, CheckSet_ReturnsTrueWhenAllKeysAreSet)
+{
+    KVParser parser;
+    ASSERT_EQ(parser.SetItem("ock.mmc.key", "value"), MMC_OK);
+
+    vector<string> keys = {"ock.mmc.key"};
+    EXPECT_TRUE(parser.CheckSet(keys));
 }

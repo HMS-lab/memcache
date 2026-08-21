@@ -187,52 +187,17 @@ TEST_F(TestMmcBmProxy, InitBm_AlreadyStarted)
 
 // InitBm_InvalidOpType removed: smem library no longer rejects SMEMB_DATA_OP_BUTT at create time, so InitBm succeeds even for unknown types.
 
-// 总容量 <= 32TB 时不启用 56 位 GVA。
-TEST_F(TestMmcBmProxy, InitBm_BelowThreshold_NotEnable56BitsGva)
+// 56-bit GVA 始终启用，不再依赖容量阈值判断。
+TEST_F(TestMmcBmProxy, InitBm_AlwaysEnable56BitsGva)
 {
     MockSmemBmResetLastCreate2Option();
-    // (localMaxDRAMSize + localMaxHBMSize) * worldSize = (1TB + 0) * 4 = 4TB < 32TB
-    createConfig.localDRAMSize = 1ULL << 30ULL;
-    createConfig.localMaxDRAMSize = 1ULL << 40ULL;
-    createConfig.localHBMSize = 0;
-    createConfig.localMaxHBMSize = 0;
-    Result ret = InitBmWithConfig();
-    EXPECT_EQ(ret, MMC_OK);
-
-    const smem_bm_create_option_t *captured = MockSmemBmGetLastCreate2Option();
-    ASSERT_NE(captured, nullptr);
-    EXPECT_FALSE(captured->enable56BitsGva);
-}
-
-// (localMaxDRAMSize + localMaxHBMSize) * worldSize > 32TB 时自动启用 56 位 GVA
-// （mmc 适配层职责，业务层无感）。
-TEST_F(TestMmcBmProxy, InitBm_AboveThreshold_AutoEnable56BitsGva)
-{
-    MockSmemBmResetLastCreate2Option();
-    // 9TB * 4 = 36TB > 32TB
-    createConfig.localMaxDRAMSize = 9ULL << 40ULL;
-    createConfig.localMaxHBMSize = 0;
+    // 验证初始化传给 SMEM 的 56-bit GVA 开关始终为 true
     Result ret = InitBmWithConfig();
     EXPECT_EQ(ret, MMC_OK);
 
     const smem_bm_create_option_t *captured = MockSmemBmGetLastCreate2Option();
     ASSERT_NE(captured, nullptr);
     EXPECT_TRUE(captured->enable56BitsGva);
-}
-
-// 阈值边界：恰好等于 32TB 时不启用（严格大于阈值才启用）。
-TEST_F(TestMmcBmProxy, InitBm_AtThreshold_NotEnable56BitsGva)
-{
-    MockSmemBmResetLastCreate2Option();
-    // 8TB * 4 = 32TB（不大于阈值）
-    createConfig.localMaxDRAMSize = 8ULL << 40ULL;
-    createConfig.localMaxHBMSize = 0;
-    Result ret = InitBmWithConfig();
-    EXPECT_EQ(ret, MMC_OK);
-
-    const smem_bm_create_option_t *captured = MockSmemBmGetLastCreate2Option();
-    ASSERT_NE(captured, nullptr);
-    EXPECT_FALSE(captured->enable56BitsGva);
 }
 
 TEST_F(TestMmcBmProxy, DestroyBm_Success)

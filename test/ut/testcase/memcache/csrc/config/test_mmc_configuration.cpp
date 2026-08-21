@@ -51,7 +51,7 @@ static local_config CreateLocalConfigWithCurrentDefaults()
     SafeCopy("tcp://127.0.0.1:7000", config.hcom_url, sizeof(config.hcom_url));
     SafeCopy("1GB", config.dram_size, sizeof(config.dram_size));
     SafeCopy("0", config.hbm_size, sizeof(config.hbm_size));
-    SafeCopy("64GB", config.max_dram_size, sizeof(config.max_dram_size));
+    SafeCopy("1TB", config.max_dram_size, sizeof(config.max_dram_size));
     SafeCopy("0", config.max_hbm_size, sizeof(config.max_hbm_size));
     config.client_retry_milliseconds = 0;
     config.client_timeout_seconds = 60UL;
@@ -363,6 +363,15 @@ TEST_F(TestMmcConfiguration, ParseMemSizeTest)
 
     ret = configuration.ParseMemSize("1TB");
     ASSERT_EQ(ret, TB_MEM_BYTES);
+}
+
+TEST_F(TestMmcConfiguration, MissingMaxDramSizeUsesDefault)
+{
+    ClientConfig clientConfig;
+    clientConfig.LoadConfigurations();
+
+    ASSERT_TRUE(clientConfig.Initialized());
+    ASSERT_EQ(clientConfig.GetString(ConfConstant::OKC_MMC_LOCAL_SERVICE_MAX_DRAM_SIZE), "1TB");
 }
 
 TEST_F(TestMmcConfiguration, SetupWithErrorHandlingTest)

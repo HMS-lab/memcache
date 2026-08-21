@@ -107,7 +107,7 @@ public:
     inline uint32_t RankId() const;
 
 private:
-    Result InternalCreateBm(const mmc_bm_create_config_t &createConfig, uint32_t worldSize);
+    Result InternalCreateBm(const mmc_bm_create_config_t &createConfig);
 
     void *gvas_[MEDIA_NONE]{};
     uint64_t spaces_[MEDIA_NONE];

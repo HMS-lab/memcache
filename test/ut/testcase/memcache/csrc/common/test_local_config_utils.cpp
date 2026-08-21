@@ -42,7 +42,7 @@ TEST_F(TestLocalConfigUtils, CreateDefaultLocalConfigReturnsExpectedDefaults)
     EXPECT_STREQ(config.hcom_url, "tcp://127.0.0.1:7000");
     EXPECT_STREQ(config.dram_size, "1GB");
     EXPECT_STREQ(config.hbm_size, "0");
-    EXPECT_STREQ(config.max_dram_size, "64GB");
+    EXPECT_STREQ(config.max_dram_size, "1TB");
     EXPECT_STREQ(config.max_hbm_size, "0");
     EXPECT_EQ(config.client_retry_milliseconds, 0u);
     EXPECT_EQ(config.client_timeout_seconds, 60u);
