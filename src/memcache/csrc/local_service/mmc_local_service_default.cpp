@@ -127,7 +127,7 @@ Result MmcLocalServiceDefault::Start(const mmc_local_service_config_t &config)
     metaNetClient_->RegisterRetryHandler(
         std::bind(&MmcLocalServiceDefault::RegisterBm, this),
         std::bind(&MmcLocalServiceDefault::UpdateMetaBackup, this, std::placeholders::_1, std::placeholders::_2,
-                  std::placeholders::_3, std::placeholders::_4, std::placeholders::_5),
+                  std::placeholders::_3, std::placeholders::_4),
         std::bind(&MmcLocalServiceDefault::CopyBlob, this, std::placeholders::_1, std::placeholders::_2,
                   std::placeholders::_3),
         std::bind(&MmcLocalServiceDefault::BlobDelete, this, std::placeholders::_1, std::placeholders::_2),
@@ -362,7 +362,7 @@ Result MmcLocalServiceDefault::InitUbsIo(int32_t deviceId, const std::string &co
 }
 
 Result MmcLocalServiceDefault::UpdateMetaBackup(const std::vector<uint32_t> &ops, const std::vector<std::string> &keys,
-                                                const std::vector<MmcMemBlobDesc> &blobs, bool asyncFlush,
+                                                const std::vector<MmcMemBlobDesc> &blobs,
                                                 std::vector<Result> &keyResults)
 {
     const auto opCount = ops.size();
@@ -375,8 +375,8 @@ Result MmcLocalServiceDefault::UpdateMetaBackup(const std::vector<uint32_t> &ops
         return MMC_INVALID_PARAM;
     }
 
-    std::vector<size_t> flushTasks = ProcessBackupMetadata(ops, keys, blobs, asyncFlush, length, keyResults);
-    MMC_LOG_DEBUG("ProcessBackupMetadata done, asyncFlush=" << asyncFlush << ", flushTasks=" << flushTasks.size());
+    std::vector<size_t> flushTasks = ProcessBackupMetadata(ops, keys, blobs, length, keyResults);
+    MMC_LOG_DEBUG("ProcessBackupMetadata done, flushTasks=" << flushTasks.size());
 
     BatchFlushToSsd(flushTasks, keys, blobs, keyResults);
 
@@ -424,8 +424,7 @@ static bool EraseDesc(std::map<std::string, std::vector<MmcMemBlobDesc>> &blobMa
 std::vector<size_t> MmcLocalServiceDefault::ProcessBackupMetadata(const std::vector<uint32_t> &ops,
                                                                   const std::vector<std::string> &keys,
                                                                   const std::vector<MmcMemBlobDesc> &blobs,
-                                                                  bool asyncFlush, size_t length,
-                                                                  std::vector<Result> &keyResults)
+                                                                  size_t length, std::vector<Result> &keyResults)
 {
     keyResults.resize(length, MMC_ERROR);
     std::vector<size_t> flushTasks;
@@ -438,10 +437,9 @@ std::vector<size_t> MmcLocalServiceDefault::ProcessBackupMetadata(const std::vec
                 keyResults[i] = MMC_DUPLICATED_OBJECT;
                 continue;
             }
-            if (asyncFlush && blobs[i].mediaType_ == MEDIA_DRAM && ubsIoProxyPtr_ != nullptr &&
-                bmProxyPtr_ != nullptr) {
+            if (blobs[i].mediaType_ == MEDIA_DRAM && ubsIoProxyPtr_ != nullptr && bmProxyPtr_ != nullptr) {
                 flushTasks.push_back(i);
-            } else if (asyncFlush && blobs[i].mediaType_ == MEDIA_DRAM) {
+            } else if (blobs[i].mediaType_ == MEDIA_DRAM) {
                 MMC_LOG_WARN("async flush skipped, ubs or bm not available, key=" << keys[i]);
             } else {
                 keyResults[i] = MMC_OK;
@@ -803,7 +801,7 @@ void MmcLocalServiceDefault::HandleUbsIoMetaEvents(int type, const std::vector<s
             MMC_LOG_WARN("UBS IO meta DELETE RPC failed, ret=" << ret << ", resp=" << response.ret_
                                                                << ", keyCount=" << keys.size());
         } else {
-            MMC_LOG_INFO("UBS IO meta DELETE RPC success, keyCount=" << keys.size());
+            MMC_LOG_DEBUG("UBS IO meta DELETE RPC success, keyCount=" << keys.size());
         }
     } else {
         MMC_LOG_ERROR("unknown UBS IO meta event type=" << type << ", keyCount=" << keys.size());

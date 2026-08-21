@@ -42,8 +42,7 @@ struct MetaBackUpOperate {
 struct MMCMetaBackUpConfDefault : public MMCMetaBackUpConf {
     MetaNetServerPtr serverPtr_;
     uint32_t asyncFlushIntervalMs = 0;
-    uint32_t asyncFlushBatchLimit = 0;
-    bool asyncFlushEnabled = false;
+    uint32_t asyncFlushBatchLimit = 8;
     MmcThreadPoolPtr rewarmPool_;
     std::function<bool(uint32_t)> isSsdAvailableFunc_;
     std::function<void(uint32_t, const std::vector<std::pair<std::string, MmcMemBlobDesc>> &)> onAsyncFlushComplete_;
@@ -51,12 +50,11 @@ struct MMCMetaBackUpConfDefault : public MMCMetaBackUpConf {
     explicit MMCMetaBackUpConfDefault(MetaNetServerPtr serverPtr) : serverPtr_(serverPtr) {}
 
     void Setup(
-        uint32_t intervalMs, uint32_t batchLimit, bool enabled, std::function<bool(uint32_t)> isSsdAvailableFunc,
+        uint32_t intervalMs, uint32_t batchLimit, std::function<bool(uint32_t)> isSsdAvailableFunc,
         std::function<void(uint32_t, const std::vector<std::pair<std::string, MmcMemBlobDesc>> &)> onAsyncFlushComplete)
     {
         asyncFlushIntervalMs = intervalMs;
         asyncFlushBatchLimit = batchLimit;
-        asyncFlushEnabled = enabled;
         isSsdAvailableFunc_ = std::move(isSsdAvailableFunc);
         onAsyncFlushComplete_ = std::move(onAsyncFlushComplete);
     }
@@ -87,7 +85,6 @@ public:
         metaNetServer_ = defaultPtr->serverPtr_;
         asyncFlushIntervalMs_ = defaultPtr->asyncFlushIntervalMs;
         asyncFlushBatchLimit_ = defaultPtr->asyncFlushBatchLimit;
-        asyncFlushEnabled_ = defaultPtr->asyncFlushEnabled;
         rewarmPool_ = defaultPtr->rewarmPool_;
         isSsdAvailableFunc_ = defaultPtr->isSsdAvailableFunc_;
         onAsyncFlushComplete_ = defaultPtr->onAsyncFlushComplete_;
@@ -156,7 +153,7 @@ public:
 
     bool ShouldNotify(size_t queueSize) const
     {
-        return !asyncFlushEnabled_ || queueSize >= asyncFlushBatchLimit_;
+        return queueSize >= asyncFlushBatchLimit_;
     }
 
 private:
@@ -171,8 +168,7 @@ private:
     std::condition_variable backupThreadCv_;
     std::list<MetaBackUpOperate> backupList_;
     uint32_t asyncFlushIntervalMs_ = 0;
-    uint32_t asyncFlushBatchLimit_ = 0;
-    bool asyncFlushEnabled_ = false;
+    uint32_t asyncFlushBatchLimit_ = 8;
     MmcThreadPoolPtr rewarmPool_;
     std::function<bool(uint32_t)> isSsdAvailableFunc_;
     std::function<void(uint32_t, const std::vector<std::pair<std::string, MmcMemBlobDesc>> &)> onAsyncFlushComplete_;

@@ -28,8 +28,6 @@ using namespace ock::mmc;
 
 namespace {
 
-constexpr uint16_t REWARM_DRAM_WATERMARK = 100U;
-
 struct RecordedEvent {
     std::string type; // "stored" / "removed" / "cleared"
     std::string key;
@@ -103,7 +101,7 @@ TEST_F(TestMetaManagerKvEvents, UpdateStateEmitsStored)
 {
     MmcLocation loc{0, MEDIA_DRAM};
     MmcLocalMemlInitInfo locInfo{0, 1000000};
-    auto metaMng = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U, REWARM_DRAM_WATERMARK);
+    auto metaMng = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U);
     ASSERT_EQ(metaMng->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobList;
     metaMng->Mount(loc, locInfo, blobList, false);
@@ -137,7 +135,7 @@ TEST_F(TestMetaManagerKvEvents, RemoveEmitsRemoved)
 {
     MmcLocation loc{0, MEDIA_DRAM};
     MmcLocalMemlInitInfo locInfo{0, 1000000};
-    auto metaMng = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U, REWARM_DRAM_WATERMARK);
+    auto metaMng = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U);
     ASSERT_EQ(metaMng->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobList;
     metaMng->Mount(loc, locInfo, blobList, false);
@@ -173,7 +171,7 @@ TEST_F(TestMetaManagerKvEvents, NoSinkIsNoop)
 {
     MmcLocation loc{0, MEDIA_DRAM};
     MmcLocalMemlInitInfo locInfo{0, 1000000};
-    auto metaMng = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U, REWARM_DRAM_WATERMARK);
+    auto metaMng = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U);
     ASSERT_EQ(metaMng->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobList;
     metaMng->Mount(loc, locInfo, blobList, false);
@@ -193,7 +191,7 @@ TEST_F(TestMetaManagerKvEvents, RemoveAllEmitsRemovedPerKey)
 {
     MmcLocation loc{0, MEDIA_DRAM};
     MmcLocalMemlInitInfo locInfo{0, 4000000};
-    auto metaMng = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U, REWARM_DRAM_WATERMARK);
+    auto metaMng = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U);
     ASSERT_EQ(metaMng->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobList;
     metaMng->Mount(loc, locInfo, blobList, false);

@@ -182,6 +182,8 @@ void MmcMetaServiceHttpTest::StartService()
         metaServiceConfig_.evictThresholdLow = kHttpEvictThresholdLow;
         metaServiceConfig_.haEnable = false;
         metaServiceConfig_.accTlsConfig.tlsEnable = false;
+        metaServiceConfig_.asyncFlushIntervalMs = 1000UL;
+        metaServiceConfig_.asyncFlushBatchLimit = 8UL;
         // mmc_meta_service_config_t no longer has localSsdSize
 
         const std::string discoveryUrl = std::string(kHttpTcpUrlPrefix) + std::to_string(discoveryPort_);
@@ -472,14 +474,10 @@ TEST_F(MmcMetaServiceHttpTest, MetricsContract)
     const MmcMetaMetricSnapshot snapshot = MmcMetaMetricManager::GetInstance().GetSnapshot();
     std::ostringstream expectedSummary;
     expectedSummary
-        << "keys=" << kHttpExpectedBlobCount << " evict=" << snapshot.evictCount
-        << " evict_to_ssd=" << snapshot.evictToSsdCount << " evict_ssd_delete=" << snapshot.evictSsdDeleteCount
-        << " evict_mem_delete=" << snapshot.evictMemDeleteCount << " rewarm=" << snapshot.rewarmCount
+        << "keys=" << kHttpExpectedBlobCount << " evict=" << snapshot.evictCount << " rewarm=" << snapshot.rewarmCount
         << " rewarm_fail=" << snapshot.rewarmFailCount << " rewarm_bytes_total=" << snapshot.rewarmBytesCount
-        << " rewarm_bytes_current=" << snapshot.rewarmBytesCurrent
-        << " async_flush_blobs_added=" << snapshot.asyncFlushBlobAdded
-        << " async_flush_bytes=" << snapshot.asyncFlushBlobBytes
-        << " async_flush_writes=" << snapshot.asyncFlushWriteCount << " get_hit_dram=" << snapshot.getHitDramCount
+        << " rewarm_bytes_current=" << snapshot.rewarmBytesCurrent << " flush_blobs=" << snapshot.asyncFlushBlobAdded
+        << " flush_bytes=" << snapshot.asyncFlushBlobBytes << " get_hit_dram=" << snapshot.getHitDramCount
         << " get_hit_ssd=" << snapshot.getHitSsdCount << " hbm_used=" << SIZE_32K << "/" << kHttpSegmentCapacityBytes
         << " dram_used=" << kHttpZeroUsedBytes << "/" << kHttpSegmentCapacityBytes << " ssd_used=" << kHttpZeroUsedBytes
         << "/" << kHttpZeroUsedBytes << " alloc_req=" << snapshot.allocRequestCount

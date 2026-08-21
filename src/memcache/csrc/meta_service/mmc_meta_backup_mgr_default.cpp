@@ -53,9 +53,10 @@ void MMCMetaBackUpMgrDefault::SendBackup2Local()
         std::lock_guard<std::mutex> lg(backupThreadLock_);
         drained.splice(drained.begin(), backupList_);
     }
+    const size_t batchLimit = asyncFlushBatchLimit_;
     for (auto it = drained.begin(); it != drained.end();) {
         auto &group = rankGroups[it->desc_.rank_];
-        if (!asyncFlushEnabled_ || group.size() < asyncFlushBatchLimit_) {
+        if (group.size() < batchLimit) {
             group.push_back(std::move(*it));
             it = drained.erase(it);
         } else {
@@ -71,7 +72,7 @@ void MMCMetaBackUpMgrDefault::SendBackup2Local()
         return;
     }
 
-    MMC_LOG_DEBUG("Backup sending " << rankGroups.size() << " rank groups, async=" << asyncFlushEnabled_);
+    MMC_LOG_DEBUG("Backup sending " << rankGroups.size() << " rank groups");
     if (rewarmPool_ != nullptr) {
         std::vector<std::future<void>> futures;
         for (auto &[rank, entries] : rankGroups) {
@@ -106,12 +107,7 @@ void MMCMetaBackUpMgrDefault::SendBackupForRank(uint32_t rank, std::vector<MetaB
         request.blobs_.push_back(e.desc_);
     }
 
-    if (asyncFlushEnabled_ && isSsdAvailableFunc_) {
-        request.asyncFlush_ = isSsdAvailableFunc_(rank);
-    }
-
-    MMC_LOG_DEBUG("Backup flush rank=" << rank << " keys=" << request.keys_.size()
-                                       << " asyncFlush=" << request.asyncFlush_);
+    MMC_LOG_DEBUG("Backup flush rank=" << rank << " keys=" << request.keys_.size());
 
     Response response;
     TP_TRACE_BEGIN(TP_MMC_META_ASYNC_FLUSH_RPC);
@@ -136,7 +132,7 @@ void MMCMetaBackUpMgrDefault::SendBackupForRank(uint32_t rank, std::vector<MetaB
     std::vector<std::pair<std::string, MmcMemBlobDesc>> flushedBlobs;
     for (size_t i = 0; i < response.keyResults_.size(); ++i) {
         if (request.ops_[i] == META_BACKUP_ADD) {
-            if (!request.asyncFlush_) {
+            if (isSsdAvailableFunc_ == nullptr || !isSsdAvailableFunc_(rank)) {
                 // 非刷盘模式：ADD 成功仅表示元数据已记录，不构造 SSD 副本
                 if (response.keyResults_[i] != MMC_OK) {
                     MMC_LOG_WARN("backup add failed for key=" << request.keys_[i]

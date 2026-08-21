@@ -33,7 +33,7 @@ constexpr int RETRY_LOG_INTERVAL = 10;
 using ClientRetryHandler = std::function<int32_t(void)>;
 using ClientReplicateHandler =
     std::function<int32_t(const std::vector<uint32_t> &ops, const std::vector<std::string> &keys,
-                          const std::vector<MmcMemBlobDesc> &blobs, bool asyncFlush, std::vector<Result> &keyResults)>;
+                          const std::vector<MmcMemBlobDesc> &blobs, std::vector<Result> &keyResults)>;
 using ClientBlobCopyHandler =
     std::function<int32_t(const std::string &key, const MmcMemBlobDesc &src, const MmcMemBlobDesc &dst)>;
 using ClientBlobDeleteHandler = std::function<int32_t(const std::string &key, const MmcMemBlobDesc &blob)>;

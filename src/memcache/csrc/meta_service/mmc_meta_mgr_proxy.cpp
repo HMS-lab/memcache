@@ -341,7 +341,8 @@ Result MmcMetaMgrProxy::BatchGet(const BatchGetRequest &req, BatchAllocResponse 
         metricManager.IncrementRequestCounter(RestMetricType::GET, rank);
         auto &objMeta = objMetas[i];
         if (objMeta.numBlobs_ == 0 || objMeta.blobs_.empty() || HasSsdBlob(objMeta, req.keys_[i], "BatchGet")) {
-            MMC_LOG_WARN("BatchGet key: " << req.keys_[i] << " no blob found, numBlobs: " << objMeta.numBlobs_
+            MMC_LOG_WARN("BatchGet key: " << req.keys_[i] << " no blob found, numBlobs: "
+                                          << static_cast<unsigned int>(objMeta.numBlobs_)
                                           << ", blobs.size: " << objMeta.blobs_.size());
             resp.numBlobs_[i] = 0;
             resp.blobs_[i] = {};

@@ -26,7 +26,6 @@
 
 namespace ock {
 namespace mmc {
-
 #define ALLOC_FLAGS_GVA_MALLOC_MASK (1 << 8) // 标记 alloc 是由 malloc 接口触发
 enum AllocFlags {
     ALLOC_FORCE_BY_RANK = 1 << 0, // 按照rank强制分配

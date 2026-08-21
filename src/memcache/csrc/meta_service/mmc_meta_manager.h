@@ -34,7 +34,6 @@ namespace mmc {
 constexpr int METAMGR_POOL_BASE = 16;
 constexpr int REWARM_POOL_BASE = 32;
 constexpr int REMOVE_POOL_BASE = 16;
-constexpr uint16_t DEFAULT_REWARM_HIGH_WATERMARK = 95U;
 
 struct MmcMetaChangeCallbacks {
     using Callback = std::function<void(const std::string &key, uint32_t rank, uint16_t mediaType)>;
@@ -121,7 +120,6 @@ struct MmcMemMetaDesc {
 
 struct MmcMetaExtConfig {
     bool prefetchEnabled = false;
-    bool asyncFlushEnabled = false;
     uint64_t pendingWaitTimeoutMs = 300U;
 };
 
@@ -130,11 +128,11 @@ class MmcMetaManager : public MmcReferable {
 
 public:
     explicit MmcMetaManager(uint64_t defaultTtl, uint16_t evictThresholdHigh, uint16_t evictThresholdLow,
-                            uint16_t rewarmDramWatermark, const MmcMetaExtConfig &extConfig = {},
-                            uint32_t evictYieldInterval = 0, uint32_t evictYieldDurationUs = 100)
+                            const MmcMetaExtConfig &extConfig = {}, uint32_t evictYieldInterval = 0,
+                            uint32_t evictYieldDurationUs = 100)
         : defaultTtlMs_(defaultTtl == 0 ? MMC_DATA_TTL_MS : defaultTtl), evictThresholdHigh_(evictThresholdHigh),
-          evictThresholdLow_(evictThresholdLow), rewarmDramWatermark_(rewarmDramWatermark), extConfig_(extConfig),
-          evictYieldInterval_(evictYieldInterval), evictYieldDurationUs_(evictYieldDurationUs)
+          evictThresholdLow_(evictThresholdLow), extConfig_(extConfig), evictYieldInterval_(evictYieldInterval),
+          evictYieldDurationUs_(evictYieldDurationUs)
     {}
     // evictYieldInterval: number of evicted objects between yields (0=disabled, default=0)
     // evictYieldDurationUs: sleep duration per yield in microseconds (default=100us)
@@ -369,11 +367,6 @@ public:
         return defaultTtlMs_.load(std::memory_order_relaxed);
     }
 
-    uint16_t GetRewarmWatermark(MediaType media) const
-    {
-        return rewarmDramWatermark_;
-    }
-
     std::vector<std::pair<uint16_t, uint16_t>> GetEvictWatermark() const
     {
         std::vector<std::pair<uint16_t, uint16_t>> result(MEDIA_NONE);
@@ -433,20 +426,8 @@ private:
     Result TryRewarmForGet(const std::string &key, uint64_t operateId, const MmcMemObjMetaPtr &memObj,
                            MmcMemBlobPtr &lowerBlob, std::unique_lock<std::mutex> &guard, MmcMemBlobPtr &selectedBlob);
 
-    Result CopyBlob(const std::string &key, const MmcMemObjMetaPtr &objMeta, std::unique_lock<std::mutex> &guard,
-                    const MmcMemBlobDesc &srcBlob, const MmcLocation &dstLoc);
-
-    Result CopyBlobToSsd(const std::string &key, const MmcMemObjMetaPtr &objMeta, std::unique_lock<std::mutex> &guard,
-                         const MmcMemBlobDesc &srcBlob, const MmcLocation &dstLoc);
-
-    Result CopyBlobAlloc(const std::string &key, const MmcMemObjMetaPtr &objMeta, const MmcMemBlobDesc &srcBlob,
-                         const MmcLocation &dstLoc, MmcMemBlobPtr &outBlob, MmcMemBlobDesc &outDesc);
-
-    Result CopyBlobToDram(const std::string &key, const MmcMemObjMetaPtr &objMeta, std::unique_lock<std::mutex> &guard,
-                          const MmcMemBlobDesc &srcBlob, const MmcLocation &dstLoc);
-
-    bool HandleMoveBlobExistingDst(const std::string &key, const MmcMemObjMetaPtr &objMeta, const MmcLocation &src,
-                                   const MmcLocation &dst, uint32_t srcRank, std::unique_lock<std::mutex> &guard);
+    Result CopyBlob(const std::string &key, const MmcMemObjMetaPtr &objMeta, const MmcMemBlobDesc &srcBlob,
+                    const MmcLocation &dstLoc);
 
     Result RebuildMeta(std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList);
 
@@ -458,18 +439,13 @@ private:
     EvictResult EvictCallBackFunction(const std::string &key, const MmcMemObjMetaPtr &objMeta, MediaType srcMediaType);
 
     EvictResult EvictRemoveSrc(const std::string &key, const MmcMemObjMetaPtr &objMeta,
-                               const MmcBlobFilterPtr &srcFilter, uint32_t evictRank, MediaType srcMediaType,
-                               MediaType dstMedium, bool isSsdDelete);
+                               const MmcBlobFilterPtr &srcFilter, MediaType srcMediaType, MediaType dstMedium);
     EvictResult EvictRemoveSrc(const std::string &key, const MmcMemObjMetaPtr &objMeta, MediaType srcMediaType,
-                               MediaType dstMedium, bool isSsdDelete);
-
-    bool HandleEvictSsdBranch(const std::string &key, const MmcMemObjMetaPtr &objMeta,
-                              const MmcBlobFilterPtr &srcFilter, uint32_t evictRank, MediaType srcMediaType,
-                              EvictResult &outResult);
+                               MediaType dstMedium);
 
     EvictResult DispatchMoveBlob(const std::string &key, const MmcMemObjMetaPtr &objMeta,
-                                 const MmcBlobFilterPtr &srcFilter, uint32_t evictRank, const MmcLocation &src,
-                                 const MmcLocation &dst, MediaType srcMediaType, MediaType dstMedium);
+                                 const MmcBlobFilterPtr &srcFilter, const MmcLocation &src, const MmcLocation &dst,
+                                 MediaType srcMediaType, MediaType dstMedium);
 
     Result BlobDeleteRpc(const std::string &key, const MmcMemBlobDesc &blob);
 
@@ -554,7 +530,6 @@ private:
     std::atomic<uint64_t> defaultTtlMs_; /* default ttl in milliseconds */
     std::atomic<uint16_t> evictThresholdHigh_;
     std::atomic<uint16_t> evictThresholdLow_;
-    uint16_t rewarmDramWatermark_;
     MmcMetaExtConfig extConfig_;
     uint32_t evictYieldInterval_;   /* GC eviction yield interval (0=disabled) */
     uint32_t evictYieldDurationUs_; /* GC eviction yield sleep duration in microseconds */

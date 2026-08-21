@@ -109,6 +109,8 @@ TEST_F(TestUbsIoEnabled, PutAndGetWithUbsIoFallback)
     metaServiceConfig.logRotationFileSize = 2 * 1024 * 1024;
     metaServiceConfig.logRotationFileCount = 20;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     metaServiceConfig.evictThresholdHigh = 80U;
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = false;
@@ -189,6 +191,8 @@ TEST_F(TestUbsIoEnabled, BatchGetWithUbsIoFallback)
     metaServiceConfig.logRotationFileSize = 2 * 1024 * 1024;
     metaServiceConfig.logRotationFileCount = 20;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     metaServiceConfig.evictThresholdHigh = 80U;
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = false;
@@ -286,6 +290,8 @@ TEST_F(TestUbsIoEnabled, ExistOperationsWithUbsIo)
     metaServiceConfig.logRotationFileSize = 2 * 1024 * 1024;
     metaServiceConfig.logRotationFileCount = 20;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     metaServiceConfig.evictThresholdHigh = 80U;
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = false;
@@ -365,6 +371,8 @@ TEST_F(TestUbsIoEnabled, QueryOperationsWithUbsIo)
     metaServiceConfig.logRotationFileSize = 2 * 1024 * 1024;
     metaServiceConfig.logRotationFileCount = 20;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     metaServiceConfig.evictThresholdHigh = 80U;
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = false;
@@ -447,6 +455,8 @@ TEST_F(TestUbsIoEnabled, UbsIoFallbackWhenMemcacheFull)
     metaServiceConfig.logRotationFileSize = 2 * 1024 * 1024;
     metaServiceConfig.logRotationFileCount = 20;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     metaServiceConfig.evictThresholdHigh = 80U;
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = false;
@@ -532,6 +542,8 @@ TEST_F(TestUbsIoEnabled, UbsIoDisabledCompare)
     metaServiceConfig.logRotationFileSize = 2 * 1024 * 1024;
     metaServiceConfig.logRotationFileCount = 20;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     metaServiceConfig.evictThresholdHigh = 80U;
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = false;

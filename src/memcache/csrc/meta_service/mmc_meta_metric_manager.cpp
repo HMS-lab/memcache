@@ -107,10 +107,6 @@ MmcMetaMetricManager::MmcMetaMetricManager()
       unmountSuccessCounter_("memcache_unmount_successes_total", "Total number of Unmount successes"),
       unmountFailureCounter_("memcache_unmount_failures_total", "Total number of Unmount failures"),
       evictCounter_("memcache_evict_operations_total", "Total number of eviction operations"),
-      evictToSsdCounter_("memcache_evict_to_ssd_total", "Total number of eviction to SSD operations"),
-      evictSsdDeleteCounter_("memcache_evict_ssd_delete_total", "Total number of SSD eviction delete operations"),
-      evictMemDeleteCounter_("memcache_evict_mem_delete_total",
-                             "Total number of memory tier eviction delete operations"),
       rewarmCounter_("memcache_rewarm_total", "Total number of SSD->DRAM rewarm operations"),
       rewarmFailCounter_("memcache_rewarm_failed_total", "Total number of failed SSD->DRAM rewarm operations"),
       getHitDramCounter_("memcache_get_hits_dram_total", "Total number of Get hits served from DRAM"),
@@ -118,10 +114,8 @@ MmcMetaMetricManager::MmcMetaMetricManager()
       rewarmBytesCounter_("memcache_rewarm_bytes_total", "Total bytes rewarmed from SSD to DRAM"),
       rewarmBytesCurrentGauge_("memcache_rewarm_bytes_current", "Current bytes occupied by rewarmed data"),
       keyCountGauge_("memcache_stored_keys", "Current number of stored keys"),
-      asyncFlushBlobAddedCounter_("memcache_async_flush_blobs_added_total",
-                                  "Total number of SSD blobs registered via async flush"),
-      asyncFlushBlobBytesCounter_("memcache_async_flush_bytes_total", "Total bytes flushed to SSD via async flush"),
-      asyncFlushWriteCounter_("memcache_async_flush_writes_total", "Total number of async flush SSD write operations")
+      asyncFlushBlobAddedCounter_("memcache_flush_blobs_total", "Total number of SSD blobs registered via async flush"),
+      asyncFlushBlobBytesCounter_("memcache_flush_bytes_total", "Total bytes flushed to SSD via async flush")
 // per-rank counters (pure data, metric names passed at serialization time)
 {}
 
@@ -187,9 +181,6 @@ MmcMetaMetricSnapshot MmcMetaMetricManager::GetSnapshot() const
     snapshot.unmountSuccessCount = static_cast<uint64_t>(unmountSuccessCounter_.value());
     snapshot.unmountFailureCount = static_cast<uint64_t>(unmountFailureCounter_.value());
     snapshot.evictCount = static_cast<uint64_t>(evictCounter_.value());
-    snapshot.evictToSsdCount = static_cast<uint64_t>(evictToSsdCounter_.value());
-    snapshot.evictSsdDeleteCount = static_cast<uint64_t>(evictSsdDeleteCounter_.value());
-    snapshot.evictMemDeleteCount = static_cast<uint64_t>(evictMemDeleteCounter_.value());
     snapshot.rewarmCount = static_cast<uint64_t>(rewarmCounter_.value());
     snapshot.rewarmFailCount = static_cast<uint64_t>(rewarmFailCounter_.value());
     snapshot.getHitDramCount = static_cast<uint64_t>(getHitDramCounter_.value());
@@ -199,14 +190,10 @@ MmcMetaMetricSnapshot MmcMetaMetricManager::GetSnapshot() const
     snapshot.keyCount = static_cast<uint64_t>(keyCountGauge_.value());
     snapshot.asyncFlushBlobAdded = static_cast<uint64_t>(asyncFlushBlobAddedCounter_.value());
     snapshot.asyncFlushBlobBytes = static_cast<uint64_t>(asyncFlushBlobBytesCounter_.value());
-    snapshot.asyncFlushWriteCount = static_cast<uint64_t>(asyncFlushWriteCounter_.value());
 
     // per-rank internal counters
     if (IsPerRankEnabled()) {
         snapshot.evictCountByRank = evictRankedCounter_.GetRankMap();
-        snapshot.evictToSsdCountByRank = evictToSsdRankedCounter_.GetRankMap();
-        snapshot.evictSsdDeleteCountByRank = evictSsdDeleteRankedCounter_.GetRankMap();
-        snapshot.evictMemDeleteCountByRank = evictMemDeleteRankedCounter_.GetRankMap();
         snapshot.getHitDramCountByRank = getHitDramRankedCounter_.GetRankMap();
         snapshot.getHitSsdCountByRank = getHitSsdRankedCounter_.GetRankMap();
         snapshot.rewarmCountByRank = rewarmRankedCounter_.GetRankMap();
@@ -215,7 +202,6 @@ MmcMetaMetricSnapshot MmcMetaMetricManager::GetSnapshot() const
         snapshot.rewarmBytesCurrentByRank = rewarmBytesCurrentRankedCounter_.GetRankMap();
         snapshot.asyncFlushBlobAddedByRank = asyncFlushBlobAddedRankedCounter_.GetRankMap();
         snapshot.asyncFlushBlobBytesByRank = asyncFlushBlobBytesRankedCounter_.GetRankMap();
-        snapshot.asyncFlushWriteCountByRank = asyncFlushWriteRankedCounter_.GetRankMap();
     }
 
     return snapshot;

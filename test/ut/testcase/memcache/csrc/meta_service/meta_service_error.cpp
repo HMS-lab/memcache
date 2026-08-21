@@ -93,6 +93,8 @@ TEST_F(TestMmcServiceError, metaService)
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = true;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     // mmc_meta_service_config_t no longer has localSsdSize
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
     UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);
@@ -225,6 +227,8 @@ TEST_F(TestMmcServiceError, metaServiceRebuild)
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = true;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     // mmc_meta_service_config_t no longer has localSsdSize
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
     UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);

@@ -166,6 +166,8 @@ TEST_F(TestMmcacheStore, Init)
     metaServiceConfig.logRotationFileSize = 2UL * 1024UL * 1024UL;
     metaServiceConfig.logRotationFileCount = 20UL;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     metaServiceConfig.evictThresholdHigh = 80UL;
     metaServiceConfig.evictThresholdLow = 60UL;
     metaServiceConfig.haEnable = false;
@@ -223,6 +225,8 @@ static mmc_meta_service_t StartMetaService()
     metaServiceConfig.logRotationFileSize = 2UL * 1024UL * 1024UL;
     metaServiceConfig.logRotationFileCount = 20;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     metaServiceConfig.evictThresholdHigh = 80UL;
     metaServiceConfig.evictThresholdLow = 60UL;
     metaServiceConfig.haEnable = false;
@@ -341,6 +345,8 @@ TEST_F(TestMmcacheStore, BatchMalloc)
     metaServiceConfig.logRotationFileSize = 2UL * 1024UL * 1024UL;
     metaServiceConfig.logRotationFileCount = 20UL;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     metaServiceConfig.evictThresholdHigh = 80UL;
     metaServiceConfig.evictThresholdLow = 60UL;
     metaServiceConfig.haEnable = false;
@@ -448,6 +454,8 @@ TEST_F(TestMmcacheStore, SsdConfig_InitsUbsIoWithSsdSize)
     metaServiceConfig.logRotationFileSize = 2UL * 1024UL * 1024UL;
     metaServiceConfig.logRotationFileCount = 20;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     metaServiceConfig.evictThresholdHigh = 80U;
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = false;
@@ -503,6 +511,8 @@ TEST_F(TestMmcacheStore, SsdEvictHandler_DramToSsdCopy)
     metaServiceConfig.logRotationFileSize = 2UL * 1024UL * 1024UL;
     metaServiceConfig.logRotationFileCount = 20UL;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     metaServiceConfig.evictThresholdHigh = 80U;
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = false;
@@ -576,6 +586,8 @@ TEST_F(TestMmcacheStore, SsdExistQueryHandler)
     metaServiceConfig.logRotationFileSize = 2UL * 1024UL * 1024UL;
     metaServiceConfig.logRotationFileCount = 20;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     metaServiceConfig.evictThresholdHigh = 80U;
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = false;
@@ -634,6 +646,8 @@ TEST_F(TestMmcacheStore, SsdRemoveHandler)
     metaServiceConfig.logRotationFileSize = 2UL * 1024UL * 1024UL;
     metaServiceConfig.logRotationFileCount = 20UL;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     metaServiceConfig.evictThresholdHigh = 80U;
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = false;
@@ -714,6 +728,8 @@ TEST_F(TestMmcacheStore, CopyBlob_SsdToDram)
     metaServiceConfig.logRotationFileSize = 2UL * 1024UL * 1024UL;
     metaServiceConfig.logRotationFileCount = 20UL;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     metaServiceConfig.evictThresholdHigh = 80UL;
     metaServiceConfig.evictThresholdLow = 60UL;
     metaServiceConfig.haEnable = false;
@@ -782,6 +798,8 @@ TEST_F(TestMmcacheStore, RegisterBm_ReportsSsdMount)
     metaServiceConfig.logRotationFileSize = 2UL * 1024UL * 1024UL;
     metaServiceConfig.logRotationFileCount = 20UL;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     metaServiceConfig.evictThresholdHigh = 80UL;
     metaServiceConfig.evictThresholdLow = 60UL;
     metaServiceConfig.haEnable = false;
@@ -826,6 +844,8 @@ TEST_F(TestMmcacheStore, BatchMallocLeaseCleanUp)
     metaServiceConfig.logRotationFileSize = 2 * 1024 * 1024;
     metaServiceConfig.logRotationFileCount = 20;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     metaServiceConfig.evictThresholdHigh = 80;
     metaServiceConfig.evictThresholdLow = 60;
     metaServiceConfig.haEnable = false;
@@ -891,6 +911,8 @@ TEST_F(TestMmcacheStore, BatchWriteFinishBasic)
     metaServiceConfig.logRotationFileSize = 2UL * 1024UL * 1024UL;
     metaServiceConfig.logRotationFileCount = 20UL;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     metaServiceConfig.evictThresholdHigh = 80UL;
     metaServiceConfig.evictThresholdLow = 60UL;
     metaServiceConfig.haEnable = false;
@@ -957,6 +979,8 @@ TEST_F(TestMmcacheStore, BatchWriteFinishFailRemovesBlob)
     mmc_meta_service_config_t metaServiceConfig{};
     metaServiceConfig.logLevel = INFO_LEVEL;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     metaServiceConfig.evictThresholdHigh = 80UL;
     metaServiceConfig.evictThresholdLow = 60UL;
     metaServiceConfig.haEnable = false;
@@ -1016,6 +1040,8 @@ TEST_F(TestMmcacheStore, BatchWriteFinishUnknownKey)
     mmc_meta_service_config_t metaServiceConfig{};
     metaServiceConfig.logLevel = INFO_LEVEL;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     metaServiceConfig.evictThresholdHigh = 80UL;
     metaServiceConfig.evictThresholdLow = 60UL;
     metaServiceConfig.haEnable = false;
@@ -1053,6 +1079,8 @@ TEST_F(TestMmcacheStore, BatchWriteFinishLeaseExpiryCleanup)
     metaServiceConfig.logRotationFileSize = 2UL * 1024UL * 1024UL;
     metaServiceConfig.logRotationFileCount = 20UL;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     metaServiceConfig.evictThresholdHigh = 80UL;
     metaServiceConfig.evictThresholdLow = 60UL;
     metaServiceConfig.haEnable = false;
@@ -1117,6 +1145,8 @@ TEST_F(TestMmcacheStore, BatchCopySkipsReadableBlob)
     mmc_meta_service_config_t metaServiceConfig{};
     metaServiceConfig.logLevel = INFO_LEVEL;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     metaServiceConfig.evictThresholdHigh = 80UL;
     metaServiceConfig.evictThresholdLow = 60UL;
     metaServiceConfig.haEnable = false;

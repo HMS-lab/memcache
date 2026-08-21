@@ -688,20 +688,16 @@ Result MmcRestApiFacade::BuildMetricsSummary(bool serviceReady, std::string &res
     }
 
     std::ostringstream oss;
-    oss << "keys=" << keys.size() << " evict=" << metricSnapshot.evictCount
-        << " evict_to_ssd=" << metricSnapshot.evictToSsdCount
-        << " evict_ssd_delete=" << metricSnapshot.evictSsdDeleteCount
-        << " evict_mem_delete=" << metricSnapshot.evictMemDeleteCount << " rewarm=" << metricSnapshot.rewarmCount
+    oss << "keys=" << keys.size() << " evict=" << metricSnapshot.evictCount << " rewarm=" << metricSnapshot.rewarmCount
         << " rewarm_fail=" << metricSnapshot.rewarmFailCount
         << " rewarm_bytes_total=" << metricSnapshot.rewarmBytesCount
         << " rewarm_bytes_current=" << metricSnapshot.rewarmBytesCurrent
-        << " async_flush_blobs_added=" << metricSnapshot.asyncFlushBlobAdded
-        << " async_flush_bytes=" << metricSnapshot.asyncFlushBlobBytes
-        << " async_flush_writes=" << metricSnapshot.asyncFlushWriteCount
-        << " get_hit_dram=" << metricSnapshot.getHitDramCount << " get_hit_ssd=" << metricSnapshot.getHitSsdCount
-        << " hbm_used=" << BuildUsedText(hbmUsage) << " dram_used=" << BuildUsedText(dramUsage)
-        << " ssd_used=" << BuildUsedText(ssdUsage) << " alloc_req=" << metricSnapshot.allocRequestCount
-        << " alloc_success=" << metricSnapshot.allocSuccessCount << " alloc_fail=" << metricSnapshot.allocFailureCount
+        << " flush_blobs=" << metricSnapshot.asyncFlushBlobAdded
+        << " flush_bytes=" << metricSnapshot.asyncFlushBlobBytes << " get_hit_dram=" << metricSnapshot.getHitDramCount
+        << " get_hit_ssd=" << metricSnapshot.getHitSsdCount << " hbm_used=" << BuildUsedText(hbmUsage)
+        << " dram_used=" << BuildUsedText(dramUsage) << " ssd_used=" << BuildUsedText(ssdUsage)
+        << " alloc_req=" << metricSnapshot.allocRequestCount << " alloc_success=" << metricSnapshot.allocSuccessCount
+        << " alloc_fail=" << metricSnapshot.allocFailureCount
         << " batch_alloc_req=" << metricSnapshot.batchAllocRequestCount
         << " batch_alloc_success=" << metricSnapshot.batchAllocSuccessCount
         << " batch_alloc_fail=" << metricSnapshot.batchAllocFailureCount
@@ -754,18 +750,14 @@ Result MmcRestApiFacade::BuildMetricsSummary(bool serviceReady, std::string &res
         << " unmount_fail=" << metricSnapshot.unmountFailureCount;
     if (MmcMetaMetricManager::IsPerRankEnabled()) {
         AppendPerRankText(oss, "evict_by_rank", metricSnapshot.evictCountByRank);
-        AppendPerRankText(oss, "evict_to_ssd_by_rank", metricSnapshot.evictToSsdCountByRank);
-        AppendPerRankText(oss, "evict_ssd_delete_by_rank", metricSnapshot.evictSsdDeleteCountByRank);
-        AppendPerRankText(oss, "evict_mem_delete_by_rank", metricSnapshot.evictMemDeleteCountByRank);
         AppendPerRankText(oss, "get_hit_dram_by_rank", metricSnapshot.getHitDramCountByRank);
         AppendPerRankText(oss, "get_hit_ssd_by_rank", metricSnapshot.getHitSsdCountByRank);
         AppendPerRankText(oss, "rewarm_by_rank", metricSnapshot.rewarmCountByRank);
         AppendPerRankText(oss, "rewarm_fail_by_rank", metricSnapshot.rewarmFailCountByRank);
         AppendPerRankText(oss, "rewarm_bytes_by_rank", metricSnapshot.rewarmBytesByRank);
         AppendPerRankText(oss, "rewarm_bytes_current_by_rank", metricSnapshot.rewarmBytesCurrentByRank);
-        AppendPerRankText(oss, "async_flush_blobs_added_by_rank", metricSnapshot.asyncFlushBlobAddedByRank);
-        AppendPerRankText(oss, "async_flush_bytes_by_rank", metricSnapshot.asyncFlushBlobBytesByRank);
-        AppendPerRankText(oss, "async_flush_writes_by_rank", metricSnapshot.asyncFlushWriteCountByRank);
+        AppendPerRankText(oss, "flush_blobs_by_rank", metricSnapshot.asyncFlushBlobAddedByRank);
+        AppendPerRankText(oss, "flush_bytes_by_rank", metricSnapshot.asyncFlushBlobBytesByRank);
     }
     result = oss.str();
     return MMC_OK;
@@ -814,16 +806,11 @@ Result MmcRestApiFacade::BuildPrometheusMetrics(bool serviceReady, std::string &
     // per-rank internal counters (SimplePerRankCounter, not in registry)
     if (MmcMetaMetricManager::IsPerRankEnabled()) {
         AppendPerRankPrometheus(oss, "memcache_evict_operations_total", metricSnapshot.evictCountByRank);
-        AppendPerRankPrometheus(oss, "memcache_evict_to_ssd_total", metricSnapshot.evictToSsdCountByRank);
-        AppendPerRankPrometheus(oss, "memcache_evict_ssd_delete_total", metricSnapshot.evictSsdDeleteCountByRank);
-        AppendPerRankPrometheus(oss, "memcache_evict_mem_delete_total", metricSnapshot.evictMemDeleteCountByRank);
         AppendPerRankPrometheus(oss, "memcache_get_hits_dram_total", metricSnapshot.getHitDramCountByRank);
         AppendPerRankPrometheus(oss, "memcache_get_hits_ssd_total", metricSnapshot.getHitSsdCountByRank);
         AppendPerRankPrometheus(oss, "memcache_rewarm_total", metricSnapshot.rewarmCountByRank);
-        AppendPerRankPrometheus(oss, "memcache_async_flush_blobs_added_total",
-                                metricSnapshot.asyncFlushBlobAddedByRank);
-        AppendPerRankPrometheus(oss, "memcache_async_flush_bytes_total", metricSnapshot.asyncFlushBlobBytesByRank);
-        AppendPerRankPrometheus(oss, "memcache_async_flush_writes_total", metricSnapshot.asyncFlushWriteCountByRank);
+        AppendPerRankPrometheus(oss, "memcache_flush_blobs_total", metricSnapshot.asyncFlushBlobAddedByRank);
+        AppendPerRankPrometheus(oss, "memcache_flush_bytes_total", metricSnapshot.asyncFlushBlobBytesByRank);
         AppendPerRankPrometheus(oss, "memcache_rewarm_failed_total", metricSnapshot.rewarmFailCountByRank);
         AppendPerRankPrometheus(oss, "memcache_rewarm_bytes_total", metricSnapshot.rewarmBytesByRank);
         AppendPerRankPrometheus(oss, "memcache_rewarm_bytes_current", metricSnapshot.rewarmBytesCurrentByRank);
@@ -900,26 +887,14 @@ Result MmcRestApiFacade::BuildPrometheusMetrics(bool serviceReady, std::string &
                            metricSnapshot.unmountSuccessCount, metricSnapshot.unmountFailureCount);
     AppendMetricHeader(oss, "memcache_evict_operations_total", "Total number of eviction operations", "counter");
     AppendMetricValue(oss, "memcache_evict_operations_total", metricSnapshot.evictCount);
-    AppendMetricHeader(oss, "memcache_evict_to_ssd_total", "Total number of eviction to SSD operations", "counter");
-    AppendMetricValue(oss, "memcache_evict_to_ssd_total", metricSnapshot.evictToSsdCount);
-    AppendMetricHeader(oss, "memcache_evict_ssd_delete_total", "Total number of SSD eviction delete operations",
-                       "counter");
-    AppendMetricValue(oss, "memcache_evict_ssd_delete_total", metricSnapshot.evictSsdDeleteCount);
-    AppendMetricHeader(oss, "memcache_evict_mem_delete_total", "Total number of memory tier eviction delete operations",
-                       "counter");
-    AppendMetricValue(oss, "memcache_evict_mem_delete_total", metricSnapshot.evictMemDeleteCount);
     AppendMetricHeader(oss, "memcache_evict_running", "Whether eviction (GC) is currently running (1=yes, 0=no)",
                        "gauge");
     AppendMetricValue(oss, "memcache_evict_running", metaManager_ != nullptr && metaManager_->IsEvictRunning() ? 1 : 0);
-    AppendMetricHeader(oss, "memcache_async_flush_blobs_added_total",
-                       "Total number of SSD blobs registered via async flush", "counter");
-    AppendMetricValue(oss, "memcache_async_flush_blobs_added_total", metricSnapshot.asyncFlushBlobAdded);
-    AppendMetricHeader(oss, "memcache_async_flush_bytes_total", "Total bytes flushed to SSD via async flush",
+    AppendMetricHeader(oss, "memcache_flush_blobs_total", "Total number of SSD blobs registered via async flush",
                        "counter");
-    AppendMetricValue(oss, "memcache_async_flush_bytes_total", metricSnapshot.asyncFlushBlobBytes);
-    AppendMetricHeader(oss, "memcache_async_flush_writes_total", "Total number of async flush SSD write operations",
-                       "counter");
-    AppendMetricValue(oss, "memcache_async_flush_writes_total", metricSnapshot.asyncFlushWriteCount);
+    AppendMetricValue(oss, "memcache_flush_blobs_total", metricSnapshot.asyncFlushBlobAdded);
+    AppendMetricHeader(oss, "memcache_flush_bytes_total", "Total bytes flushed to SSD via async flush", "counter");
+    AppendMetricValue(oss, "memcache_flush_bytes_total", metricSnapshot.asyncFlushBlobBytes);
     AppendMetricHeader(oss, "memcache_get_hits_dram_total", "Total number of Get hits served from DRAM", "counter");
     AppendMetricValue(oss, "memcache_get_hits_dram_total", metricSnapshot.getHitDramCount);
     AppendMetricHeader(oss, "memcache_get_hits_ssd_total", "Total number of Get hits served from SSD (rewarm)",

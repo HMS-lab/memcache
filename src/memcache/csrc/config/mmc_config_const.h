@@ -29,7 +29,6 @@ constexpr auto OCK_MMC_META_SERVICE_HTTP_URL =
 constexpr auto OCK_MMC_METRICS_REPORT_INTERVAL_SECONDS =
     std::make_pair("ock.mmc.meta_service.metrics_report_interval_seconds", 30UL);
 constexpr auto OCK_MMC_META_HA_ENABLE = std::make_pair("ock.mmc.meta.ha.enable", false);
-constexpr auto OCK_MMC_META_BACKUP_ENABLE = std::make_pair("ock.mmc.meta.backup.enable", false);
 constexpr auto OKC_MMC_EVICT_THRESHOLD_HIGH = std::make_pair("ock.mmc.evict_threshold_high", 90);
 constexpr auto OKC_MMC_EVICT_THRESHOLD_LOW = std::make_pair("ock.mmc.evict_threshold_low", 80);
 constexpr auto OCK_MMC_EVICT_CHECK_INTERVAL_SECONDS = std::make_pair("ock.mmc.evict_check_interval_seconds", 5);
@@ -119,13 +118,9 @@ constexpr size_t CURVE_KEY_Z85_LEN = 40;
 constexpr auto OCK_MMC_ZMQ_ENABLE_CURVE = std::make_pair("ock.mmc.zmq.enable_curve", false);
 constexpr auto OCK_MMC_ZMQ_PUBLIC_KEY = std::make_pair("ock.mmc.zmq.public_key", "");
 constexpr auto OCK_MMC_ZMQ_SECRET_KEY = std::make_pair("ock.mmc.zmq.private_key", "");
-constexpr uint16_t DEFAULT_REWARM_WATERMARK_VAL = 95U;
-constexpr auto OCK_MMC_REWARM_DRAM_WATERMARK =
-    std::make_pair("ock.mmc.rewarm.dram_watermark", DEFAULT_REWARM_WATERMARK_VAL);
 constexpr auto OCK_MMC_PREFETCH_ENABLED = std::make_pair("ock.mmc.storage.prefetch.enabled", false);
 constexpr auto OCK_MMC_PENDING_WAIT_TIMEOUT_MS = std::make_pair("ock.mmc.storage.pending_wait.timeout", 300U);
 constexpr auto OCK_MMC_LOCAL_SERVICE_STORAGE_ENABLED = std::make_pair("ock.mmc.local_service.storage.enabled", false);
-constexpr auto OCK_MMC_ASYNC_FLUSH_ENABLED = std::make_pair("ock.mmc.storage.async_flush.enabled", false);
 constexpr auto OCK_MMC_ASYNC_FLUSH_INTERVAL_MS = std::make_pair("ock.mmc.storage.async_flush.interval_ms", 200);
 constexpr auto OCK_MMC_ASYNC_FLUSH_BATCH_LIMIT = std::make_pair("ock.mmc.storage.async_flush.batch_limit", 20);
 constexpr auto OCK_MMC_LOCAL_SERVICE_DRAM_BEST_EFFORT =
@@ -150,8 +145,6 @@ constexpr int MAX_WORLD_SIZE = 1024;
 
 constexpr int MIN_EVICT_THRESHOLD = 1;
 constexpr int MAX_EVICT_THRESHOLD = 99;
-constexpr int MIN_DRAM_WATERMARK = 5;
-constexpr int MAX_DRAM_WATERMARK = 95;
 constexpr int MIN_LEASE_TTL_MS = 1;
 constexpr int MAX_LEASE_TTL_MS = 2147483647;
 
@@ -195,10 +188,10 @@ constexpr uint64_t DEFAULT_BATCH_CHUNK_SIZE = 8 * MB_MEM_BYTES;
 constexpr uint64_t MIN_INTERVAL_SECONDS = 0;
 constexpr uint64_t MAX_INTERVAL_SECONDS = 86400;
 
-constexpr int MIN_FLUSH_INTERVAL_MS = 1;
-constexpr int MAX_FLUSH_INTERVAL_MS = 60000;
-constexpr int MIN_FLUSH_BATCH_LIMIT = 1;
-constexpr int MAX_FLUSH_BATCH_LIMIT = 65536;
+constexpr int MIN_FLUSH_INTERVAL_MS = 200;
+constexpr int MAX_FLUSH_INTERVAL_MS = 1000;
+constexpr int MIN_FLUSH_BATCH_LIMIT = 8;
+constexpr int MAX_FLUSH_BATCH_LIMIT = 1024;
 
 constexpr int MIN_PENDING_WAIT_TIMEOUT_MS = 1;
 constexpr int MAX_PENDING_WAIT_TIMEOUT_MS = 60000;

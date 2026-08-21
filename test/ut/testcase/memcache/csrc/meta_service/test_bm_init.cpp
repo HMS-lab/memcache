@@ -1,8 +1,7 @@
 /*
 * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  * MemCache_Hybrid is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
+ * You can use this software according to the terms and conditions of the Mulan PSL v2 at:
  *          http://license.coscl.org.cn/MulanPSL2
  * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
@@ -31,6 +30,8 @@ public:
     void TearDown() override;
 
 protected:
+    MmcMetaServicePtr metaServicePtr_;
+    MmcLocalServicePtr localServicePtr1_;
 };
 TestBmInit::TestBmInit() {}
 
@@ -42,6 +43,12 @@ void TestBmInit::SetUp()
 void TestBmInit::TearDown()
 {
     cout << "this is NetEngine TEST_F teardown" << endl;
+    if (localServicePtr1_.Get() != nullptr) {
+        localServicePtr1_->Stop();
+    }
+    if (metaServicePtr_.Get() != nullptr) {
+        metaServicePtr_->Stop();
+    }
 }
 
 static void UrlStringToChar(std::string &urlString, char *urlChar)
@@ -65,12 +72,14 @@ TEST_F(TestBmInit, Init)
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = true;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     // mmc_meta_service_config_t no longer has localSsdSize
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
     UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);
     auto metaServiceDefault = MmcMakeRef<MmcMetaService>("testMetaService");
-    MmcMetaServicePtr metaServicePtr = Convert<MmcMetaService, MmcMetaService>(metaServiceDefault);
-    ASSERT_TRUE(metaServicePtr->Start(metaServiceConfig) == MMC_OK);
+    metaServicePtr_ = Convert<MmcMetaService, MmcMetaService>(metaServiceDefault);
+    ASSERT_TRUE(metaServicePtr_->Start(metaServiceConfig) == MMC_OK);
 
     mmc_local_service_config_t localServiceConfig1 = {
         "", 0, 0, 1, "", "", "", 0, "device_sdma", 0, 0, 104857600, 104857600, 0, 0, {}, 0, nullptr, {}, {}};
@@ -80,8 +89,8 @@ TEST_F(TestBmInit, Init)
     UrlStringToChar(bmUrl, localServiceConfig1.bmIpPort);
     UrlStringToChar(hcomUrl, localServiceConfig1.bmHcomUrl);
     auto localServiceDefault1 = MmcMakeRef<MmcLocalServiceDefault>("testLocalService1");
-    MmcLocalServicePtr localServicePtr1 = Convert<MmcLocalServiceDefault, MmcLocalService>(localServiceDefault1);
-    ASSERT_TRUE(localServicePtr1->Start(localServiceConfig1) == MMC_OK);
+    localServicePtr1_ = Convert<MmcLocalServiceDefault, MmcLocalService>(localServiceDefault1);
+    ASSERT_TRUE(localServicePtr1_->Start(localServiceConfig1) == MMC_OK);
 
     PingMsg req;
     req.msgId = ML_PING_REQ;
@@ -96,6 +105,4 @@ TEST_F(TestBmInit, Init)
     ASSERT_TRUE(localServiceDefault1->SyncCallMeta(reqAlloc, response, 30) == MMC_OK);
     ASSERT_TRUE(response.numBlobs_ == 1);
     ASSERT_TRUE(response.blobs_[0].size_ == SIZE_32K);
-    localServicePtr1->Stop();
-    metaServicePtr->Stop();
 }

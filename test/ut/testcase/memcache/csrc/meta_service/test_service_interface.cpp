@@ -101,6 +101,8 @@ TEST_F(TestMmcServiceInterface, MultiLevelEvict)
     metaServiceConfig.logRotationFileSize = 2 * 1024 * 1024;
     metaServiceConfig.logRotationFileCount = 20;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     metaServiceConfig.evictThresholdHigh = 80U;
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = false;
@@ -193,6 +195,8 @@ TEST_F(TestMmcServiceInterface, metaServiceStart)
     metaServiceConfig.logRotationFileSize = 2 * 1024 * 1024;
     metaServiceConfig.logRotationFileCount = 20;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     metaServiceConfig.evictThresholdHigh = 70;
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = true;

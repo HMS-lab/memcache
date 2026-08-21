@@ -20,6 +20,7 @@
 
 namespace ock {
 namespace mmc {
+
 struct AllocOptions {
     uint64_t blobSize_{0};
     uint32_t numBlobs_{0};
@@ -624,7 +625,6 @@ struct MetaReplicateRequest : public MsgBase {
     std::vector<uint32_t> ops_;
     std::vector<std::string> keys_;
     std::vector<MmcMemBlobDesc> blobs_; /* pointers of blobs */
-    bool asyncFlush_ = false;
 
     MetaReplicateRequest() : MsgBase{0, LM_META_REPLICATE_REQ, 0} {}
     MetaReplicateRequest(const std::vector<uint32_t> &ops, const std::vector<std::string> &keys,
@@ -640,7 +640,6 @@ struct MetaReplicateRequest : public MsgBase {
         packer.Serialize(ops_);
         packer.Serialize(keys_);
         packer.Serialize(blobs_);
-        packer.Serialize(asyncFlush_);
         return MMC_OK;
     }
 
@@ -652,7 +651,6 @@ struct MetaReplicateRequest : public MsgBase {
         packer.Deserialize(ops_);
         packer.Deserialize(keys_);
         packer.Deserialize(blobs_);
-        packer.Deserialize(asyncFlush_);
         return MMC_OK;
     }
 

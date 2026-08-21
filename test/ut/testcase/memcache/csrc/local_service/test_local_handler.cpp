@@ -70,8 +70,6 @@ using namespace testing;
 using namespace std;
 using namespace ock::mmc;
 
-constexpr uint16_t REWARM_DRAM_WATERMARK = 100U;
-
 class TestLocalHandler : public testing::Test {
 public:
     TestLocalHandler();
@@ -100,7 +98,7 @@ TEST_F(TestLocalHandler, Init)
     MmcLocalMemlInitInfo locInfo{100, 1000};
 
     uint64_t defaultTtl = 2000;
-    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 60U, REWARM_DRAM_WATERMARK);
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 60U);
     metaMng->Start();
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
     metaMng->Mount(loc, locInfo, blobMap, false);
@@ -114,7 +112,7 @@ TEST_F(TestLocalHandler, Alloc)
     MmcLocalMemlInitInfo locInfo{0, 1000000};
 
     uint64_t defaultTtl = 2000;
-    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 60U, REWARM_DRAM_WATERMARK);
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 60U);
     metaMng->Start();
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
     metaMng->Mount(loc, locInfo, blobMap, false);

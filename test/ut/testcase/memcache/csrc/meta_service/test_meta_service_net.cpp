@@ -65,6 +65,8 @@ TEST_F(TestMmcMetaService, Init)
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = true;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     // mmc_meta_service_config_t no longer has localSsdSize
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
     UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);
@@ -114,6 +116,8 @@ TEST_F(TestMmcMetaService, ExistRequest)
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = true;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     // mmc_meta_service_config_t no longer has localSsdSize
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
     UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);
@@ -169,6 +173,8 @@ TEST_F(TestMmcMetaService, BatchExistRequest)
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = true;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     // mmc_meta_service_config_t no longer has localSsdSize
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
     UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);
@@ -244,6 +250,8 @@ TEST_F(TestMmcMetaService, QueryRequest)
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = true;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     // mmc_meta_service_config_t no longer has localSsdSize
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
     UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);
@@ -303,6 +311,8 @@ TEST_F(TestMmcMetaService, BatchQueryRequest)
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = true;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
     // mmc_meta_service_config_t no longer has localSsdSize
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
     UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);

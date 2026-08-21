@@ -286,15 +286,6 @@ memcache_get_not_found_total 0
 # HELP memcache_evict_operations_total Total number of eviction operations
 # TYPE memcache_evict_operations_total counter
 memcache_evict_operations_total 0
-# HELP memcache_evict_to_ssd_total Total number of eviction to SSD operations
-# TYPE memcache_evict_to_ssd_total counter
-memcache_evict_to_ssd_total 0
-# HELP memcache_evict_ssd_delete_total Total number of SSD eviction delete operations
-# TYPE memcache_evict_ssd_delete_total counter
-memcache_evict_ssd_delete_total 0
-# HELP memcache_evict_mem_delete_total Total number of memory tier eviction delete operations
-# TYPE memcache_evict_mem_delete_total counter
-memcache_evict_mem_delete_total 0
 # HELP memcache_evict_running Whether eviction (GC) is currently running (1=yes, 0=no)
 # TYPE memcache_evict_running gauge
 memcache_evict_running 0
@@ -430,9 +421,6 @@ memcache_ubs_io_disk_total_bandwidth_bytes_per_sec{rank="0",disk_path="/data/dis
 | `memcache_<op>_failures_total` | counter | — | `MmcMetaMetricSnapshot::<op>FailureCount` | `<op>` 失败次数（真实错误，含 `MMC_DUPLICATED_OBJECT`）；支持 per-rank |
 | `memcache_<op>_not_found_total` | counter | — | `MmcMetaMetricSnapshot::<op>NotFoundCount` | `<op>` 未命中次数（`MMC_UNMATCHED_KEY`），不计入 failure；仅 `get`/`batch_get`/`remove`/`batch_remove`/`update_state`/`batch_update_state`/`query`/`batch_query`/`exist_key`/`batch_exist_key` 输出；支持 per-rank |
 | `memcache_evict_operations_total` | counter | — | `MmcMetaMetricSnapshot::evictCount` | 驱逐操作总数；支持 per-rank |
-| `memcache_evict_to_ssd_total` | counter | — | `MmcMetaMetricSnapshot::evictToSsdCount` | 迁移到 SSD 的驱逐次数；支持 per-rank |
-| `memcache_evict_ssd_delete_total` | counter | — | `MmcMetaMetricSnapshot::evictSsdDeleteCount` | 驱逐时 SSD blob 删除数；支持 per-rank |
-| `memcache_evict_mem_delete_total` | counter | — | `MmcMetaMetricSnapshot::evictMemDeleteCount` | 驱逐时内存层 blob 删除数；支持 per-rank |
 | `memcache_evict_running` | gauge | — | `MmcMetaManager::evictCheck_` | 是否正在执行淘汰(GC)（1=是，0=否） |
 | `memcache_get_hits_dram_total` | counter | — | `MmcMetaMetricSnapshot::getHitDramCount` | 命中 DRAM 的 Get 次数；支持 per-rank |
 | `memcache_get_hits_ssd_total` | counter | — | `MmcMetaMetricSnapshot::getHitSsdCount` | 命中 SSD（触发回温）的 Get 次数；支持 per-rank |
@@ -513,7 +501,7 @@ curl "http://127.0.0.1:8000/metrics/summary"
 `text/plain; charset=utf-8`：
 
 ```text
-keys=2 evict=0 evict_to_ssd=0 evict_ssd_delete=0 evict_mem_delete=0 rewarm=0 rewarm_fail=0 rewarm_bytes_total=0 rewarm_bytes_current=0 get_hit_dram=0 get_hit_ssd=0 hbm_used=368640/5368709120 dram_used=0/5368709120 ssd_used=0/0 alloc_req=68 alloc_success=68 alloc_fail=0 batch_alloc_req=0 batch_alloc_success=0 batch_alloc_fail=0 get_req=68 get_success=68 get_fail=0 get_not_found=0 batch_get_req=0 batch_get_success=0 batch_get_fail=0 batch_get_not_found=0 remove_req=0 remove_success=0 remove_fail=0 remove_not_found=0 batch_remove_req=0 batch_remove_success=0 batch_remove_fail=0 batch_remove_not_found=0 remove_all_req=0 remove_all_success=0 remove_all_fail=0 update_state_req=0 update_state_success=0 update_state_fail=0 update_state_not_found=0 batch_update_state_req=0 batch_update_state_success=0 batch_update_state_fail=0 batch_update_state_not_found=0 query_req=12 query_success=11 query_fail=0 query_not_found=1 batch_query_req=3 batch_query_success=3 batch_query_fail=0 batch_query_not_found=1 get_all_keys_req=4 get_all_keys_success=4 get_all_keys_fail=0 exist_key_req=0 exist_key_success=0 exist_key_fail=0 exist_key_not_found=0 batch_exist_key_req=0 batch_exist_key_success=0 batch_exist_key_fail=0 batch_exist_key_not_found=0 mount_req=0 mount_success=0 mount_fail=0 unmount_req=0 unmount_success=0 unmount_fail=0
+keys=2 evict=0 rewarm=0 rewarm_fail=0 rewarm_bytes_total=0 rewarm_bytes_current=0 get_hit_dram=0 get_hit_ssd=0 hbm_used=368640/5368709120 dram_used=0/5368709120 ssd_used=0/0 alloc_req=68 alloc_success=68 alloc_fail=0 batch_alloc_req=0 batch_alloc_success=0 batch_alloc_fail=0 get_req=68 get_success=68 get_fail=0 get_not_found=0 batch_get_req=0 batch_get_success=0 batch_get_fail=0 batch_get_not_found=0 remove_req=0 remove_success=0 remove_fail=0 remove_not_found=0 batch_remove_req=0 batch_remove_success=0 batch_remove_fail=0 batch_remove_not_found=0 remove_all_req=0 remove_all_success=0 remove_all_fail=0 update_state_req=0 update_state_success=0 update_state_fail=0 update_state_not_found=0 batch_update_state_req=0 batch_update_state_success=0 batch_update_state_fail=0 batch_update_state_not_found=0 query_req=12 query_success=11 query_fail=0 query_not_found=1 batch_query_req=3 batch_query_success=3 batch_query_fail=0 batch_query_not_found=1 get_all_keys_req=4 get_all_keys_success=4 get_all_keys_fail=0 exist_key_req=0 exist_key_success=0 exist_key_fail=0 exist_key_not_found=0 batch_exist_key_req=0 batch_exist_key_success=0 batch_exist_key_fail=0 batch_exist_key_not_found=0 mount_req=0 mount_success=0 mount_fail=0 unmount_req=0 unmount_success=0 unmount_fail=0
 ```
 
 **解释**
@@ -523,9 +511,9 @@ keys=2 evict=0 evict_to_ssd=0 evict_ssd_delete=0 evict_mem_delete=0 rewarm=0 rew
 | 单行文本 | 成功时必须为单行，不能换行拆分 | 接口成功返回约定 |
 | 格式 | 以空格分隔的 `key=value` 串，字段顺序固定 | 统计摘要接口契约 |
 | 成功示例字段 | 成功示例应包含当前约定的全部字段 | 统计摘要接口契约 |
-| 字段顺序固定 | 依次为 `keys`、`evict`、`evict_to_ssd`、`evict_ssd_delete`、`evict_mem_delete`、`rewarm`、`rewarm_fail`、`rewarm_bytes_total`、`rewarm_bytes_current`、`get_hit_dram`、`get_hit_ssd`、`hbm_used`、`dram_used`、`ssd_used`、`alloc_req`、`alloc_success`、`alloc_fail`、`batch_alloc_req`、`batch_alloc_success`、`batch_alloc_fail`、`get_req`、`get_success`、`get_fail`、`get_not_found`、`batch_get_req`、`batch_get_success`、`batch_get_fail`、`batch_get_not_found`、`remove_req`、`remove_success`、`remove_fail`、`remove_not_found`、`batch_remove_req`、`batch_remove_success`、`batch_remove_fail`、`batch_remove_not_found`、`remove_all_req`、`remove_all_success`、`remove_all_fail`、`update_state_req`、`update_state_success`、`update_state_fail`、`update_state_not_found`、`batch_update_state_req`、`batch_update_state_success`、`batch_update_state_fail`、`batch_update_state_not_found`、`query_req`、`query_success`、`query_fail`、`query_not_found`、`batch_query_req`、`batch_query_success`、`batch_query_fail`、`batch_query_not_found`、`get_all_keys_req`、`get_all_keys_success`、`get_all_keys_fail`、`exist_key_req`、`exist_key_success`、`exist_key_fail`、`exist_key_not_found`、`batch_exist_key_req`、`batch_exist_key_success`、`batch_exist_key_fail`、`batch_exist_key_not_found`、`mount_req`、`mount_success`、`mount_fail`、`unmount_req`、`unmount_success`、`unmount_fail` | 统计摘要接口契约 |
+| 字段顺序固定 | 依次为 `keys`、`evict`、`rewarm`、`rewarm_fail`、`rewarm_bytes_total`、`rewarm_bytes_current`、`get_hit_dram`、`get_hit_ssd`、`hbm_used`、`dram_used`、`ssd_used`、`alloc_req`、`alloc_success`、`alloc_fail`、`batch_alloc_req`、`batch_alloc_success`、`batch_alloc_fail`、`get_req`、`get_success`、`get_fail`、`get_not_found`、`batch_get_req`、`batch_get_success`、`batch_get_fail`、`batch_get_not_found`、`remove_req`、`remove_success`、`remove_fail`、`remove_not_found`、`batch_remove_req`、`batch_remove_success`、`batch_remove_fail`、`batch_remove_not_found`、`remove_all_req`、`remove_all_success`、`remove_all_fail`、`update_state_req`、`update_state_success`、`update_state_fail`、`update_state_not_found`、`batch_update_state_req`、`batch_update_state_success`、`batch_update_state_fail`、`batch_update_state_not_found`、`query_req`、`query_success`、`query_fail`、`query_not_found`、`batch_query_req`、`batch_query_success`、`batch_query_fail`、`batch_query_not_found`、`get_all_keys_req`、`get_all_keys_success`、`get_all_keys_fail`、`exist_key_req`、`exist_key_success`、`exist_key_fail`、`exist_key_not_found`、`batch_exist_key_req`、`batch_exist_key_success`、`batch_exist_key_fail`、`batch_exist_key_not_found`、`mount_req`、`mount_success`、`mount_fail`、`unmount_req`、`unmount_success`、`unmount_fail` | 统计摘要接口契约 |
 | 容量字段 | `hbm_used` / `dram_used` / `ssd_used` 格式为 `used/total`；未配置 SSD 时 `ssd_used` 为 `0/0` | 统计摘要接口契约 |
-| per-rank 字段 | 开启 `MmcMetaMetricManager::IsPerRankEnabled()` 时，在上述固定字段后以 `<base>_by_rank_<rank>=<val>` 形式追加 per-rank 字段（每个 rank 一项），覆盖驱逐/回温/命中 10 项：`evict_by_rank`、`evict_to_ssd_by_rank`、`evict_ssd_delete_by_rank`、`evict_mem_delete_by_rank`、`get_hit_dram_by_rank`、`get_hit_ssd_by_rank`、`rewarm_by_rank`、`rewarm_fail_by_rank`、`rewarm_bytes_by_rank`、`rewarm_bytes_current_by_rank`；业务调用、容量、`keys` 等不输出 per-rank 字段 | per-rank 统计契约 |
+| per-rank 字段 | 开启 `MmcMetaMetricManager::IsPerRankEnabled()` 时，在上述固定字段后以 `<base>_by_rank_<rank>=<val>` 形式追加 per-rank 字段（每个 rank 一项），覆盖驱逐/回温/命中 7 项：`evict_by_rank`、`get_hit_dram_by_rank`、`get_hit_ssd_by_rank`、`rewarm_by_rank`、`rewarm_fail_by_rank`、`rewarm_bytes_by_rank`、`rewarm_bytes_current_by_rank`；业务调用、容量、`keys` 等不输出 per-rank 字段 | per-rank 统计契约 |
 | 结果口径 | `*_success` 表示 `MMC_OK`；`*_fail` 表示真实错误（包括 `MMC_DUPLICATED_OBJECT`）；`*_not_found` 表示 `MMC_UNMATCHED_KEY`，不计入 fail；Batch 字段为接口调用级统计，Batch 子项同时累计到对应非 Batch 字段；Batch 调用级统计中真实错误优先，只有无真实错误且存在子项 `MMC_UNMATCHED_KEY` 时才增加 Batch `*_not_found` | 统计摘要接口契约 |
 | 占位值策略 | 当前无法提供真实值的字段仍保留在成功体中，可使用 `0`、`0/0` 或空值占位 | 降级规则 |
 
@@ -537,9 +525,6 @@ keys=2 evict=0 evict_to_ssd=0 evict_ssd_delete=0 evict_mem_delete=0 rewarm=0 rew
 |---|---|---|---|
 | `keys` | uint | `MmcMetaMetricSnapshot::keyCount` | 当前已存储 key 数量 |
 | `evict` | uint | `MmcMetaMetricSnapshot::evictCount` | 驱逐操作总数 |
-| `evict_to_ssd` | uint | `MmcMetaMetricSnapshot::evictToSsdCount` | 迁移到 SSD 的驱逐次数 |
-| `evict_ssd_delete` | uint | `MmcMetaMetricSnapshot::evictSsdDeleteCount` | 驱逐时 SSD blob 删除数 |
-| `evict_mem_delete` | uint | `MmcMetaMetricSnapshot::evictMemDeleteCount` | 驱逐时内存层 blob 删除数 |
 | `rewarm` | uint | `MmcMetaMetricSnapshot::rewarmCount` | SSD→DRAM 回温操作总数 |
 | `rewarm_fail` | uint | `MmcMetaMetricSnapshot::rewarmFailCount` | 失败的回温操作数 |
 | `rewarm_bytes_total` | uint (bytes) | `MmcMetaMetricSnapshot::rewarmBytesCount` | 累计回温字节数 |

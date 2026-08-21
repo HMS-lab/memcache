@@ -23,8 +23,6 @@ using namespace std;
 namespace ock {
 namespace mmc {
 
-constexpr uint16_t REWARM_DRAM_WATERMARK = 100U;
-
 // SIZE_32K is defined as macro in mmc_blob_allocator.h: #define SIZE_32K (uint64_t)(32 * 1024)
 
 // ============================================================================
@@ -66,7 +64,7 @@ TEST_F(TestThreeTierCache, PutGet_HbmHit)
     MmcLocation hbmLoc{0, MEDIA_HBM};
     MmcLocalMemlInitInfo hbmInfo{0, 128 * 1024};
 
-    MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U, REWARM_DRAM_WATERMARK);
+    MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U);
     ASSERT_EQ(mgr->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
     mgr->Mount(hbmLoc, hbmInfo, blobMap, false);
@@ -94,7 +92,7 @@ TEST_F(TestThreeTierCache, EvictDram_CascadingEviction)
     MmcLocation ssdLoc{0, MEDIA_SSD};
     MmcLocalMemlInitInfo ssdInfo{0, 128UL * 1024UL};
 
-    MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 50U, REWARM_DRAM_WATERMARK);
+    MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 50U);
     ASSERT_EQ(mgr->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
     mgr->Mount(dramLoc, dramInfo, blobMap, false);
@@ -137,7 +135,7 @@ TEST_F(TestThreeTierCache, MassivePut_MultiLevelEviction)
     MmcLocation ssdLoc{0, MEDIA_SSD};
     MmcLocalMemlInitInfo ssdInfo{0, 256UL * 1024UL};
 
-    MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 50U, REWARM_DRAM_WATERMARK);
+    MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 50U);
     ASSERT_EQ(mgr->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
     mgr->Mount(dramLoc, dramInfo, blobMap, false);
@@ -183,7 +181,7 @@ TEST_F(TestThreeTierCache, EmptyCluster_GetReturnsUnmatchedKey)
     MmcLocation dramLoc{0, MEDIA_DRAM};
     MmcLocalMemlInitInfo dramInfo{0, 128UL * 1024UL};
 
-    MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U, REWARM_DRAM_WATERMARK);
+    MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U);
     ASSERT_EQ(mgr->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
     mgr->Mount(dramLoc, dramInfo, blobMap, false);
@@ -201,7 +199,7 @@ TEST_F(TestThreeTierCache, RepeatedPut_OverwritesOldData)
     MmcLocation dramLoc{0, MEDIA_DRAM};
     MmcLocalMemlInitInfo dramInfo{0, 128UL * 1024UL};
 
-    MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U, REWARM_DRAM_WATERMARK);
+    MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U);
     ASSERT_EQ(mgr->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
     mgr->Mount(dramLoc, dramInfo, blobMap, false);
@@ -250,7 +248,7 @@ TEST_F(TestThreeTierCache, SsdWriteFailure_EvictionFallsBackToRemove)
     MmcLocation ssdLoc{0, MEDIA_SSD};
     MmcLocalMemlInitInfo ssdInfo{0, 128UL * 1024UL};
 
-    MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 50U, REWARM_DRAM_WATERMARK);
+    MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 50U);
     ASSERT_EQ(mgr->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
     mgr->Mount(dramLoc, dramInfo, blobMap, false);
@@ -290,7 +288,7 @@ TEST_F(TestThreeTierCache, RebuildMeta_SegmentInfoConsistent)
     MmcLocation dramLoc{0, MEDIA_DRAM};
     MmcLocalMemlInitInfo dramInfo{0, 128UL * 1024UL};
 
-    MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U, REWARM_DRAM_WATERMARK);
+    MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U);
     ASSERT_EQ(mgr->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
     mgr->Mount(dramLoc, dramInfo, blobMap, false);
@@ -317,7 +315,7 @@ TEST_F(TestThreeTierCache, SsdFull_DramEviction_HandlesGracefully)
     MmcLocation ssdLoc{0, MEDIA_SSD};
     MmcLocalMemlInitInfo ssdInfo{0, 64UL * 1024UL};
 
-    MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 50U, REWARM_DRAM_WATERMARK);
+    MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 50U);
     ASSERT_EQ(mgr->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
     mgr->Mount(dramLoc, dramInfo, blobMap, false);
@@ -360,7 +358,7 @@ TEST_F(TestThreeTierCache, NoMetaNetServer_RpcFailsGracefully)
     MmcLocation ssdLoc{0, MEDIA_SSD};
     MmcLocalMemlInitInfo ssdInfo{0, 128UL * 1024UL};
 
-    MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U, REWARM_DRAM_WATERMARK);
+    MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U);
     ASSERT_EQ(mgr->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
     mgr->Mount(dramLoc, dramInfo, blobMap, false);
@@ -391,7 +389,7 @@ TEST_F(TestThreeTierCache, ConcurrentGet_DuringWrite)
     MmcLocation dramLoc{0, MEDIA_DRAM};
     MmcLocalMemlInitInfo dramInfo{0, 128UL * 1024UL};
 
-    MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U, REWARM_DRAM_WATERMARK);
+    MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U);
     ASSERT_EQ(mgr->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
     mgr->Mount(dramLoc, dramInfo, blobMap, false);
@@ -438,7 +436,7 @@ TEST_F(TestThreeTierCache, GetLatency_Benchmark)
     MmcLocation ssdLoc{0, MEDIA_SSD};
     MmcLocalMemlInitInfo ssdInfo{0, 128UL * 1024UL};
 
-    MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U, REWARM_DRAM_WATERMARK);
+    MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U);
     ASSERT_EQ(mgr->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
     mgr->Mount(dramLoc, dramInfo, blobMap, false);
@@ -473,7 +471,7 @@ TEST_F(TestThreeTierCache, Eviction_Throughput)
     MmcLocation ssdLoc{0, MEDIA_SSD};
     MmcLocalMemlInitInfo ssdInfo{0, 512UL * 1024UL};
 
-    MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 50U, REWARM_DRAM_WATERMARK);
+    MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 50U);
     ASSERT_EQ(mgr->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
     mgr->Mount(dramLoc, dramInfo, blobMap, false);
@@ -524,7 +522,7 @@ TEST_F(TestThreeTierCache, ThreeTierFullPath_LatencyRegression)
     MmcLocation ssdLoc{0, MEDIA_SSD};
     MmcLocalMemlInitInfo ssdInfo{0, 128UL * 1024UL};
 
-    MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U, REWARM_DRAM_WATERMARK);
+    MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U);
     ASSERT_EQ(mgr->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
     mgr->Mount(hbmLoc, hbmInfo, blobMap, false);
