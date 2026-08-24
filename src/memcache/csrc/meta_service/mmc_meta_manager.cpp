@@ -1432,6 +1432,14 @@ Result MmcMetaManager::GetAllKeys(std::vector<std::string> &keys)
     return MMC_OK;
 }
 
+Result MmcMetaManager::GetKeyCount(size_t &count)
+{
+    MMC_VALIDATE_RETURN(metaContainer_ != nullptr, "meta container not initialized! ", MMC_NOT_INITIALIZED);
+
+    count = metaContainer_->GetKeyCount();
+    return MMC_OK;
+}
+
 Result MmcMetaManager::CopyBlob(const std::string &key, const MmcMemObjMetaPtr &objMeta, const MmcMemBlobDesc &srcBlob,
                                 const MmcLocation &dstLoc)
 {

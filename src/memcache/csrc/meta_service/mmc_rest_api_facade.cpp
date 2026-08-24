@@ -430,10 +430,10 @@ Result MmcRestApiFacade::PrefetchKeys(const std::vector<std::string> &keys) cons
     return metaMgrProxy_->PrefetchKeys(keys);
 }
 
-Result MmcRestApiFacade::GetAllKeys(std::vector<std::string> &keys) const
+Result MmcRestApiFacade::GetKeyCount(size_t &count) const
 {
     MMC_VALIDATE_RETURN(metaManager_ != nullptr, "meta manager is nullptr", MMC_NOT_INITIALIZED);
-    return metaManager_->GetAllKeys(keys);
+    return metaManager_->GetKeyCount(count);
 }
 
 Result MmcRestApiFacade::GetAllKeysText(std::string &result) const
@@ -659,14 +659,14 @@ Result MmcRestApiFacade::BuildMetricsSummary(bool serviceReady, std::string &res
         return ret;
     }
 
-    std::vector<std::string> keys;
-    ret = GetAllKeys(keys);
+    size_t keyCount = 0;
+    ret = GetKeyCount(keyCount);
     if (ret != MMC_OK) {
         return ret;
     }
 
     MmcMetaMetricManager &metricManager = MmcMetaMetricManager::GetInstance();
-    metricManager.SetKeyCount(keys.size());
+    metricManager.SetKeyCount(keyCount);
     const MmcMetaMetricSnapshot metricSnapshot = metricManager.GetSnapshot();
     RestUsageSnapshot hbmUsage;
     RestUsageSnapshot dramUsage;
@@ -688,7 +688,7 @@ Result MmcRestApiFacade::BuildMetricsSummary(bool serviceReady, std::string &res
     }
 
     std::ostringstream oss;
-    oss << "keys=" << keys.size() << " evict=" << metricSnapshot.evictCount << " rewarm=" << metricSnapshot.rewarmCount
+    oss << "keys=" << keyCount << " evict=" << metricSnapshot.evictCount << " rewarm=" << metricSnapshot.rewarmCount
         << " rewarm_fail=" << metricSnapshot.rewarmFailCount
         << " rewarm_bytes_total=" << metricSnapshot.rewarmBytesCount
         << " rewarm_bytes_current=" << metricSnapshot.rewarmBytesCurrent
@@ -772,14 +772,14 @@ Result MmcRestApiFacade::BuildPrometheusMetrics(bool serviceReady, std::string &
         return ret;
     }
 
-    std::vector<std::string> keys;
-    ret = GetAllKeys(keys);
+    size_t keyCount = 0;
+    ret = GetKeyCount(keyCount);
     if (ret != MMC_OK) {
         return ret;
     }
 
     MmcMetaMetricManager &metricManager = MmcMetaMetricManager::GetInstance();
-    metricManager.SetKeyCount(keys.size());
+    metricManager.SetKeyCount(keyCount);
     const MmcMetaMetricSnapshot metricSnapshot = metricManager.GetSnapshot();
 
     RestUsageSnapshot hbmUsage;
@@ -910,7 +910,7 @@ Result MmcRestApiFacade::BuildPrometheusMetrics(bool serviceReady, std::string &
     AppendMetricHeader(oss, "memcache_rewarm_bytes_current", "Current bytes occupied by rewarmed data", "gauge");
     AppendMetricValue(oss, "memcache_rewarm_bytes_current", metricSnapshot.rewarmBytesCurrent);
     AppendMetricHeader(oss, "memcache_stored_keys", "Current number of stored keys", "gauge");
-    AppendMetricValue(oss, "memcache_stored_keys", keys.size());
+    AppendMetricValue(oss, "memcache_stored_keys", keyCount);
 
     const kv_event::KvEventStats kvStats =
         metaService_ != nullptr ? metaService_->GetKvEventStats() : kv_event::KvEventStats{};

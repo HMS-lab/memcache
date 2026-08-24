@@ -353,6 +353,12 @@ public:
     Result GetAllKeys(std::vector<std::string> &keys);
 
     /**
+     * @brief Get the number of keys
+     * @param count          [out] number of keys
+     */
+    Result GetKeyCount(size_t &count);
+
+    /**
      * @brief check and evict meta objects
      */
     void CheckAndEvict(MediaType media, uint64_t wantAllocSize);

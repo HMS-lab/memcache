@@ -78,7 +78,6 @@ public:
     Result EvictKeys(const std::vector<std::string> &keys) const;
     Result PrefetchKey(const std::string &key) const;
     Result PrefetchKeys(const std::vector<std::string> &keys) const;
-    Result GetAllKeys(std::vector<std::string> &keys) const;
     Result GetAllKeysText(std::string &result) const;
 
     Result GetAllSegmentSnapshots(std::vector<RestSegmentSnapshot> &segments) const;
@@ -97,6 +96,7 @@ public:
 
 private:
     RestHaSnapshot GetHaSnapshot() const;
+    Result GetKeyCount(size_t &count) const;
     Result GetSegmentInfoJson(nlohmann::json &result) const;
     Result BuildUsageFromMedium(const std::vector<RestSegmentSnapshot> &segments, const std::string &medium,
                                 RestUsageSnapshot &usage) const;

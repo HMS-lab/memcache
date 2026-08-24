@@ -168,6 +168,12 @@ public:
         MMC_LOG_DEBUG("Retrieved all keys, count=" << keys.size());
     }
 
+    size_t GetKeyCount() override
+    {
+        ock::mf::ReadGuard lockGuard(metaLock_);
+        return metaMap_.size();
+    }
+
     Result Promote(const Key &key)
     {
         ock::mf::ReadGuard lockGuard(metaLock_);
