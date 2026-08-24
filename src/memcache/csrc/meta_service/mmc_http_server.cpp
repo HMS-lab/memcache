@@ -635,10 +635,6 @@ bool MmcHttpServer::SetupTls()
 
 void MmcHttpServer::Stop()
 {
-    if (!running_.load()) {
-        return;
-    }
-
     server_->Stop();
     running_ = false;
     MMC_LOG_TRACE("HTTP server stopped");

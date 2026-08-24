@@ -125,6 +125,10 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
     // 注册心跳超时回调：mf 的 AccStoreServer 检测到 rank 心跳超时后，
     // 通过 GetRankIdByLinkId 映射到 rankId，触发 ClearResource 踢出集群
     confStore_->RegisterServerBrokenHandler([this](uint32_t linkId, ock::smem::StoreBackendPtr) {
+        if (confStore_ == nullptr) {
+            MMC_LOG_DEBUG("HeartBeat timeout after config store stopped, linkId=" << linkId);
+            return MMC_OK;
+        }
         uint32_t rankId = confStore_->GetRankIdByLinkId(linkId);
         if (rankId != UINT32_MAX) {
             MMC_LOG_WARN("HeartBeat timeout for rank=" << rankId << ", linkId=" << linkId << ", clearing resource");
@@ -391,6 +395,11 @@ void MmcMetaService::Stop()
     metaMgrProxy_->Stop();
     metaNetServer_->Stop();
     kvEvents_.Shutdown();
+    // 反注册 broken handler：置空 confStore_ 前先清掉 MF 侧 externalBrokenHandler_，
+    // 避免 worker 线程在析构期间仍回调本对象的 lambda（访问 this->confStore_）触发崩溃。
+    if (confStore_ != nullptr) {
+        confStore_->RegisterServerBrokenHandler(nullptr);
+    }
     confStore_ = nullptr;
     metadata_.clear();
     ock::smem::StoreFactory::DestroyStore(options_.configStoreURL);
