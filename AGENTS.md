@@ -19,21 +19,21 @@
 - PR 增量检查：`bash script/ci-pre-commit-pr.sh`。
 - Python 规则以 `pre-commit/pyproject.toml` 为准：Ruff 目标 `py310`，行宽 120，并启用 Pylint、Bandit。
 - C/C++ 格式以 `.clang-format` 和 `.pre-commit-config.yaml` 为准：clang-format v18.1.8、4 空格缩进、行宽 120。
-- C/C++ 命名和魔法数字规则以 `doc/c_cpp_naming.md` 为准。
+- C/C++ 命名和魔法数字规则以 `docs/c_cpp_naming.md` 为准。
 
 ## 代码规范
 
-- 新增 C/C++ 代码遵守 `doc/c_cpp_naming.md`：文件 `snake_case`，C++ 类型/函数 `UpperCamelCase`，C API `snake_case`，参数和局部变量 `lowerCamelCase`，私有/保护成员以 `_` 结尾。
+- 新增 C/C++ 代码遵守 `docs/c_cpp_naming.md`：文件 `snake_case`，C++ 类型/函数 `UpperCamelCase`，C API `snake_case`，参数和局部变量 `lowerCamelCase`，私有/保护成员以 `_` 结尾。
 - 除 `0`、`-1` 等惯用值外，具有独立语义的数字必须提取为命名常量或枚举值；测试代码同样适用。
 - 新增测试文件使用 `*_test.cpp`，Mock 实现文件使用 `mock_*.cpp`；存量文件不要求为此单独改名。
 - 错误处理保持本项目现有错误码、断言宏、校验宏和日志宏风格，例如 `MMC_OK`、`MMC_ERROR`、`MMC_VALIDATE_RETURN`、`MMC_LOG_ERROR`。
-- 安全相关要求以 `doc/SECURITYNOTE.md` 为准，涉及 TLS、证书、私钥、配置文件权限、运行用户和端口范围时必须同步参考。
+- 安全相关要求以 `docs/SECURITYNOTE.md` 为准，涉及 TLS、证书、私钥、配置文件权限、运行用户和端口范围时必须同步参考。
 
 ## 运行时与配置
 
 - 常用配置文件：`config/mmc-meta.conf`、`config/mmc-local.conf`。
-- 安装使用文档：`doc/install_whl.md`、`doc/install_run.md`。
-- 配置项说明：`doc/memcache_config.md`。
+- 安装使用文档：`docs/install_whl.md`、`docs/install_run.md`。
+- 配置项说明：`docs/memcache_config.md`。
 - 常见环境变量：`MMC_META_CONFIG_PATH`、`MMC_LOCAL_CONFIG_PATH`、`MEMCACHE_HYBRID_HOME_PATH`、`LD_LIBRARY_PATH`。
 - 构建时 `PYTHON_HOME` 默认探测 `/usr/local/python3.11` 或 `/usr/local`；UT 会设置 mock CANN 的 `ASCEND_HOME_PATH`。
 
@@ -50,11 +50,11 @@
 
 ## 对外接口与文档同步
 
-- C API 变更同步 `doc/memcache_c_api.md`。
-- C++ API 变更同步 `doc/memcache_c++_api.md`。
-- Python API 变更同步 `doc/memcache_python_api.md`。
-- REST/MetaService 行为变更同步 `doc/memcache_restful_api.md`。
-- 安装、配置、环境变量或安全行为变更同步 `doc/install_whl.md`、`doc/install_run.md`、`doc/memcache_config.md`、`doc/SECURITYNOTE.md` 中相关内容。
+- C API 变更同步 `docs/memcache_c_api.md`。
+- C++ API 变更同步 `docs/memcache_c++_api.md`。
+- Python API 变更同步 `docs/memcache_python_api.md`。
+- REST/MetaService 行为变更同步 `docs/memcache_restful_api.md`。
+- 安装、配置、环境变量或安全行为变更同步 `docs/install_whl.md`、`docs/install_run.md`、`docs/memcache_config.md`、`docs/SECURITYNOTE.md` 中相关内容。
 
 ## 产物与依赖
 
