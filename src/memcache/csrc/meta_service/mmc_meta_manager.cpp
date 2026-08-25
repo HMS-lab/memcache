@@ -697,9 +697,16 @@ Result MmcMetaManager::ExistKey(const std::string &key)
         return ret;
     }
 
+    std::unique_lock<std::mutex> guard(memObj->Mutex());
+    MmcBlobFilterPtr filterPtr = MmcMakeRef<MmcBlobFilter>(UINT32_MAX, MEDIA_NONE, READABLE);
+    std::vector<MmcMemBlobPtr> blobs = memObj->GetBlobs(filterPtr);
+    if (blobs.empty()) {
+        MMC_LOG_DEBUG("Key is exist but do not have readable blob key:" << key);
+        return MMC_UNMATCHED_KEY;
+    }
+
     // 预取：如果 key 仅存在于低层介质，无上层 READABLE blob 则触发预取
     if (extConfig_.prefetchEnabled) {
-        std::unique_lock<std::mutex> guard(memObj->Mutex());
         auto classified = ClassifyBlobs(memObj);
         if (classified.upperBlob == nullptr && classified.lowerBlob != nullptr) {
             MMC_LOG_DEBUG("ExistKey triggering prefetch for key " << key);

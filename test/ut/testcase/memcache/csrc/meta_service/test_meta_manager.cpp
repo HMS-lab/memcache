@@ -461,22 +461,25 @@ TEST_F(TestMmcMetaManager, EvictCallback_AllocatedOnly_GoesToRemove)
     metaMng->Start();
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
     metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+    uint64_t operateId = 1;
+    constexpr size_t survivingKeyIdx = 2;
 
     std::vector<std::string> keys = {"alloc_only_key1", "alloc_only_key2", "alloc_only_key3"};
     for (size_t i = 0; i < keys.size(); ++i) {
         AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
         MmcMemMetaDesc objMeta;
-        ASSERT_EQ(metaMng->Alloc(keys[i], allocReq, 1, 0, objMeta), MMC_OK);
+        ASSERT_EQ(metaMng->Alloc(keys[i], allocReq, operateId, 0, objMeta), MMC_OK);
         // Intentionally skip UpdateState(WRITE_OK) so blobs stay in ALLOCATED state
     }
 
+    ASSERT_EQ(metaMng->UpdateState(keys[survivingKeyIdx], dramLoc, MMC_WRITE_OK, operateId), MMC_OK);
     // Eviction removes ALLOCATED-only keys instead of blocking the LRU
     metaMng->CheckAndEvict(MEDIA_DRAM, SIZE_32K);
     usleep(500000UL); // wait for lease timeout + async eviction to finish
 
     EXPECT_EQ(metaMng->ExistKey(keys[0]), MMC_UNMATCHED_KEY);
     EXPECT_EQ(metaMng->ExistKey(keys[1]), MMC_UNMATCHED_KEY);
-    EXPECT_EQ(metaMng->ExistKey(keys[2]), MMC_OK);
+    EXPECT_EQ(metaMng->ExistKey(keys[survivingKeyIdx]), MMC_OK);
 
     metaMng->Stop();
 }
