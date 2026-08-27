@@ -41,6 +41,7 @@ enum LogLevel : int {
     INFO_LEVEL,
     WARN_LEVEL,
     ERROR_LEVEL,
+    FATAL_LEVEL,
     TRACE_LEVEL,
     BUTT_LEVEL // no use
 };
@@ -171,7 +172,7 @@ private:
     ExternalLog logFunc_ = nullptr;
     ExternalAuditLog auditLogFunc_ = nullptr;
 
-    const char *logLevelDesc_[BUTT_LEVEL] = {"DEBUG", "INFO", "WARN", "ERROR", "TRACE"};
+    const char *logLevelDesc_[BUTT_LEVEL] = {"DEBUG", "INFO", "WARN", "ERROR", "FATAL", "TRACE"};
 };
 } // namespace mmc
 } // namespace ock
@@ -206,6 +207,7 @@ private:
 #define MMC_LOG_INFO(ARGS)  MMC_OUT_LOG(ock::mmc::INFO_LEVEL, ARGS)
 #define MMC_LOG_WARN(ARGS)  MMC_OUT_LOG(ock::mmc::WARN_LEVEL, ARGS)
 #define MMC_LOG_ERROR(ARGS) MMC_OUT_LOG(ock::mmc::ERROR_LEVEL, ARGS)
+#define MMC_LOG_FATAL(ARGS) MMC_OUT_LOG(ock::mmc::FATAL_LEVEL, ARGS)
 #define MMC_LOG_TRACE(ARGS) MMC_OUT_LOG(ock::mmc::TRACE_LEVEL, ARGS)
 
 #define MMC_AUDIT_LOG(MSG) MMC_OUT_AUDIT_LOG(MSG)

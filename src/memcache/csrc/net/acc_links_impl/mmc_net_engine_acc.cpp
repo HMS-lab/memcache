@@ -26,6 +26,8 @@ namespace ock {
 namespace mmc {
 constexpr const int16_t NET_SERVER_MAGIC = 3867;
 constexpr const int NET_POOL_BASE = 16;
+// 纯 client（未初始化 BM）建连时宣告的无效 rank id，接收端应忽略该 rank。
+constexpr const uint64_t INVALID_RANK_ID = UINT64_MAX;
 
 Result NetEngineAcc::Start(const NetEngineOptions &options)
 {
@@ -414,6 +416,12 @@ void NetEngineAcc::UnInitialize()
         peerLinkMap_->Clear();
     }
 
+    /* clear ignored-rank link id set */
+    {
+        std::lock_guard<std::mutex> guard(ignoredRankLinksMutex_);
+        ignoredRankLinkIds_.clear();
+    }
+
     inited_ = false;
 }
 
@@ -437,6 +445,7 @@ Result NetEngineAcc::HandleNewLink(const TcpConnReq &req, const TcpLinkPtr &link
 {
     MMC_ASSERT_LOG_AND_RETURN(link.Get() != nullptr, "link.Get() is nullptr", MMC_INVALID_PARAM);
 
+    const bool ignoreRank = (req.rankId == INVALID_RANK_ID);
     auto peerId = static_cast<uint32_t>(req.rankId);
     link->UpCtx(peerId);
 
@@ -444,9 +453,18 @@ Result NetEngineAcc::HandleNewLink(const TcpConnReq &req, const TcpLinkPtr &link
     MMC_ASSERT_LOG_AND_RETURN(newLinkAcc != nullptr, "newLinkAcc is nullptr", MMC_NEW_OBJECT_FAILED);
     MMC_LOG_DEBUG("NEW Link");
 
-    /* add into peer link map */
-    peerLinkMap_->Add(peerId, newLinkAcc);
-    MMC_LOG_TRACE("HandleNewLink with peer rankId: " << req.rankId);
+    if (ignoreRank) {
+        /* 纯 client（无 BM）建连，rank 无效，放入独立集合跟踪，避免污染 rank 键空间 */
+        {
+            std::lock_guard<std::mutex> guard(ignoredRankLinksMutex_);
+            ignoredRankLinkIds_.insert(link->Id());
+        }
+        MMC_LOG_INFO("HandleNewLink with ignored rank, linkId: " << link->Id());
+    } else {
+        /* add into peer link map */
+        peerLinkMap_->Add(peerId, newLinkAcc);
+        MMC_LOG_INFO("HandleNewLink with peer rankId: " << req.rankId << ", linkId: " << link->Id());
+    }
     Result ret = MMC_OK;
     if (newLinkHandler_ != nullptr) {
         ret = newLinkHandler_(newLinkAcc.Get());
@@ -501,6 +519,14 @@ Result NetEngineAcc::HandleLinkBroken(const TcpLinkPtr &link) const
 {
     MMC_ASSERT_LOG_AND_RETURN(link.Get() != nullptr, "link.Get() is nullptr", MMC_INVALID_PARAM);
 
+    /* 纯 client（ignore rank）链接断链，仅从独立集合中移除，无 rank 资源需要清理 */
+    {
+        std::lock_guard<std::mutex> guard(ignoredRankLinksMutex_);
+        if (ignoredRankLinkIds_.erase(link->Id()) != 0) {
+            return MMC_OK;
+        }
+    }
+
     const auto peerId = static_cast<uint32_t>(link->UpCtx());
 
     MmcRef<NetLinkAcc> linkAcc = nullptr;
@@ -519,14 +545,14 @@ Result NetEngineAcc::HandleLinkBroken(const TcpLinkPtr &link) const
 }
 
 Result NetEngineAcc::ConnectToPeer(uint32_t peerId, const std::string &peerIp, uint16_t port, NetLinkPtr &newLink,
-                                   bool isForce)
+                                   bool isForce, bool ignoreRankId)
 {
     MMC_ASSERT_LOG_AND_RETURN(started_, "started_ = " << started_, MMC_NOT_STARTED);
     MMC_ASSERT_LOG_AND_RETURN(!peerIp.empty(), "peerIp is empty", MMC_INVALID_PARAM);
     MMC_ASSERT_LOG_AND_RETURN(port != 0, "port = " << port, MMC_INVALID_PARAM);
 
     TcpConnReq connReq;
-    connReq.rankId = peerId;
+    connReq.rankId = ignoreRankId ? INVALID_RANK_ID : peerId;
     connReq.version = static_cast<int16_t>(NetProtoVersion::VERSION_1);
     connReq.magic = NET_SERVER_MAGIC;
 

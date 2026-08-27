@@ -98,7 +98,7 @@ public:
         return spaces_[type];
     }
 
-    bool IsReady()
+    bool IsReady() const
     {
         return started_;
     }

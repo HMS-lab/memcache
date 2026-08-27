@@ -109,8 +109,9 @@ void MetaNetClient::Stop()
     }
 }
 
-Result MetaNetClient::Connect(const std::string &url)
+Result MetaNetClient::Connect(const std::string &url, bool ignoreRankId)
 {
+    ignoreRankId_ = ignoreRankId;
     {
         std::lock_guard<std::mutex> guard(mutex_);
         serverUrl_ = url;
@@ -150,7 +151,7 @@ Result MetaNetClient::ResolveAndConnect(bool isForce)
         MMC_LOG_ERROR("Failed to register resolved peer url: " << peerUrl << ", serverUrl: " << url);
         return MMC_INVALID_PARAM;
     }
-    Result ret = engine_->ConnectToPeer(rankId_, ip, port, link2Index_, isForce);
+    Result ret = engine_->ConnectToPeer(rankId_, ip, port, link2Index_, isForce, ignoreRankId_);
     if (ret != MMC_OK) {
         MMC_LOG_ERROR("MetaNetClient connect " << ip << ", port " << port << " failed, ret: " << ret);
         return ret;
@@ -203,7 +204,7 @@ Result MetaNetClient::HandleMetaReplicate(const NetContextPtr &context)
             resp.ret_ = replicateHandler_(req.ops_, req.keys_, req.blobs_, keyResults);
             resp.keyResults_ = std::move(keyResults);
         } else {
-            MMC_LOG_ERROR("replicateHandler_ is nullptr");
+            MMC_LOG_DEBUG("replicateHandler_ is nullptr");
             resp.ret_ = MMC_ERROR;
         }
         return ctx->Reply(req.msgId, resp);

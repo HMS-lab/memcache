@@ -65,9 +65,10 @@ public:
      * @brief Connect to net server
      *
      * @param url          [in] url of net server
+     * @param ignoreRankId [in] announce the local rank id as invalid (UINT64_MAX)
      * @return 0 if successful
      */
-    Result Connect(const std::string &url);
+    Result Connect(const std::string &url, bool ignoreRankId = false);
 
     /**
      * @brief Force re-resolve the server URL and reconnect.
@@ -192,6 +193,7 @@ private:
     NetEnginePtr engine_;
     NetLinkPtr link2Index_ = nullptr;
     uint16_t rankId_ = UINT16_MAX;
+    bool ignoreRankId_ = false;
     std::string ip_ = "";
     uint64_t port_ = 5000U;
     const uint32_t retryCount_ = NET_RETRY_COUNT;

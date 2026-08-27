@@ -115,6 +115,11 @@ public:
         return rankId_;
     }
 
+    bool HasBm() const
+    {
+        return bmInitialized_;
+    }
+
     static Result RegisterInstance()
     {
         std::lock_guard<std::mutex> lock(gClientHandlerMtx);
@@ -227,6 +232,7 @@ private:
     MmcUbsIoProxyPtr ubsIoProxy_;
     std::string name_;
     uint32_t rankId_{UINT32_MAX};
+    bool bmInitialized_{false};
     std::atomic<uint32_t> rpcRetryTimeOut_{0};
     uint64_t defaultTtlMs_ = MMC_DATA_TTL_MS;
     MmcThreadPoolPtr threadPool_;

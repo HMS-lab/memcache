@@ -19,7 +19,7 @@ using namespace testing;
 using namespace std;
 using namespace ock::mmc;
 
-/* ── Minimal fake NetEngine for testing HandleLinkBroken / Stop ─────────── */
+/* ── Minimal fake NetEngine for testing HandleLinkBroken / Stop / Connect ─ */
 
 class FakeNetEngine : public NetEngine {
 public:
@@ -33,10 +33,12 @@ public:
         stopCalled = true;
     }
 
-    Result ConnectToPeer(uint32_t peerId, const std::string &peerIp, uint16_t port, NetLinkPtr &newLink,
-                         bool isForce) override
+    Result ConnectToPeer(uint32_t peerId, const std::string &peerIp, uint16_t port, NetLinkPtr &newLink, bool isForce,
+                         bool ignoreRankId = false) override
     {
         connectCalled = true;
+        lastPeerId = peerId;
+        lastIgnoreRankId = ignoreRankId;
         return connectResult;
     }
 
@@ -53,6 +55,8 @@ public:
 
     bool stopCalled = false;
     bool connectCalled = false;
+    uint32_t lastPeerId = 0;
+    bool lastIgnoreRankId = false;
     Result connectResult = MMC_OK;
 };
 
@@ -114,6 +118,36 @@ TEST_F(TestMetaNetClient, UpdateServerUrl_DifferentPort_UpdatesFields)
     EXPECT_EQ(client.ip_, "127.0.0.1");
     EXPECT_EQ(client.port_, 7000);
     EXPECT_EQ(client.serverUrl_, "tcp://127.0.0.1:7000");
+}
+
+/* ── Connect() ignoreRankId propagation tests ───────────────────────────── */
+
+TEST_F(TestMetaNetClient, Connect_IgnoreRankIdTrue_StoresFlagAndPassesToEngine)
+{
+    MetaNetClient client("tcp://127.0.0.1:5000", "test");
+    auto *rawEngine = new FakeNetEngine();
+    NetEnginePtr guard(rawEngine);
+    client.engine_ = rawEngine;
+
+    auto ret = client.Connect("tcp://127.0.0.1:5000", true);
+    EXPECT_EQ(ret, MMC_OK);
+    EXPECT_TRUE(client.ignoreRankId_);
+    EXPECT_TRUE(rawEngine->connectCalled);
+    EXPECT_TRUE(rawEngine->lastIgnoreRankId);
+}
+
+TEST_F(TestMetaNetClient, Connect_Default_IgnoreRankIdFalse)
+{
+    MetaNetClient client("tcp://127.0.0.1:5000", "test");
+    auto *rawEngine = new FakeNetEngine();
+    NetEnginePtr guard(rawEngine);
+    client.engine_ = rawEngine;
+
+    auto ret = client.Connect("tcp://127.0.0.1:5000");
+    EXPECT_EQ(ret, MMC_OK);
+    EXPECT_FALSE(client.ignoreRankId_);
+    EXPECT_TRUE(rawEngine->connectCalled);
+    EXPECT_FALSE(rawEngine->lastIgnoreRankId);
 }
 
 /* ── Stop() tests: three-phase mutex approach, stopping_ flag ────────────── */

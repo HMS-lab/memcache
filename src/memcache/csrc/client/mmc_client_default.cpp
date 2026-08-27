@@ -91,6 +91,7 @@ Result MmcClientDefault::Start(const mmc_client_config_t &config)
     bmProxy_ = MmcBmProxyFactory::GetInstance("bmProxyDefault");
     MMC_ASSERT_LOG_AND_RETURN(bmProxy_ != nullptr, "bmProxy_ is nullptr", MMC_MALLOC_FAILED);
     rankId_ = bmProxy_->RankId();
+    bmInitialized_ = bmProxy_->IsReady();
 
     threadPool_ = MmcMakeRef<MmcThreadPool>("client_pool", 1);
     MMC_ASSERT_LOG_AND_RETURN(threadPool_ != nullptr, "threadPool_ is nullptr", MMC_MALLOC_FAILED);
@@ -125,7 +126,7 @@ Result MmcClientDefault::Start(const mmc_client_config_t &config)
         options.logLevel = config.logLevel;
         options.logFunc = config.logFunc;
         MMC_RETURN_ERROR(tmpNetClient->Start(options), "Failed to start net server of local service " << name_);
-        MMC_RETURN_ERROR(tmpNetClient->Connect(config.discoveryURL),
+        MMC_RETURN_ERROR(tmpNetClient->Connect(config.discoveryURL, !bmInitialized_),
                          "Failed to connect net server of local service " << name_);
     }
 

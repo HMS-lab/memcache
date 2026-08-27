@@ -172,10 +172,11 @@ public:
      * @param port         [in] port of peer server listen at
      * @param newLink      [in/out] new linked created
      * @param isForce      [in] force connect
+     * @param ignoreRankId [in] announce the peer rank id as invalid (UINT64_MAX)
      * @return 0 if successful
      */
     virtual Result ConnectToPeer(uint32_t peerId, const std::string &peerIp, uint16_t port, NetLinkPtr &newLink,
-                                 bool isForce) = 0;
+                                 bool isForce, bool ignoreRankId = false) = 0;
 
     /**
      * @brief Register callback function of request received

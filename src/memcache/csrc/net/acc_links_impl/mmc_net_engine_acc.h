@@ -12,6 +12,8 @@
 #ifndef MEM_FABRIC_MMC_NET_ENGINE_ACC_LINKS_H
 #define MEM_FABRIC_MMC_NET_ENGINE_ACC_LINKS_H
 
+#include <unordered_set>
+
 #include "mmc_net_engine.h"
 #include "mmc_net_common_acc.h"
 #include "mmc_thread_pool.h"
@@ -26,8 +28,8 @@ public:
     Result Start(const NetEngineOptions &options) override;
     void Stop() override;
 
-    Result ConnectToPeer(uint32_t peerId, const std::string &peerIp, uint16_t port, NetLinkPtr &newLink,
-                         bool isForce) override;
+    Result ConnectToPeer(uint32_t peerId, const std::string &peerIp, uint16_t port, NetLinkPtr &newLink, bool isForce,
+                         bool ignoreRankId = false) override;
 
     Result Call(uint32_t targetId, int16_t opCode, const char *reqData, uint32_t reqDataLen, char **respData,
                 uint32_t &respDataLen, int32_t timeoutInSecond) override;
@@ -56,6 +58,10 @@ private:
     TcpServerPtr server_;
     NetLinkMapAccPtr peerLinkMap_;
     NetContextStorePtr ctxStore_;
+
+    /* 纯 client（ignore rank）建连的 link id 集合，与 rank->link 映射空间隔离 */
+    mutable std::mutex ignoredRankLinksMutex_;
+    mutable std::unordered_set<uint32_t> ignoredRankLinkIds_;
 
     /* not hot used variables */
     NetEngineOptions options_{};
