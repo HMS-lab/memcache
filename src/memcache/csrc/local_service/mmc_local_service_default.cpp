@@ -439,9 +439,8 @@ std::vector<size_t> MmcLocalServiceDefault::ProcessBackupMetadata(const std::vec
             }
             if (blobs[i].mediaType_ == MEDIA_DRAM && ubsIoProxyPtr_ != nullptr && bmProxyPtr_ != nullptr) {
                 flushTasks.push_back(i);
-            } else if (blobs[i].mediaType_ == MEDIA_DRAM) {
-                MMC_LOG_WARN("async flush skipped, ubs or bm not available, key=" << keys[i]);
             } else {
+                // DRAM 未使能刷盘（ubs/bm 不可用）：仅记录元数据，不构造 SSD 副本；其他介质直接成功
                 keyResults[i] = MMC_OK;
             }
         } else if (ops[i] == META_BACKUP_ADD_REWARM) {
