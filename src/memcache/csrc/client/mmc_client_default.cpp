@@ -468,7 +468,7 @@ Result MmcClientDefault::BatchGet(const std::vector<std::string> &keys, const st
         return MMC_INVALID_PARAM;
     }
     // get meta
-    batchResult.assign(keys.size(), MMC_ERROR);
+    batchResult.assign(keys.size(), MMC_INVALID_PARAM);
     const uint64_t operateId = GenerateOperateId(rankId_);
     BatchGetRequest request{keys, rankId_, operateId};
     BatchAllocResponse response;
@@ -495,12 +495,14 @@ Result MmcClientDefault::BatchGet(const std::vector<std::string> &keys, const st
         if (numBlobs <= 0 || blobs.empty() || blobs.size() != numBlobs) {
             MMC_LOG_ERROR("client " << name_ << " batch get failed for key " << keys[i]
                                     << ", blob:" << std::to_string(numBlobs) << ", size:" << blobs.size());
+            batchResult[i] = MMC_OBJECT_NOT_EXISTS;
             continue;
         }
         if (bufArr.TotalSize() != blobs[0].size_) {
             MMC_LOG_ERROR("client " << name_ << " batch get failed for key " << keys[i]
                                     << ", blob:" << std::to_string(numBlobs) << ", size:" << blobs[0].size_
                                     << " key size:" << bufArr.TotalSize());
+            batchResult[i] = MMC_INTERNAL_ERROR;
             continue;
         }
 

@@ -80,6 +80,7 @@ MMC_API int32_t mmcc_put(const char *key, mmc_buffer *buf, mmc_put_options optio
     MMC_VALIDATE_RETURN(strlen(key) <= MAX_KEY_LEN, "invalid param, key's len more than 256", MMC_INVALID_PARAM);
     MMC_VALIDATE_RETURN(buf != nullptr, "invalid param, buf is null", MMC_INVALID_PARAM);
     MMC_VALIDATE_RETURN((void *)buf->addr != nullptr, "invalid param, buf addr is null", MMC_INVALID_PARAM);
+    MMC_VALIDATE_RETURN(buf->len != 0, "invalid param, buf len equals 0", MMC_INVALID_PARAM);
     MMC_VALIDATE_RETURN(MmcClientDefault::GetInstance() != nullptr, "client is not initialize", MMC_CLIENT_NOT_INIT);
 
     auto ret = MmcClientDefault::GetInstance()->Put(key, buf, options, flags);
@@ -97,6 +98,7 @@ MMC_API int32_t mmcc_get(const char *key, mmc_buffer *buf, uint32_t flags)
     MMC_VALIDATE_RETURN(strlen(key) <= MAX_KEY_LEN, "invalid param, key's len more than 256", MMC_INVALID_PARAM);
     MMC_VALIDATE_RETURN(buf != nullptr, "invalid param, buf is null", MMC_INVALID_PARAM);
     MMC_VALIDATE_RETURN(buf->addr != 0, "invalid param, buf addr is null", MMC_INVALID_PARAM);
+    MMC_VALIDATE_RETURN(buf->len != 0, "invalid param, buf len equals 0", MMC_INVALID_PARAM);
     MMC_VALIDATE_RETURN(MmcClientDefault::GetInstance() != nullptr, "client is not initialize", MMC_CLIENT_NOT_INIT);
 
     MMC_RETURN_ERROR(MmcClientDefault::GetInstance()->Get(key, buf, flags), MmcClientDefault::GetInstance()->Name()
@@ -465,7 +467,7 @@ MMC_API int32_t mmcc_batch_get(const char **keys, uint32_t keys_count, mmc_buffe
 
     std::vector<std::string> keys_vector;
     std::vector<mmc_buffer> bufs_vector;
-    std::vector<int> batchResult(keys_count, MMC_ERROR);
+    std::vector<int> batchResult(keys_count, MMC_INVALID_PARAM);
     keys_vector.reserve(keys_count);
     bufs_vector.reserve(keys_count);
 
@@ -501,7 +503,7 @@ MMC_API int32_t mmcc_batch_put(const char **keys, uint32_t keys_count, const mmc
 
     std::vector<std::string> keys_vector;
     std::vector<mmc_buffer> bufs_vector;
-    std::vector<int> batchResult(keys_count, MMC_ERROR);
+    std::vector<int> batchResult(keys_count, MMC_INVALID_PARAM);
     keys_vector.reserve(keys_count);
     bufs_vector.reserve(keys_count);
 
@@ -515,8 +517,9 @@ MMC_API int32_t mmcc_batch_put(const char **keys, uint32_t keys_count, const mmc
             MMC_LOG_ERROR("Remove invalid key: " << keys[i]);
             return MMC_INVALID_PARAM; // 这个错误属于入参不合法，直接给调用者返回错误
         }
-        if (bufs == nullptr || bufs[i].addr == 0 || bufs[i].type >= BUF_TYPE_BASE) {
-            MMC_LOG_ERROR("Remove invalid buf with key: " << keys[i] << ", type: " << bufs[i].type);
+        if (bufs == nullptr || bufs[i].addr == 0 || bufs[i].type >= BUF_TYPE_BASE || bufs[i].len == 0) {
+            MMC_LOG_ERROR("Remove invalid buf with key: " << keys[i] << ", type: " << bufs[i].type
+                                                          << ", len: " << bufs[i].len);
             return MMC_INVALID_PARAM;
         }
         keys_vector.emplace_back(keys[i]);

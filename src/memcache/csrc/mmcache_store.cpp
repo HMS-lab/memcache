@@ -445,7 +445,7 @@ std::vector<int> MmcacheStore::BatchPutFrom(const std::vector<std::string> &keys
     const size_t count = keys.size();
     MMC_VALIDATE_RETURN(count > 0, "key vector is empty", {});
 
-    std::vector<int> results(count, -1);
+    std::vector<int> results(count, MMC_INVALID_PARAM);
     if (buffers.size() != count || sizes.size() != count) {
         MMC_LOG_ERROR("Input vector sizes mismatch: keys=" << keys.size() << ", buffers=" << buffers.size()
                                                            << ", sizes=" << sizes.size());
@@ -492,7 +492,7 @@ std::vector<int> MmcacheStore::BatchGetInto(const std::vector<std::string> &keys
     size_t count = keys.size();
     MMC_VALIDATE_RETURN(count > 0, "key vector is empty", {});
 
-    std::vector<int> results(count, -1);
+    std::vector<int> results(count, MMC_INVALID_PARAM);
     if (buffers.size() != count || sizes.size() != count) {
         MMC_LOG_ERROR("Input vector sizes mismatch: keys=" << keys.size() << ", buffers=" << buffers.size()
                                                            << ", sizes=" << sizes.size());
@@ -514,6 +514,10 @@ std::vector<int> MmcacheStore::BatchGetInto(const std::vector<std::string> &keys
     std::vector<const char *> keyArray(count);
     std::vector<mmc_buffer> bufferArray(count);
     for (size_t i = 0; i < count; ++i) {
+        if (static_cast<uint64_t>(sizes[i]) == 0) {
+            MMC_LOG_ERROR("Invalid vector sizes on idx [" << i << "] equals 0");
+            return results;
+        }
         keyArray[i] = keys[i].c_str();
         bufferArray[i] = {.addr = reinterpret_cast<uint64_t>(buffers[i]),
                           .type = type,
@@ -541,8 +545,7 @@ int MmcacheStore::PutFromLayers(const std::string &key, const std::vector<void *
     if (direct != SMEMB_COPY_L2G && direct != SMEMB_COPY_H2G && direct != SMEMB_COPY_AUTO) {
         MMC_LOG_ERROR(
             "Invalid direct(" << direct
-                              << "), only"
-                                 "0 (SMEMB_COPY_L2G), 3 (SMEMB_COPY_H2G) and 9 (SMEMB_COPY_AUTO) is supported");
+                              << "), only 0 (SMEMB_COPY_L2G), 3 (SMEMB_COPY_H2G) and 9 (SMEMB_COPY_AUTO) is supported");
         return MMC_INVALID_PARAM;
     }
 
@@ -579,6 +582,10 @@ int MmcacheStore::PutFromLayers(const std::string &key, const std::vector<void *
     Result res;
     MmcBufferArray bufArr;
     for (size_t i = 0; i < layerNum; i += 1) {
+        if (static_cast<uint64_t>(sizes[i]) == 0) {
+            MMC_LOG_ERROR("Invalid param, layers buf len on idx [" << i << "] equals 0");
+            return MMC_INVALID_PARAM;
+        }
         bufArr.AddBuffer({.addr = reinterpret_cast<uint64_t>(buffers[i]),
                           .type = type,
                           .offset = 0,
@@ -700,6 +707,10 @@ int MmcacheStore::GetIntoLayers(const std::string &key, const std::vector<void *
 
     std::vector<mmc_buffer> mmc_buffers;
     for (size_t i = 0; i < layerNum; i += 1) {
+        if (static_cast<uint64_t>(sizes[i]) == 0) {
+            MMC_LOG_ERROR("Invalid param, layers buf len on idx [" << i << "] equals 0");
+            return MMC_INVALID_PARAM;
+        }
         mmc_buffers.push_back({.addr = reinterpret_cast<uint64_t>(buffers[i]),
                                .type = type,
                                .offset = 0,
@@ -840,7 +851,7 @@ int MmcacheStore::PutBatch(const std::vector<std::string> &keys, std::vector<mmc
     const size_t count = keys.size();
     MMC_VALIDATE_RETURN(count > 0, "key vector is empty", 0);
 
-    std::vector<int> results(count, -1);
+    std::vector<int> results(count, MMC_INVALID_PARAM);
     if (buffers.size() != count) {
         MMC_LOG_ERROR("Input vector sizes mismatch: keys=" << keys.size() << ", buffers=" << buffers.size());
         return MMC_INVALID_PARAM;
@@ -909,7 +920,7 @@ std::vector<mmc_buffer> MmcacheStore::GetBatch(const std::vector<std::string> &k
     size_t count = keys.size();
     MMC_VALIDATE_RETURN(count > 0, "key vector is empty", {});
 
-    std::vector<int> results(count, -1);
+    std::vector<int> results(count, MMC_INVALID_PARAM);
     std::vector<mmc_buffer> buffers(count, {0, 0, 0, 0});
     std::vector<const char *> keyArray(count);
 
