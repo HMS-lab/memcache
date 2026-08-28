@@ -12,6 +12,7 @@
 #ifndef MEM_FABRIC_MMC_META_MANAGER_H
 #define MEM_FABRIC_MMC_META_MANAGER_H
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <list>
@@ -512,7 +513,8 @@ private:
                          std::vector<MmcMemMetaDesc> &objMetas, std::vector<DeferredLockEntry> &deferredLockList);
 
     void PendingWaitAndFill(const std::vector<std::string> &keys, uint32_t opRankId, uint32_t opSeq,
-                            std::vector<MmcMemMetaDesc> &objMetas, PendingRewarmWait &w);
+                            std::vector<MmcMemMetaDesc> &objMetas, PendingRewarmWait &w,
+                            const std::chrono::steady_clock::time_point &deadline);
 
     Result SendBatchRpc(uint32_t rank, const std::vector<std::string> &keys, const std::vector<RewarmEntry> &group,
                         BatchRpcData &batch, size_t groupSize, std::vector<bool> &copyOk);

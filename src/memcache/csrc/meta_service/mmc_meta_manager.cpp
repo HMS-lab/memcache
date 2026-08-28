@@ -293,22 +293,26 @@ Result MmcMetaManager::GetByRank(const std::vector<std::string> &keys, uint64_t 
     ClassifyAndGroupKeys(keys, opRankId, opSeq, objMetas, rankGroups, pendingWaitList, deferredLockList);
     TP_TRACE_END(TP_MMC_META_BATCH_GET_CLASSIFY, MMC_OK);
 
-    // 先异步提交 rewarm/pendingWait，后台启动 RPC；主线程同步给 selectedBlob 加读锁，两者并行缩小时隙
-    std::vector<std::future<void>> futures;
+    // 只把实际回暖任务提交到回暖线程池。pending wait 会阻塞等待条件变量，若也占用该线程池，
+    // 并发 BatchGet 会让等待者排在生产者前面，导致真正的回暖任务无法运行。
+    std::vector<std::future<void>> rewarmFutures;
     for (auto &[rank, group] : rankGroups) {
-        futures.push_back(rewarmThreadPool_->Enqueue([this, rank, &group, &keys, opRankId, opSeq, &objMetas]() {
+        rewarmFutures.push_back(rewarmThreadPool_->Enqueue([this, rank, &group, &keys, opRankId, opSeq, &objMetas]() {
             RewarmRankGroup(rank, group, keys, opRankId, opSeq, objMetas);
-        }));
-    }
-    for (auto &w : pendingWaitList) {
-        futures.push_back(rewarmThreadPool_->Enqueue([this, &keys, opRankId, opSeq, &objMetas, &w]() {
-            PendingWaitAndFill(keys, opRankId, opSeq, objMetas, w);
         }));
     }
 
     AttachReadLocks(keys, opRankId, opSeq, objMetas, deferredLockList);
 
-    for (auto &f : futures) {
+    // pending key 在当前请求线程内等待，并共享同一个截止时间。这样既不会占用回暖 worker，
+    // 也不会让包含多个 pending key 的 BatchGet 把 300ms 超时逐 key 串行累加。
+    const auto pendingDeadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(extConfig_.pendingWaitTimeoutMs);
+    for (auto &w : pendingWaitList) {
+        PendingWaitAndFill(keys, opRankId, opSeq, objMetas, w, pendingDeadline);
+    }
+
+    for (auto &f : rewarmFutures) {
         try {
             f.get();
         } catch (const std::exception &e) {
@@ -652,16 +656,19 @@ void MmcMetaManager::AttachReadLocks(const std::vector<std::string> &keys, uint3
 }
 
 void MmcMetaManager::PendingWaitAndFill(const std::vector<std::string> &keys, uint32_t opRankId, uint32_t opSeq,
-                                        std::vector<MmcMemMetaDesc> &objMetas, PendingRewarmWait &w)
+                                        std::vector<MmcMemMetaDesc> &objMetas, PendingRewarmWait &w,
+                                        const std::chrono::steady_clock::time_point &deadline)
 {
-    auto timeout = std::chrono::milliseconds(extConfig_.pendingWaitTimeoutMs);
     if (w.memObj == nullptr || w.pendingBlob == nullptr) {
         MMC_LOG_ERROR("pending wait: memObj or pendingBlob is null, key=" << keys[w.index]);
         return;
     }
     std::unique_lock<std::mutex> guard(w.memObj->Mutex());
     if (w.pendingBlob->State() != READABLE) {
-        w.pendingBlob->WaitUntilReadable(guard, timeout);
+        const auto now = std::chrono::steady_clock::now();
+        if (now < deadline) {
+            w.pendingBlob->WaitUntilReadable(guard, deadline - now);
+        }
     }
 
     if (w.pendingBlob->State() == READABLE) {

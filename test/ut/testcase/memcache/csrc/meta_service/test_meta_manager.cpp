@@ -9,7 +9,9 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
 */
+#include <atomic>
 #include <chrono>
+#include <future>
 #include <iostream>
 #include <thread>
 #include "gtest/gtest.h"
@@ -41,6 +43,10 @@ protected:
     {
         return mgr->globalAllocator_;
     }
+    static auto &RewarmThreadPool(MmcRef<MmcMetaManager> &mgr)
+    {
+        return mgr->rewarmThreadPool_;
+    }
 };
 TestMmcMetaManager::TestMmcMetaManager() {}
 
@@ -65,6 +71,72 @@ TEST_F(TestMmcMetaManager, Init)
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
     metaMng->Mount(loc, locInfo, blobMap, false);
     ASSERT_TRUE(metaMng != nullptr);
+    metaMng->Stop();
+}
+
+TEST_F(TestMmcMetaManager, PendingGetDoesNotDependOnRewarmWorkerAvailability)
+{
+    MmcMetaExtConfig extConfig;
+    extConfig.pendingWaitTimeoutMs = 500U;
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U, extConfig);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+
+    const std::string key = "pending_without_rewarm_worker";
+    auto memObj = MmcMakeRef<MmcMemObjMeta>();
+    auto pendingBlob = MmcMakeRef<MmcMemBlob>(0, 0x1000, SIZE_32K, MEDIA_DRAM, ALLOCATED);
+    ASSERT_NE(memObj, nullptr);
+    ASSERT_NE(pendingBlob, nullptr);
+    ASSERT_EQ(memObj->AddBlob(pendingBlob), MMC_OK);
+    ASSERT_EQ(MetaContainer(metaMng)->Insert(key, memObj), MMC_OK);
+
+    std::promise<void> releaseWorkers;
+    auto releaseFuture = releaseWorkers.get_future().share();
+    std::atomic<size_t> startedWorkers{0};
+    std::vector<std::future<void>> blockers;
+    blockers.reserve(REWARM_POOL_BASE);
+    for (size_t i = 0; i < REWARM_POOL_BASE; ++i) {
+        blockers.push_back(RewarmThreadPool(metaMng)->Enqueue([&startedWorkers, releaseFuture]() {
+            startedWorkers.fetch_add(1, std::memory_order_release);
+            releaseFuture.wait();
+        }));
+    }
+
+    const auto workersReadyDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (startedWorkers.load(std::memory_order_acquire) != REWARM_POOL_BASE &&
+           std::chrono::steady_clock::now() < workersReadyDeadline) {
+        std::this_thread::yield();
+    }
+    if (startedWorkers.load(std::memory_order_acquire) != REWARM_POOL_BASE) {
+        releaseWorkers.set_value();
+        for (auto &blocker : blockers) {
+            blocker.get();
+        }
+        metaMng->Stop();
+        FAIL() << "rewarm pool did not start all workers";
+    }
+
+    std::thread completeRewarm([memObj, pendingBlob]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        std::lock_guard<std::mutex> guard(memObj->Mutex());
+        pendingBlob->UpdateState(MMC_WRITE_OK);
+        pendingBlob->NotifyReadable();
+    });
+
+    std::vector<MmcMemMetaDesc> objMetas;
+    auto getFuture = std::async(std::launch::async, [&]() { return metaMng->GetByRank({key}, 1U, objMetas); });
+    const auto getStatus = getFuture.wait_for(std::chrono::milliseconds(200));
+
+    // Always release the synthetic blockers before assertions so failures cannot hang teardown.
+    releaseWorkers.set_value();
+    for (auto &blocker : blockers) {
+        blocker.get();
+    }
+    completeRewarm.join();
+
+    EXPECT_EQ(getStatus, std::future_status::ready);
+    EXPECT_EQ(getFuture.get(), MMC_OK);
+    ASSERT_EQ(objMetas.size(), 1U);
+    EXPECT_EQ(objMetas[0].numBlobs_, 1U);
     metaMng->Stop();
 }
 
