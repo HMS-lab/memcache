@@ -191,8 +191,8 @@ private:
                          const BatchAllocResponse &allocResponse, std::vector<int> &batchResult);
     void WaitFeatures(std::vector<std::tuple<uint32_t, uint32_t, std::future<int32_t>>> &futures,
                       std::vector<int> &batchResult);
-    void SyncUpdateState(BatchUpdateRequest &updateRequest);
-    void AsyncUpdateState(BatchUpdateRequest &updateRequest);
+    void SyncUpdateState(BatchUpdateRequest &updateRequest, const std::string &opName);
+    void AsyncUpdateState(BatchUpdateRequest &updateRequest, const std::string &opName);
     void SyncUpdateLease(BatchUpdateLeaseRequest &request);
     void AsyncUpdateLease(BatchUpdateLeaseRequest &request);
     std::future<int32_t> SubmitPutTask(BatchCopyDesc &copyDesc, MediaType mediaType, bool asyncExec);

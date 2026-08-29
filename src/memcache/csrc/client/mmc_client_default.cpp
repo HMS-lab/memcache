@@ -301,7 +301,7 @@ Result MmcClientDefault::Put(const std::string &key, const MmcBufferArray &bufAr
         updateRequest.mediaTypes_.push_back(blob.mediaType_);
         updateRequest.operateIds_.push_back(operateId);
     }
-    SyncUpdateState(updateRequest);
+    SyncUpdateState(updateRequest, "put update");
     return result;
 }
 
@@ -376,7 +376,7 @@ Result MmcClientDefault::BatchPut(const std::vector<std::string> &keys, const st
             updateRequest.operateIds_.push_back(operateId);
         }
     }
-    SyncUpdateState(updateRequest); // 写需要同步更新，异步更新会出现立即读查询blob不可读的情况
+    SyncUpdateState(updateRequest, "batch put update"); // 写需要同步更新，异步更新会出现立即读查询blob不可读的情况
 
     if (ret != MMC_OK) {
         MMC_LOG_ERROR("client " << name_ << " batch put failed: " << ret);
@@ -422,7 +422,7 @@ Result MmcClientDefault::Get(const std::string &key, const MmcBufferArray &bufAr
     updateRequest.ranks_.push_back(blob.rank_);
     updateRequest.mediaTypes_.push_back(blob.mediaType_);
     updateRequest.operateIds_.push_back(operateId);
-    AsyncUpdateState(updateRequest);
+    AsyncUpdateState(updateRequest, "get update");
 
     if (ret != MMC_OK) {
         MMC_LOG_ERROR("client " << name_ << " get " << key << " read data failed.");
@@ -554,7 +554,7 @@ Result MmcClientDefault::BatchGet(const std::vector<std::string> &keys, const st
             updateRequest.operateIds_.push_back(operateId);
         }
     }
-    AsyncUpdateState(updateRequest);
+    AsyncUpdateState(updateRequest, "batch get update");
     if (hasExpiredLease) {
         MMC_LOG_ERROR("client " << name_ << " batch get lease expired.");
         return MMC_LEASE_EXPIRED;
@@ -907,31 +907,31 @@ void MmcClientDefault::ProcessUbsIoBatchGetWithHBM(UbsIoBatchGetData &data)
     }
 }
 
-void MmcClientDefault::SyncUpdateState(BatchUpdateRequest &updateRequest)
+void MmcClientDefault::SyncUpdateState(BatchUpdateRequest &updateRequest, const std::string &opName)
 {
     TP_TRACE_BEGIN(TP_MMC_LOCAL_BATCH_UPDATE);
     BatchUpdateResponse updateResponse;
     Result updateResult = metaNetClient_->SyncCall(updateRequest, updateResponse, rpcRetryTimeOut_);
     TP_TRACE_END(TP_MMC_LOCAL_BATCH_UPDATE, updateResult);
     if (updateResult != MMC_OK || updateResponse.results_.size() != updateRequest.keys_.size()) {
-        MMC_LOG_ERROR("client " << name_ << " batch get update failed:" << updateResult << ", key size:"
+        MMC_LOG_ERROR("client " << name_ << " " << opName << " failed:" << updateResult << ", key size:"
                                 << updateRequest.keys_.size() << ", ret size:" << updateResponse.results_.size());
     } else {
         for (size_t i = 0; i < updateRequest.keys_.size(); ++i) {
             if (updateResponse.results_[i] != MMC_OK) {
-                MMC_LOG_ERROR("client " << name_ << " batch update for key " << updateRequest.keys_[i]
+                MMC_LOG_ERROR("client " << name_ << " " << opName << " for key " << updateRequest.keys_[i]
                                         << " failed:" << updateResponse.results_[i]);
             }
         }
     }
 }
 
-void MmcClientDefault::AsyncUpdateState(BatchUpdateRequest &updateRequest)
+void MmcClientDefault::AsyncUpdateState(BatchUpdateRequest &updateRequest, const std::string &opName)
 {
-    auto future = threadPool_->Enqueue([&](BatchUpdateRequest updateRequestL) { SyncUpdateState(updateRequestL); },
-                                       updateRequest);
+    auto future = threadPool_->Enqueue(
+        [this, opName](BatchUpdateRequest updateRequestL) { SyncUpdateState(updateRequestL, opName); }, updateRequest);
     if (!future.valid()) {
-        SyncUpdateState(updateRequest);
+        SyncUpdateState(updateRequest, opName);
     }
 }
 
