@@ -73,10 +73,10 @@ void MMCMetaBackUpMgrDefault::SendBackup2Local()
     }
 
     MMC_LOG_DEBUG("Backup sending " << rankGroups.size() << " rank groups");
-    if (rewarmPool_ != nullptr) {
+    if (backupPool_ != nullptr) {
         std::vector<std::future<void>> futures;
         for (auto &[rank, entries] : rankGroups) {
-            auto future = rewarmPool_->Enqueue([this, rank, &entries]() { SendBackupForRank(rank, entries); });
+            auto future = backupPool_->Enqueue([this, rank, &entries]() { SendBackupForRank(rank, entries); });
             if (!future.valid()) {
                 // 线程池不可用（如正在停止），原地处理，保证备份/刷盘请求不丢
                 MMC_LOG_WARN("backup pool unavailable, send backup for rank=" << rank << " inline");

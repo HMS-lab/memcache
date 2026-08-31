@@ -104,9 +104,6 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
         options.asyncFlushIntervalMs, options.asyncFlushBatchLimit,
         std::bind(&MmcMetaService::IsSsdAvailable, this, std::placeholders::_1),
         std::bind(&MmcMetaService::OnAsyncFlushComplete, this, std::placeholders::_1, std::placeholders::_2));
-    if (metaMgrProxy_ != nullptr && metaMgrProxy_->GetMetaManager() != nullptr) {
-        backupConf->rewarmPool_ = metaMgrProxy_->GetMetaManager()->GetRewarmThreadPool();
-    }
     MMCMetaBackUpConfPtr defaultPtr = Convert<MMCMetaBackUpConfDefault, MMCMetaBackUpConf>(backupConf);
     MMC_RETURN_ERROR(metaBackUpMgrPtr_->Start(defaultPtr), "metaBackUpMgr start failed");
 

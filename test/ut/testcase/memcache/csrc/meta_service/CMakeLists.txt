@@ -1,4 +1,5 @@
 file(GLOB_RECURSE meta_service_src
+        ${CMAKE_CURRENT_SOURCE_DIR}/mmc_meta_backup_mgr_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_meta_manager.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_meta_service_net.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_meta_service_url_resolve.cpp

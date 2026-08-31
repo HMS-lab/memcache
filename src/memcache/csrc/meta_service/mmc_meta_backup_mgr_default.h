@@ -31,6 +31,9 @@
 
 namespace ock {
 namespace mmc {
+
+constexpr int META_BACKUP_POOL_BASE = 32;
+
 struct MetaBackUpOperate {
     uint32_t op_;
     std::string key_;
@@ -43,7 +46,6 @@ struct MMCMetaBackUpConfDefault : public MMCMetaBackUpConf {
     MetaNetServerPtr serverPtr_;
     uint32_t asyncFlushIntervalMs = 0;
     uint32_t asyncFlushBatchLimit = 8;
-    MmcThreadPoolPtr rewarmPool_;
     std::function<bool(uint32_t)> isSsdAvailableFunc_;
     std::function<void(uint32_t, const std::vector<std::pair<std::string, MmcMemBlobDesc>> &)> onAsyncFlushComplete_;
 
@@ -85,9 +87,12 @@ public:
         metaNetServer_ = defaultPtr->serverPtr_;
         asyncFlushIntervalMs_ = defaultPtr->asyncFlushIntervalMs;
         asyncFlushBatchLimit_ = defaultPtr->asyncFlushBatchLimit;
-        rewarmPool_ = defaultPtr->rewarmPool_;
         isSsdAvailableFunc_ = defaultPtr->isSsdAvailableFunc_;
         onAsyncFlushComplete_ = defaultPtr->onAsyncFlushComplete_;
+        // Backup RPCs can block for up to 60 seconds. Keep them off the latency-sensitive rewarm pool.
+        backupPool_ = MmcMakeRef<MmcThreadPool>("backup_pool", META_BACKUP_POOL_BASE);
+        MMC_ASSERT_LOG_AND_RETURN(backupPool_ != nullptr, "backupPool_ is nullptr", MMC_MALLOC_FAILED);
+        MMC_RETURN_ERROR(backupPool_->Start(), "backup thread pool start failed");
         started_ = true;
         backupThread_ = std::thread(std::bind(&MMCMetaBackUpMgrDefault::BackupThreadFunc, this));
         return MMC_OK;
@@ -105,6 +110,8 @@ public:
             backupThreadCv_.notify_all();
         }
         backupThread_.join();
+        backupPool_->Destroy();
+        backupPool_ = nullptr;
         metaNetServer_ = nullptr;
         backupList_.clear();
         MMC_LOG_TRACE("Stop MMCMetaBackUpMgr");
@@ -169,7 +176,7 @@ private:
     std::list<MetaBackUpOperate> backupList_;
     uint32_t asyncFlushIntervalMs_ = 0;
     uint32_t asyncFlushBatchLimit_ = 8;
-    MmcThreadPoolPtr rewarmPool_;
+    MmcThreadPoolPtr backupPool_;
     std::function<bool(uint32_t)> isSsdAvailableFunc_;
     std::function<void(uint32_t, const std::vector<std::pair<std::string, MmcMemBlobDesc>> &)> onAsyncFlushComplete_;
 };
