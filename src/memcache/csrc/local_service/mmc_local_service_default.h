@@ -80,6 +80,11 @@ private:
         std::vector<size_t> validIdx;
     };
 
+    // Start meta net client and connect to the MetaService leader. In etcd HA mode the
+    // leader address is dynamically assigned and registered with a short etcd lease, so
+    // both discovery and connect failures are retried (re-discovering each round).
+    Result ConnectMetaNetServer(const NetEngineOptions &netOptions);
+
     void CollectBatchIoParams(const std::vector<std::string> &keys, const std::vector<MmcMemBlobDesc> &srcBlobs,
                               const std::vector<MmcMemBlobDesc> &dstBlobs, bool srcIsSsd, std::vector<Result> &results,
                               BatchIoParams &out);
@@ -109,6 +114,7 @@ private:
     std::mutex mutex_;
     std::mutex blobMutex_;
     bool started_ = false;
+    std::atomic<bool> stopRequested_{false};
     std::string name_;
     mmc_local_service_config_t options_;
     std::map<std::string, std::vector<MmcMemBlobDesc>> blobMap_;

@@ -303,6 +303,47 @@ Result MmcMetaService::ClearResource(uint32_t rank)
     return MMC_OK;
 }
 
+Result MmcMetaService::ClearAllResources()
+{
+    std::lock_guard<std::mutex> guard(mutex_);
+    if (!started_) {
+        MMC_LOG_ERROR("MetaService (" << name_ << ") is not started.");
+        return MMC_NOT_STARTED;
+    }
+
+    std::vector<uint32_t> ranks;
+    for (const auto &entry : rankMediaTypeMap_) {
+        ranks.push_back(entry.first);
+    }
+
+    for (uint32_t rank : ranks) {
+        auto it = rankMediaTypeMap_.find(rank);
+        if (it == rankMediaTypeMap_.end()) {
+            continue;
+        }
+        std::unordered_set<uint16_t> mediaTypes = it->second;
+
+        for (const auto &mediaType : mediaTypes) {
+            Result ret = BmUnregisterWithoutLock(rank, mediaType);
+            if (ret != MMC_OK) {
+                MMC_LOG_WARN("ClearAllResources unmount failed, rank=" << rank << ", mediaType=" << mediaType
+                                                                       << ", ret=" << ret);
+            }
+        }
+
+        if (metaMgrProxy_ != nullptr) {
+            Result ret = metaMgrProxy_->CleanSsdBlobs(rank);
+            if (ret != MMC_OK) {
+                MMC_LOG_WARN("Clean SSD blobs failed for rank=" << rank << ", ret=" << ret);
+            }
+        }
+        MmcClientMetricStore::GetInstance().Remove(rank);
+    }
+
+    MMC_LOG_INFO("ClearAllResources cleared all " << ranks.size() << " ranks");
+    return MMC_OK;
+}
+
 void MmcMetaService::SetPublishActive(bool active)
 {
     std::lock_guard<std::mutex> guard(mutex_);
@@ -550,7 +591,8 @@ void MmcMetaService::OnBecomeLeader()
     }
     SetPublishActive(true);
     SetPeriodicEvictActive(true);
-    MMC_LOG_TRACE("MetaService leader ready, MetaNetServer listening on " << options_.discoveryURL);
+    MMC_LOG_TRACE("MetaService leader ready, MetaNetServer listening on "
+                  << netOptions_.ip << ":" << netOptions_.port << ", discoveryURL: " << options_.discoveryURL);
 }
 
 void MmcMetaService::OnBecomeStandby()
@@ -559,6 +601,7 @@ void MmcMetaService::OnBecomeStandby()
     SetPeriodicEvictActive(false);
     SetPublishActive(false);
     StopMetaNetServer();
+    (void)ClearAllResources();
 }
 
 } // namespace mmc

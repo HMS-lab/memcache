@@ -52,6 +52,8 @@ public:
 
     Result ClearResource(uint32_t rank);
 
+    Result ClearAllResources();
+
     const std::string &Name() const;
 
     const mmc_meta_service_config_t &Options() const;

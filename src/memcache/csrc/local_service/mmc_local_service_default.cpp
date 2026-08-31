@@ -12,6 +12,9 @@
 
 #include <sys/stat.h>
 
+#include <chrono>
+#include <thread>
+
 #include "smem_bm.h"
 #include "smem_bm_api.h"
 #include "mmc_meta_net_client.h"
@@ -38,6 +41,59 @@ MmcLocalServiceDefault::~MmcLocalServiceDefault()
     StopConfigPolling();
 }
 
+Result MmcLocalServiceDefault::ConnectMetaNetServer(const NetEngineOptions &netOptions)
+{
+    if (metaNetClient_->Start(netOptions) != MMC_OK) {
+        MMC_LOG_ERROR("Failed to start net server of local service, bmRankId=" << options_.rankId);
+        return MMC_ERROR;
+    }
+    if (!IsEtcdStoreUrl(options_.bmIpPort)) {
+        // 非 etcd 模式（进程级）：MetaService 监听 meta_service_url 配置端口，直接使用配置值。
+        MMC_LOG_TRACE("non-etcd mode: connect MetaService via configured URL: " << options_.discoveryURL);
+        if (metaNetClient_->Connect(options_.discoveryURL) != MMC_OK) {
+            MMC_LOG_ERROR("Failed to start net server of local service, bmRankId=" << options_.rankId);
+            return MMC_ERROR;
+        }
+        return MMC_OK;
+    }
+    // etcd HA 模式：MetaService 地址由 leader 动态分配并注册进 etcd（TTL lease）。
+    // 链路故障窗口内 lease 会短暂消失（约一次选举周期），且端口随 leader 切换变化，
+    // 因此发现失败或连接失败都必须回到发现步骤重试，禁止固定使用单次结果。
+    constexpr int kRetryIntervalSec = 2;
+    constexpr int kMaxWaitSec = 60;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(kMaxWaitSec);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (stopRequested_.load(std::memory_order_relaxed)) {
+            MMC_LOG_WARN("LocalService stop requested, abort MetaService discovery, rank=" << options_.rankId);
+            return MMC_ERROR;
+        }
+        char metaIp[64] = {0};
+        uint16_t metaPort = 0;
+        if (ock::mmc::MFSmemApi::SmemBmGetMetaServiceInfo(metaIp, sizeof(metaIp), &metaPort) == 0 &&
+            metaIp[0] != '\0') {
+            const std::string connectUrl = "tcp://" + std::string(metaIp) + ":" + std::to_string(metaPort);
+            MMC_LOG_TRACE("etcd HA: discovered MetaService leader via ConfigStore, " << connectUrl);
+            if (metaNetClient_->Connect(connectUrl) == MMC_OK) {
+                MMC_LOG_INFO("MetaNetClient connected to " << connectUrl << ", rank=" << options_.rankId);
+                return MMC_OK;
+            }
+            MMC_LOG_WARN("MetaNetClient connect " << connectUrl << " failed, rank=" << options_.rankId
+                                                  << ", will rediscover MetaService addr");
+        } else {
+            MMC_LOG_WARN("MetaService addr not found in backend yet, rank=" << options_.rankId << ", retry in "
+                                                                            << kRetryIntervalSec << "s");
+        }
+        if (std::chrono::steady_clock::now() >= deadline) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::seconds(kRetryIntervalSec));
+    }
+    MMC_LOG_ERROR("Failed to start net server of local service, bmRankId=" << options_.rankId
+                                                                           << ", discoveryURL=" << options_.discoveryURL
+                                                                           << ", waited " << kMaxWaitSec << "s");
+    return MMC_ERROR;
+}
+
 Result MmcLocalServiceDefault::Start(const mmc_local_service_config_t &config)
 {
     MMC_LOG_TRACE("Starting meta service " << name_);
@@ -46,6 +102,7 @@ Result MmcLocalServiceDefault::Start(const mmc_local_service_config_t &config)
         MMC_LOG_TRACE("MetaService " << name_ << " already started");
         return MMC_OK;
     }
+    stopRequested_.store(false, std::memory_order_relaxed);
 
     // 初始化BM，并更新bmRankId
     options_ = config;
@@ -69,24 +126,7 @@ Result MmcLocalServiceDefault::Start(const mmc_local_service_config_t &config)
         options.logLevel = options_.logLevel;
         options.logFunc = options_.logFunc;
 
-        std::string connectUrl(options_.discoveryURL);
-        // 非 etcd 模式（进程级）：MetaService 监听 meta_service_url 配置端口，
-        // 直接使用配置值（etcd HA 模式下由 HaConfigStore 动态分配 MetaService 端口，
-        // 通过 smem_bm_get_meta_service_info 查询）。
-        if (!IsEtcdStoreUrl(options_.bmIpPort)) {
-            MMC_LOG_TRACE("non-etcd mode: connect MetaService via configured URL: " << connectUrl);
-        } else {
-            char metaIp[64] = {0};
-            uint16_t metaPort = 0;
-            if (ock::mmc::MFSmemApi::SmemBmGetMetaServiceInfo(metaIp, sizeof(metaIp), &metaPort) == 0 &&
-                metaIp[0] != '\0') {
-                connectUrl = "tcp://" + std::string(metaIp) + ":" + std::to_string(metaPort);
-                MMC_LOG_TRACE("etcd HA: discovered MetaService leader via ConfigStore, " << connectUrl);
-            }
-        }
-
-        if (metaNetClient_->Start(options) != MMC_OK || metaNetClient_->Connect(connectUrl) != MMC_OK) {
-            MMC_LOG_ERROR("Failed to start net server of local service, bmRankId=" << options_.rankId);
+        if (ConnectMetaNetServer(options) != MMC_OK) {
             DestroyBm();
             metaNetClient_->Stop();
             return MMC_ERROR;
@@ -159,6 +199,7 @@ Result MmcLocalServiceDefault::Start(const mmc_local_service_config_t &config)
 
 void MmcLocalServiceDefault::Stop()
 {
+    stopRequested_.store(true, std::memory_order_relaxed);
     std::lock_guard<std::mutex> guard(mutex_);
     if (!started_) {
         MMC_LOG_WARN("MmcLocalServiceDefault has not been started" << ", rank: " << options_.rankId);

@@ -79,15 +79,17 @@ void NetEngineAcc::Stop()
         MMC_LOG_WARN("NetEngineAcc has not been started");
         return;
     }
+    // 先停 server（join 所有 AccTcpWorker），确保不会再有任何线程进入 HandleNeqRequest
+    // 访问 threadPool_；之后再销毁并置空线程池，避免 worker 在 teardown 期间解引用空指针。
+    Result result = StopInner();
+    MMC_ASSERT(result == MMC_OK, "StopInner = " << result);
+
     if (threadPool_ != nullptr) {
         threadPool_->Destroy();
         threadPool_ = nullptr;
     }
-    Result result = StopInner();
-    MMC_ASSERT(result == MMC_OK, "StopInner = " << result);
 
     UnInitialize();
-
     started_ = false;
 }
 
@@ -497,6 +499,10 @@ Result NetEngineAcc::HandleNeqRequest(const TcpReqContext &context)
         NetContextPtr asynCtxPtr = MmcMakeRef<NetContextAcc>(reqContext).Get();
         if (asynCtxPtr.Get() == nullptr) {
             MMC_LOG_ERROR("req: " << context.SeqNo() << " alloc ctx failed. op:" << opCode);
+            return MMC_ERROR;
+        }
+        if (threadPool_ == nullptr) {
+            MMC_LOG_ERROR("req: " << context.SeqNo() << " thread pool is null, engine stopped. op:" << opCode);
             return MMC_ERROR;
         }
         auto future = threadPool_->Enqueue(
