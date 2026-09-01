@@ -4,10 +4,10 @@
 
 | 原设备             | 源IP地址     | 源端口             | 目的设备            | 目的IP地址                   | 目的端口（侦听）                                                | 协议            | 端口说明                     | 侦听端口是否可更改 | 认证方式 |
 |-----------------|-----------|-----------------|-----------------|--------------------------|---------------------------------------------------------|---------------|:-------------------------|-----------|------|
-| Local/Client客户端 | 客户端通信IP地址 | 随机端口（由操作系统自动分配） | meta service    | meta_service_url中的\<ip\> | meta_service_url中的\<port\> , 默认值5000, 可配范围[1025, 65535] | TCP           | 用于元数据对象管理                | 是         | TLS  |
-| memory fabric实例 | 客户端通信IP地址 | 随机端口（由操作系统自动分配） | memory fabric实例 | config_store_url中的\<ip\> | config_store_url中的\<port\> , 默认值6000, 可配范围[1025, 65535] | TCP           | 用于memory fabric中BM信息交换同步 | 是         | TLS  |
-| 参与hcom通信的实例     | 客户端通信IP地址 | 随机端口（由操作系统自动分配） | 参与hcom通信的实例     | hcom_url中的\<ip\>         | hcom_url中的\<port\> , 默认值7000, 可配范围[1025, 65535]         | TCP/RDMA/SDMA | 用于hcom通信                 | 是         | TLS  |
-| 管理/监控客户端        | 客户端通信IP地址 | 随机端口（由操作系统自动分配） | meta service    | metrics_url中的\<ip\>    | metrics_url中的\<port\> , 默认值8000, 可配范围[1025, 65535]      | HTTPS/HTTP    | 用于RESTful API管理与监控        | 是         | mTLS(可选，默认关闭)/无认证 |
+| Local/Client客户端 | 客户端通信IP地址 | 随机端口（由操作系统自动分配） | meta service    | meta_service_url中的\<ip\> | meta_service_url中的\<port\>，默认值5000，可配范围[1025, 65535] | TCP           | 用于元数据对象管理                | 是         | TLS  |
+| memory fabric实例 | 客户端通信IP地址 | 随机端口（由操作系统自动分配） | memory fabric实例 | config_store_url中的\<ip\> | config_store_url中的\<port\>，默认值6000，可配范围[1025, 65535] | TCP           | 用于memory fabric中BM信息交换同步 | 是         | TLS  |
+| 参与hcom通信的实例     | 客户端通信IP地址 | 随机端口（由操作系统自动分配） | 参与hcom通信的实例     | hcom_url中的\<ip\>         | hcom_url中的\<port\>，默认值7000，可配范围[1025, 65535]         | TCP/RDMA/SDMA | 用于hcom通信                 | 是         | TLS  |
+| 管理/监控客户端        | 客户端通信IP地址 | 随机端口（由操作系统自动分配） | meta service    | metrics_url中的\<ip\>    | metrics_url中的\<port\>，默认值8000，可配范围[1025, 65535]      | HTTPS/HTTP    | 用于RESTful API管理与监控        | 是         | mTLS(可选，默认关闭)/无认证 |
 
 - 支持通过配置文件配置TLS私钥、证书、口令等，进行TLS安全连接。
 - 支持对 metrics HTTP 服务独立配置 mTLS（双向认证），通过 `ock.mmc.metrics.tls.*` 配置项开启。

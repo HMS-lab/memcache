@@ -1,6 +1,6 @@
 ---
 name: memcache-code-review
-description: "当用户要求 MemCache 代码审查、变更检查或新增代码检查时使用。按本项目已有的 docs/c_cpp_naming.md、.clang-format、.pre-commit-config.yaml、pre-commit/pyproject.toml、script/run_ut.sh、docs/SECURITYNOTE.md 和 API/安装文档检查变更。"
+description: "当用户要求 MemCache 代码审查、变更检查或新增代码检查时使用。按本项目已有的 docs/zh/c_cpp_naming.md、.clang-format、.pre-commit-config.yaml、pre-commit/pyproject.toml、script/run_ut.sh、docs/zh/SECURITYNOTE.md 和 API/安装文档检查变更。"
 ---
 
 # memcache-code-review — 代码审查
@@ -13,12 +13,12 @@ description: "当用户要求 MemCache 代码审查、变更检查或新增代�
 
 审查只使用本项目已有依据：
 
-- C/C++ 命名、魔法数字、测试命名：`docs/c_cpp_naming.md`。
+- C/C++ 命名、魔法数字、测试命名：`docs/zh/c_cpp_naming.md`。
 - C/C++ 格式化：`.clang-format` 和 `.pre-commit-config.yaml`。
 - Python 检查：`pre-commit/pyproject.toml`。
 - UT 和覆盖率门禁：`script/run_ut.sh`。
-- 安全说明：`docs/SECURITYNOTE.md`。
-- 安装、配置、API 文档：`docs/install_whl.md`、`docs/install_run.md`、`docs/memcache_config.md`、`docs/memcache_c_api.md`、`docs/memcache_c++_api.md`、`docs/memcache_python_api.md`、`docs/memcache_restful_api.md`。
+- 安全说明：`docs/zh/SECURITYNOTE.md`。
+- 安装、配置、API 文档：`docs/zh/install_whl.md`、`docs/zh/install_run.md`、`docs/zh/memcache_config.md`、`docs/zh/memcache_c_api.md`、`docs/zh/memcache_c++_api.md`、`docs/zh/memcache_python_api.md`、`docs/zh/memcache_restful_api.md`。
 
 ## 范围限定
 
@@ -30,7 +30,7 @@ description: "当用户要求 MemCache 代码审查、变更检查或新增代�
 
 ### 1. 命名和魔法数字
 
-- 文件名、类型、函数、变量、常量、宏、枚举、测试文件、Mock 文件按 `docs/c_cpp_naming.md` 检查。
+- 文件名、类型、函数、变量、常量、宏、枚举、测试文件、Mock 文件按 `docs/zh/c_cpp_naming.md` 检查。
 - 除 `0` 和 `-1` 等惯用值外，具有独立语义的数字必须提取为命名常量或枚举值。
 - 测试代码也要检查魔法数字，尤其是端口、重试次数、等待次数、超时时间、倍率和阈值。
 
@@ -55,15 +55,15 @@ description: "当用户要求 MemCache 代码审查、变更检查或新增代�
 
 ### 5. 文档同步
 
-- C API 变更检查 `docs/memcache_c_api.md`。
-- C++ API 变更检查 `docs/memcache_c++_api.md`。
-- Python API 变更检查 `docs/memcache_python_api.md`。
-- REST/MetaService 行为变更检查 `docs/memcache_restful_api.md`。
-- 安装、配置、环境变量或安全行为变更检查 `docs/install_whl.md`、`docs/install_run.md`、`docs/memcache_config.md`、`docs/SECURITYNOTE.md`。
+- C API 变更检查 `docs/zh/memcache_c_api.md`。
+- C++ API 变更检查 `docs/zh/memcache_c++_api.md`。
+- Python API 变更检查 `docs/zh/memcache_python_api.md`。
+- REST/MetaService 行为变更检查 `docs/zh/memcache_restful_api.md`。
+- 安装、配置、环境变量或安全行为变更检查 `docs/zh/install_whl.md`、`docs/zh/install_run.md`、`docs/zh/memcache_config.md`、`docs/zh/SECURITYNOTE.md`。
 
 ### 6. 安全说明
 
-- TLS、证书、私钥、端口范围、运行用户和文件权限相关变更，以 `docs/SECURITYNOTE.md` 为检查依据。
+- TLS、证书、私钥、端口范围、运行用户和文件权限相关变更，以 `docs/zh/SECURITYNOTE.md` 为检查依据。
 - 不建议输出未脱敏的私钥、证书口令、token、完整配置值、完整环境变量 dump 或原始缓存/共享内存数据。
 
 ## 输出格式

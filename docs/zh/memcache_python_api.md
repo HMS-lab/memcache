@@ -63,7 +63,7 @@ MetaConfig是元数据服务的启动配置类，用于设置MetaService的监�
 | log_path | str | "/var/log/memcache_hybrid" | 日志目录 |
 | log_rotation_file_size | int | 20 | 日志滚动文件大小，单位MB |
 | log_rotation_file_count | int | 50 | 日志滚动文件数量 |
-| log_output_target | str | "file" | 日志输出目标：screen（仅stdout）, file（仅滚动文件）, both（stdout + 滚动文件） |
+| log_output_target | str | "file" | 日志输出目标：screen（仅stdout），file（仅滚动文件），both（stdout + 滚动文件） |
 | evict_threshold_high | int | 90 | 驱逐高水位百分比 |
 | evict_threshold_low | int | 80 | 驱逐低水位百分比 |
 | evict_check_interval_seconds | int | 5 | 周期驱逐检查间隔，单位秒；设置为0时禁用周期检查；HA模式下仅选举出的Master执行周期检查，Standby和角色未知节点不执行 |
@@ -211,7 +211,7 @@ LocalConfig是分布式内存缓存的配置类，用于设置客户端的各种
 | world_size | int | 256 | 最大支持的rank数量 |
 | protocol | str | "host_rdma" | 数据传输协议：host_rdma, host_urma, host_tcp, host_shm, device_rdma, device_urma, device_uboe, device_sdma |
 | hcom_url | str | "tcp://127.0.0.1:7000" | HCOM URL for RDMA network |
-| dram_size | str | "1GB" | DRAM空间使用，支持格式如1GB, 2MB等 |
+| dram_size | str | "1GB" | DRAM空间使用，支持格式如1GB，2MB等 |
 | hbm_size | str | "0" | HBM空间使用 |
 | max_dram_size | str | "1TB" | 所有本地进程中dram_size的最大值 |
 | max_hbm_size | str | "0" | 所有本地进程中hbm_size的最大值 |
@@ -370,7 +370,7 @@ def put_batch(self, keys: List[str], values: List[bytes], replicateConfig: Repli
 
 **返回值**
 
-`int`：状态码 (0：成功, 非零：失败错误码)
+`int`：状态码 (0：成功；非零：失败错误码)
 
 **示例**
 

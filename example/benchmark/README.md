@@ -31,7 +31,7 @@ bash bench_start.sh -t read -p 1 -b 16 -s 1048576 -n 100 -d 1 -e memcache -l npu
 | -t             | [read, write]            | 控制测试是写入数据还是读取数据      |
 | -p             | [1, 32]                  | process count, 运行的进程数量, 受限于NPU的个数      |
 | -b             | [1, ]                    | batch size, 单次IO key的个数      |
-| -s             | [1, ]                    | block size, 单次IO key对应的value的大小，单位byte      |
+| -s             | [1, ]                    | block size, 单次IO key对应的value的大小，单位Byte      |
 | -n             | [10, ]                   | call count, 循环测试次数，受限于内存池总容量，会生成 batch_size \* process_count \* call_count个key   |
 | -w             | [0, ]                    | 写入预热次数。预热在正式写入计时前执行，不计入性能结果；每轮预热使用临时 key，并在计时前删除。默认值为 2；读测试已在正式计时前完成预热，无需配置该参数。 |
 | -d             | [1, 2]                   | 测试连续tensor（1）还是离散tensor（2），离散tensor默认为61\*128KB + 61\*16KB，连续tensor大小为block size   |

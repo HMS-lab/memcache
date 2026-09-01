@@ -158,7 +158,7 @@ MetaService.main()
 
 通过MemCache提供的[API](./memcache_python_api.md)初始化客户端并拉起LocalService，执行数据写入、查询、获取、删除等。
 
-下面的脚本[test_mmc_demo.py](../example/python/test_mmc_demo.py)是我们提供的一个示例：
+下面的脚本[test_mmc_demo.py](../../example/python/test_mmc_demo.py)是我们提供的一个示例：
 
 ```bash
 python3 test_mmc_demo.py

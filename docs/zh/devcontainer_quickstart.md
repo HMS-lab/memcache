@@ -71,7 +71,7 @@ postCreateCommand 会自动执行以下操作（`.devcontainer/post_create.sh`�
 
 > [!NOTE] 说明
 > 完成后 VS Code 左下角显示 `Dev Container: MemCache Dev Container`。
-> 点击右下角的 `show logs` 会在终端显示构建细节和进度
+> 点击右下角的 `show logs` 会在终端显示构建细节和进度。
 
 ---
 

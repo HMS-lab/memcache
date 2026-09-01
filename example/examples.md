@@ -8,7 +8,7 @@
 
 ```text
 ├── examples
-│   ├── benchmark        # memcache性能测试bench mark
+│   ├── benchmark        # memcache性能测试benchmark
 │   ├── cpp              # c++样例
 │   ├── python           # python样例
 │   ├── metrics          # grafana metrics样例

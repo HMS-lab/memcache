@@ -952,7 +952,7 @@ curl "http://127.0.0.1:8000/batch_query_keys?keys=key_a,key_b"
 
 ### 作用
 
-删除指定业务 KVCache key 及其关联数据。
+删除指定业务 KV Cache key 及其关联数据。
 
 ### curl
 
@@ -964,7 +964,7 @@ curl -X DELETE "http://127.0.0.1:8000/key?key=demo_key"
 
 | 参数名 | 类型 | 必填 | 描述 |
 |---|---|---|---|
-| `key` | String | 是 | 要删除的业务 KVCache key |
+| `key` | String | 是 | 要删除的业务 KV Cache key |
 
 ### 成功示例
 
@@ -1008,7 +1008,7 @@ curl -X DELETE "http://127.0.0.1:8000/key?key=demo_key"
 
 ### 作用
 
-删除所有业务 KVCache key 及其关联数据。
+删除所有业务 KV Cache key 及其关联数据。
 
 ### curl
 
