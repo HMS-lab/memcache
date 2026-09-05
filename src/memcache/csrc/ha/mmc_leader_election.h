@@ -71,7 +71,7 @@ private:
     std::string leaseName_;
     std::string ns_;
     std::string name_;
-    pybind11::object leaderElection_ = pybind11::none();
+    pybind11::object leaderElection_;
 };
 #pragma GCC visibility pop
 
