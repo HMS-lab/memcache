@@ -591,59 +591,16 @@ Result MmcLocalServiceDefault::CopyBlob(const std::string &key, const MmcMemBlob
     }
 
     if (src.mediaType_ == MEDIA_SSD) {
-        if (ubsIoProxyPtr_ == nullptr) {
-            MMC_LOG_ERROR("ubsIo proxy is null, src=" << src << ", dst=" << dst);
-            return MMC_SSD_NOT_AVAILABLE;
-        }
-        if (src.size_ > dst.size_) {
-            MMC_LOG_ERROR("src size " << src.size_ << " exceeds dst size " << dst.size_ << ", key=" << key);
-            return MMC_ERROR;
-        }
-        TP_TRACE_BEGIN(TP_MMC_LOCAL_UBS_IO_GET);
-        uint64_t dstVa = 0;
-        Result gvaRet = bmProxyPtr_->GvaToVa(dst.gva_, static_cast<MediaType>(dst.mediaType_), dstVa);
-        if (gvaRet != MMC_OK) {
-            MMC_LOG_ERROR("gva_to_va failed for dst gva=" << dst.gva_ << ", ret=" << gvaRet);
-            return gvaRet;
-        }
-        Result ret = ubsIoProxyPtr_->Get(key, reinterpret_cast<void *>(dstVa), src.size_);
-        TP_TRACE_END(TP_MMC_LOCAL_UBS_IO_GET, ret);
-        if (ret != MMC_OK) {
-            MMC_LOG_ERROR("ubsIo get failed:" << ret << ", src=" << src << ", dst=" << dst);
-            return MMC_ERROR;
-        }
-        MMC_LOG_DEBUG("SSD->DRAM copy ok, key=" << key << ", size=" << src.size_);
-    } else if (dst.mediaType_ == MEDIA_SSD) {
-        if (ubsIoProxyPtr_ == nullptr) {
-            MMC_LOG_ERROR("ubsIo proxy is null, src=" << src << ", dst=" << dst);
-            return MMC_SSD_NOT_AVAILABLE;
-        }
-        if (src.gva_ == 0 || src.size_ == 0) {
-            MMC_LOG_ERROR("key " << key << " invalid gva " << src.gva_ << " or size " << src.size_);
-            return MMC_INVALID_PARAM;
-        }
-        TP_TRACE_BEGIN(TP_MMC_LOCAL_UBS_IO_PUT);
-        uint64_t srcVa = 0;
-        Result gvaRet = bmProxyPtr_->GvaToVa(src.gva_, static_cast<MediaType>(src.mediaType_), srcVa);
-        if (gvaRet != MMC_OK) {
-            MMC_LOG_ERROR("gva_to_va failed for src gva=" << src.gva_ << ", ret=" << gvaRet);
-            return gvaRet;
-        }
-        Result ret = ubsIoProxyPtr_->Put(key, reinterpret_cast<void *>(srcVa), src.size_);
-        TP_TRACE_END(TP_MMC_LOCAL_UBS_IO_PUT, ret);
-        if (ret != MMC_OK) {
-            MMC_LOG_ERROR("ubsIo put failed:" << ret << ", src=" << src << ", dst=" << dst);
-            return MMC_ERROR;
-        }
-        MMC_LOG_DEBUG("DRAM->SSD copy ok, key=" << key << ", size=" << src.size_);
-    } else {
-        auto ret = bmProxyPtr_->Copy(src.gva_, dst.gva_, dst.size_, SMEMB_COPY_G2G);
-        if (ret != MMC_OK) {
-            MMC_LOG_ERROR("bm put failed:" << ret << ", src=" << src << ", dst=" << dst);
-            return MMC_ERROR;
-        }
-        MMC_LOG_DEBUG("G2G copy ok, key=" << key << ", size=" << dst.size_);
+        // 单条 SSD->DRAM 拷贝已移除：回温统一走 BatchCopyBlob->BatchGet
+        MMC_LOG_ERROR("single SSD->DRAM copy is not supported, key=" << key << ", src=" << src << ", dst=" << dst);
+        return MMC_ERROR;
     }
+    auto ret = bmProxyPtr_->Copy(src.gva_, dst.gva_, dst.size_, SMEMB_COPY_G2G);
+    if (ret != MMC_OK) {
+        MMC_LOG_ERROR("bm put failed:" << ret << ", src=" << src << ", dst=" << dst);
+        return MMC_ERROR;
+    }
+    MMC_LOG_DEBUG("G2G copy ok, key=" << key << ", size=" << dst.size_);
     return MMC_OK;
 }
 

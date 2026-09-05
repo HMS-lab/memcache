@@ -692,11 +692,9 @@ TEST_F(TestMmcacheStore, SsdDisabled_NoUbsIoInit)
     mmcs_meta_service_stop(meta_service);
 }
 
-// CopyBlob SSD→DRAM branch — when LocalService receives CopyBlob RPC with src=SSD,
-// it reads data from SSD via ubsIoProxy_->Get and writes to dst.gva_ (DRAM BM address), no temp buffer
-// CopyBlob SSD→DRAM path verification
-// LocalService Init registers CopyBlob handler (G2G / SSD→DRAM / DRAM→SSD)
-// Init succeeds + Put/Get available → three handlers registered, data path established
+// 单条 SSD→DRAM CopyBlob 已移除：回温统一走 BatchCopyBlob→BatchGet（见 RewarmBlob）
+// LocalService Init registers CopyBlob handler (G2G / DRAM→SSD) and BatchCopyBlob (SSD→DRAM)
+// Init succeeds + Put/Get available → data path established
 TEST_F(TestMmcacheStore, CopyBlob_SsdToDram)
 {
     std::string metaUrl = "tcp://127.0.0.1:5980";
@@ -741,7 +739,7 @@ TEST_F(TestMmcacheStore, CopyBlob_SsdToDram)
     MMC_LOCAL_CONF_PATH = confPath;
     std::shared_ptr<ObjectStore> store = ObjectStore::CreateObjectStore();
     int ret = store->Init(0);
-    // Init success → LocalService registered CopyBlob handler (G2G / SSD→DRAM / DRAM→SSD)
+    // Init success → LocalService registered CopyBlob (G2G / DRAM→SSD) and BatchCopyBlob (SSD→DRAM)
     ASSERT_EQ(ret, 0);
 
     // 验证基础 Put/Get 可用（数据路径已打通）

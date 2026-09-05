@@ -1799,13 +1799,13 @@ Result MmcMetaManager::RewarmBlob(const std::string &key, const MmcMemObjMetaPtr
         return MMC_ERROR;
     }
 
-    BlobCopyRequest request{key, srcDesc, dstDesc};
-    Response response;
+    BatchBlobCopyRequest request{{key}, {srcDesc}, {dstDesc}};
+    BatchBlobCopyResponse response;
     TP_TRACE_BEGIN(TP_MMC_META_REWARM_COPY_BLOB);
     ret = metaNetServer_->SyncCall(dstDesc.rank_, request, response, TIMEOUT_SECOND);
     TP_TRACE_END(TP_MMC_META_REWARM_COPY_BLOB, ret);
-    if (ret != MMC_OK || response.ret_ != MMC_OK) {
-        MMC_LOG_ERROR("CopyBlob RPC failed for rewarm, key=" << key << ", ret=" << ret << ", resp=" << response.ret_);
+    if (ret != MMC_OK || response.results_.size() != kSingleBlobCount || response.results_[0] != MMC_OK) {
+        MMC_LOG_ERROR("batch copy RPC failed for rewarm, key=" << key << ", ret=" << ret);
         rollback();
         return MMC_ERROR;
     }
