@@ -338,12 +338,15 @@ void MmcMetaManager::ClassifyAndGroupKeys(const std::vector<std::string> &keys, 
             MMC_LOG_WARN("key: " << keys[i] << " not found in container, ret: " << ret);
             continue;
         }
-
         metaContainer_->Promote(keys[i]);
 
         std::unique_lock<std::mutex> guard(memObj->Mutex());
         MmcBlobFilterPtr filterPtr = MmcMakeRef<MmcBlobFilter>(UINT32_MAX, MEDIA_NONE, NONE);
         auto blobs = memObj->GetBlobs(filterPtr);
+        if (blobs.empty()) {
+            MMC_LOG_WARN("key " << keys[i] << " exists but has no blob, respond as unmatched");
+            continue;
+        }
 
         MmcMemBlobPtr selectedBlob = nullptr;
         MmcMemBlobPtr pendingBlob = nullptr;
@@ -902,16 +905,33 @@ Result MmcMetaManager::UpdateState(const std::string &key, const MmcLocation &lo
     return result;
 }
 
-void MmcMetaManager::PushRemoveList(const std::string &key, const MmcMemObjMetaPtr &meta,
-                                    const MmcBlobFilterPtr &filter, bool triggerSsdPreFree)
+bool MmcMetaManager::CheckActiveLease(const std::string &key, const MmcMemObjMetaPtr &meta,
+                                      const MmcBlobFilterPtr &filter)
 {
     bool hasActiveLease = false;
+    uint32_t leaseUseCount = 0;
+    uint64_t leaseRemainTtlMs = 0;
+    const char *leaseType = "read";
     for (const auto &blob : meta->GetBlobs(filter)) {
         if (blob != nullptr && blob->UseCount() > 0) {
             hasActiveLease = true;
+            leaseUseCount = blob->UseCount();
+            leaseRemainTtlMs = blob->LeaseTimeoutTtlMs();
+            leaseType = (blob->State() == ALLOCATED) ? "write" : "read";
             break;
         }
     }
+    if (hasActiveLease) {
+        MMC_LOG_WARN("Remove key=" << key << " with active " << leaseType << " lease, useCount=" << leaseUseCount
+                                   << ", remainTtlMs=" << leaseRemainTtlMs);
+    }
+    return hasActiveLease;
+}
+
+void MmcMetaManager::PushRemoveList(const std::string &key, const MmcMemObjMetaPtr &meta,
+                                    const MmcBlobFilterPtr &filter, bool triggerSsdPreFree)
+{
+    bool hasActiveLease = CheckActiveLease(key, meta, filter);
 
     TP_TRACE_RECORD(TP_MMC_META_EVICT_DELETE_COUNT, 1000ULL, hasActiveLease ? -1 : 0);
     const MmcThreadPoolPtr &pool = hasActiveLease ? removeThreadPool_ : threadPool_;

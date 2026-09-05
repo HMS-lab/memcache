@@ -440,6 +440,8 @@ private:
 
     Result RemoveBlobs(uint32_t rank, MediaType mediaType);
 
+    bool CheckActiveLease(const std::string &key, const MmcMemObjMetaPtr &meta, const MmcBlobFilterPtr &filter);
+
     void PushRemoveList(const std::string &key, const MmcMemObjMetaPtr &meta, const MmcBlobFilterPtr &filter = nullptr,
                         bool triggerSsdPreFree = false);
 
