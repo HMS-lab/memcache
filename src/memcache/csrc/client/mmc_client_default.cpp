@@ -301,7 +301,11 @@ Result MmcClientDefault::Put(const std::string &key, const MmcBufferArray &bufAr
         updateRequest.mediaTypes_.push_back(blob.mediaType_);
         updateRequest.operateIds_.push_back(operateId);
     }
-    SyncUpdateState(updateRequest, "put update");
+    Result updateRet = SyncUpdateState(updateRequest, "put update");
+    if (updateRet != MMC_OK) {
+        MMC_LOG_ERROR("client " << name_ << " put update state failed: " << updateRet);
+        return updateRet;
+    }
     return result;
 }
 
@@ -376,7 +380,14 @@ Result MmcClientDefault::BatchPut(const std::vector<std::string> &keys, const st
             updateRequest.operateIds_.push_back(operateId);
         }
     }
-    SyncUpdateState(updateRequest, "batch put update"); // 写需要同步更新，异步更新会出现立即读查询blob不可读的情况
+    // 写需要同步更新，异步更新会出现立即读查询blob不可读的情况
+    Result updateRet = SyncUpdateState(updateRequest, "batch put update");
+    if (updateRet != MMC_OK) {
+        // WRITE_OK 未到服务端时 blob 停在 ALLOCATED，若仍返回成功会导致假写成功
+        // 且 key 在租约超时前无法重写。报错让调用方感知，可通过 Remove(key) 后重写恢复。
+        MMC_LOG_ERROR("client " << name_ << " batch put update state failed: " << updateRet);
+        return updateRet;
+    }
 
     if (ret != MMC_OK) {
         MMC_LOG_ERROR("client " << name_ << " batch put failed: " << ret);
@@ -941,7 +952,7 @@ void MmcClientDefault::ProcessUbsIoBatchGetWithHBM(UbsIoBatchGetData &data)
     }
 }
 
-void MmcClientDefault::SyncUpdateState(BatchUpdateRequest &updateRequest, const std::string &opName)
+Result MmcClientDefault::SyncUpdateState(BatchUpdateRequest &updateRequest, const std::string &opName)
 {
     TP_TRACE_BEGIN(TP_MMC_LOCAL_BATCH_UPDATE);
     BatchUpdateResponse updateResponse;
@@ -950,14 +961,15 @@ void MmcClientDefault::SyncUpdateState(BatchUpdateRequest &updateRequest, const 
     if (updateResult != MMC_OK || updateResponse.results_.size() != updateRequest.keys_.size()) {
         MMC_LOG_ERROR("client " << name_ << " " << opName << " failed:" << updateResult << ", key size:"
                                 << updateRequest.keys_.size() << ", ret size:" << updateResponse.results_.size());
-    } else {
-        for (size_t i = 0; i < updateRequest.keys_.size(); ++i) {
-            if (updateResponse.results_[i] != MMC_OK) {
-                MMC_LOG_ERROR("client " << name_ << " " << opName << " for key " << updateRequest.keys_[i]
-                                        << " failed:" << updateResponse.results_[i]);
-            }
+        return updateResult != MMC_OK ? updateResult : MMC_ERROR;
+    }
+    for (size_t i = 0; i < updateRequest.keys_.size(); ++i) {
+        if (updateResponse.results_[i] != MMC_OK) {
+            MMC_LOG_ERROR("client " << name_ << " " << opName << " for key " << updateRequest.keys_[i]
+                                    << " failed:" << updateResponse.results_[i]);
         }
     }
+    return MMC_OK;
 }
 
 void MmcClientDefault::AsyncUpdateState(BatchUpdateRequest &updateRequest, const std::string &opName)
@@ -1154,6 +1166,9 @@ Result MmcClientDefault::PutData2Blobs(const std::vector<std::string> &keys, con
             continue;
         } else if (numBlobs == 0 || blobs.size() != numBlobs) {
             MMC_LOG_ERROR("Invalid number of blobs" << numBlobs << " , " << blobs.size() << " for key " << key);
+            // batchResult 初始值为 MMC_OK，不设置错误码会向服务端发送 WRITE_OK，
+            // 导致未写入数据的 blob 被置为 READABLE
+            batchResult[i] = MMC_ERROR;
             continue;
         }
 
