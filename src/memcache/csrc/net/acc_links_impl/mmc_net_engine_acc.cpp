@@ -11,6 +11,8 @@
 */
 #include "mmc_net_engine_acc.h"
 
+#include <chrono>
+
 #include "mf_tls_util.h"
 #include "acc_def.h"
 #include "acc_tcp_server.h"
@@ -89,8 +91,11 @@ void NetEngineAcc::Stop()
         threadPool_ = nullptr;
     }
 
-    UnInitialize();
+    // 先关进入口：在持 mutex_ 时置 started_=false，使新 Call() 在 started_ 检查处早退，
+    // 不再触达 ctxStore_；已越过检查的在途 Call() 已完成 ++inFlightCalls_，会被
+    // UnInitialize 排空后再释放 ctxStore_。
     started_ = false;
+    UnInitialize();
 }
 
 Result NetEngineAcc::VerifyOptions(const NetEngineOptions &options)
@@ -270,6 +275,29 @@ Result NetEngineAcc::Call(uint32_t targetId, int16_t opCode, const char *reqData
                           uint32_t &respDataLen, int32_t timeoutInSecond)
 {
     uint64_t startTime = TP_CURRENT_TIME_NS;
+    /* 在途调用计数必须最先建立（started_ 检查之前）：Stop 中 UnInitialize 会等待
+       inFlightCalls_ 归零后再置空 ctxStore_，若在 started_ 检查后、guard 建立前被
+       Stop 抢先释放 ctxStore_，本函数仍会访问已释放对象。 */
+    /* InFlightGuard: 用 inFlightMutex_ 保护 check-then-act 的复合原子性。
+       inFlightCalls_ 虽是 atomic，但 UnInitialize 需要"判断归零→释放 ctxStore_"
+       整体为原子操作；若不加锁，新 Call++ 后已越过 started_ 检查，
+       可在归零判定与 ctxStore_ 释放之间插入，导致 UAF。 */
+    struct InFlightGuard {
+        NetEngineAcc *engine;
+        explicit InFlightGuard(NetEngineAcc *e) : engine(e)
+        {
+            std::lock_guard<std::mutex> guard(engine->inFlightMutex_);
+            ++engine->inFlightCalls_;
+        }
+        ~InFlightGuard()
+        {
+            std::lock_guard<std::mutex> guard(engine->inFlightMutex_);
+            --engine->inFlightCalls_;
+            if (engine->inFlightCalls_ == 0) {
+                engine->inFlightCv_.notify_all();
+            }
+        }
+    } inFlightGuard(this);
     MMC_ASSERT_LOG_AND_RETURN(started_, "started_ = " << started_, MMC_NOT_STARTED);
     MMC_ASSERT_LOG_AND_RETURN(reqData != nullptr, "reqData is nullptr", MMC_INVALID_PARAM);
     MMC_ASSERT_LOG_AND_RETURN(reqDataLen != 0, "reqDataLen = " << reqDataLen, MMC_INVALID_PARAM);
@@ -400,6 +428,18 @@ void NetEngineAcc::UnInitialize()
     if (!inited_) {
         MMC_LOG_DEBUG("NetEngine [" << options_.name << "] has not been initialized");
         return;
+    }
+
+    /* 等待所有在途 Call 返回后再释放 ctxStore_，避免异步调用者
+       （如元数据备份 SendBackupForRank）在 ctxStore_ 释放后继续访问 */
+    constexpr int kDrainTimeoutSec = 120;
+    {
+        std::unique_lock<std::mutex> lock(inFlightMutex_);
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(kDrainTimeoutSec);
+        if (!inFlightCv_.wait_until(lock, deadline, [this]() { return inFlightCalls_ == 0; })) {
+            MMC_LOG_ERROR("in-flight calls drain timeout after "
+                          << kDrainTimeoutSec << "s, count=" << inFlightCalls_.load() << ", forcing teardown");
+        }
     }
 
     /* un-initialize ctx store */

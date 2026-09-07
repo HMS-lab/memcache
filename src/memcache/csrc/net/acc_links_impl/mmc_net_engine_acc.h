@@ -12,6 +12,9 @@
 #ifndef MEM_FABRIC_MMC_NET_ENGINE_ACC_LINKS_H
 #define MEM_FABRIC_MMC_NET_ENGINE_ACC_LINKS_H
 
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
 #include <unordered_set>
 
 #include "mmc_net_engine.h"
@@ -70,6 +73,12 @@ private:
     std::mutex connectMutex_;
     int32_t timeoutInSecond_ = 0;
     MmcThreadPoolPtr threadPool_;
+
+    /* 在途 Call 计数：teardown（UnInitialize 置空 ctxStore_）前等待归零，
+       避免异步调用者（如元数据备份 SendBackupForRank）在 ctxStore_ 释放后读取 */
+    std::atomic<int32_t> inFlightCalls_{0};
+    std::condition_variable inFlightCv_;
+    std::mutex inFlightMutex_;
 };
 } // namespace mmc
 } // namespace ock
