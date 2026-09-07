@@ -93,6 +93,12 @@ public:
 
     Result BatchQuery(const std::vector<std::string> &keys, std::vector<mmc_data_info> &query_infos, uint32_t flags);
 
+    Result PrefetchKeys(std::vector<std::string> keys, MediaType srcMedia = MediaType::MEDIA_SSD,
+                        MediaType dstMedia = MediaType::MEDIA_DRAM, uint32_t flags = 0);
+
+    Result EvictKeys(std::vector<std::string> keys, MediaType srcMedia = MediaType::MEDIA_DRAM,
+                     MediaType dstMedia = MediaType::MEDIA_SSD, uint32_t flags = 0);
+
     Result BatchAddLease(const std::vector<std::string> &keys, uint64_t leaseTtlMs, std::vector<int> &results);
 
     Result BatchRemoveLease(const std::vector<std::string> &keys);

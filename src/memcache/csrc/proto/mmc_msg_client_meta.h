@@ -1299,6 +1299,158 @@ struct StatsReportResponse : MsgBase {
     }
 };
 
+// client→meta 请求：将 SSD 上的 blob 预取(rewarm)到 DRAM，不涉及 HBM
+// srcMedia_/dstMedia_/flags_ 为预留参数，当前只支持 SSD→DRAM（src=MEDIA_SSD, dst=MEDIA_DRAM）
+struct PrefetchRequest : MsgBase {
+    std::vector<std::string> keys_;
+    uint16_t srcMedia_;
+    uint16_t dstMedia_;
+    uint32_t flags_;
+
+    PrefetchRequest() : MsgBase{0, ML_PREFETCH_REQ, 0}, srcMedia_(MEDIA_SSD), dstMedia_(MEDIA_DRAM), flags_(0) {}
+    explicit PrefetchRequest(const std::vector<std::string> &keys, uint16_t srcMedia = MEDIA_SSD,
+                             uint16_t dstMedia = MEDIA_DRAM, uint32_t flags = 0)
+        : MsgBase{0, ML_PREFETCH_REQ, 0}, keys_(keys), srcMedia_(srcMedia), dstMedia_(dstMedia), flags_(flags)
+    {}
+
+    Result Serialize(NetMsgPacker &packer) const override
+    {
+        packer.Serialize(msgVer);
+        packer.Serialize(msgId);
+        packer.Serialize(destRankId);
+        packer.Serialize(keys_);
+        packer.Serialize(srcMedia_);
+        packer.Serialize(dstMedia_);
+        packer.Serialize(flags_);
+        return MMC_OK;
+    }
+
+    Result Deserialize(NetMsgUnpacker &packer) override
+    {
+        packer.Deserialize(msgVer);
+        packer.Deserialize(msgId);
+        packer.Deserialize(destRankId);
+        std::size_t size = 0;
+        packer.Deserialize(size);
+        if (size > MAX_CONTAINER_SIZE) {
+            MMC_LOG_ERROR("keys size: " << size << " exceeds limit: " << MAX_CONTAINER_SIZE);
+            return MMC_ERROR;
+        }
+        keys_.clear();
+        keys_.reserve(size);
+        for (std::size_t i = 0; i < size; ++i) {
+            std::string key;
+            packer.Deserialize(key);
+            keys_.emplace_back(std::move(key));
+        }
+        packer.Deserialize(srcMedia_);
+        packer.Deserialize(dstMedia_);
+        packer.Deserialize(flags_);
+        return MMC_OK;
+    }
+};
+
+struct PrefetchResponse : MsgBase {
+    Result ret_{MMC_OK};
+
+    PrefetchResponse() : MsgBase{0, ML_PREFETCH_RESP, 0} {}
+    explicit PrefetchResponse(Result ret) : MsgBase{0, ML_PREFETCH_RESP, 0}, ret_(ret) {}
+
+    Result Serialize(NetMsgPacker &packer) const override
+    {
+        packer.Serialize(msgVer);
+        packer.Serialize(msgId);
+        packer.Serialize(destRankId);
+        packer.Serialize(ret_);
+        return MMC_OK;
+    }
+
+    Result Deserialize(NetMsgUnpacker &packer) override
+    {
+        packer.Deserialize(msgVer);
+        packer.Deserialize(msgId);
+        packer.Deserialize(destRankId);
+        packer.Deserialize(ret_);
+        return MMC_OK;
+    }
+};
+
+// client→meta 请求：将 DRAM 上的 blob 淘汰(evict)到 SSD，不涉及 HBM
+// srcMedia_/dstMedia_/flags_ 为预留参数，当前只支持 DRAM→SSD（src=MEDIA_DRAM, dst=MEDIA_SSD）
+struct EvictRequest : MsgBase {
+    std::vector<std::string> keys_;
+    uint16_t srcMedia_;
+    uint16_t dstMedia_;
+    uint32_t flags_;
+
+    EvictRequest() : MsgBase{0, ML_EVICT_REQ, 0}, srcMedia_(MEDIA_DRAM), dstMedia_(MEDIA_SSD), flags_(0) {}
+    explicit EvictRequest(const std::vector<std::string> &keys, uint16_t srcMedia = MEDIA_DRAM,
+                          uint16_t dstMedia = MEDIA_SSD, uint32_t flags = 0)
+        : MsgBase{0, ML_EVICT_REQ, 0}, keys_(keys), srcMedia_(srcMedia), dstMedia_(dstMedia), flags_(flags)
+    {}
+
+    Result Serialize(NetMsgPacker &packer) const override
+    {
+        packer.Serialize(msgVer);
+        packer.Serialize(msgId);
+        packer.Serialize(destRankId);
+        packer.Serialize(keys_);
+        packer.Serialize(srcMedia_);
+        packer.Serialize(dstMedia_);
+        packer.Serialize(flags_);
+        return MMC_OK;
+    }
+
+    Result Deserialize(NetMsgUnpacker &packer) override
+    {
+        packer.Deserialize(msgVer);
+        packer.Deserialize(msgId);
+        packer.Deserialize(destRankId);
+        std::size_t size = 0;
+        packer.Deserialize(size);
+        if (size > MAX_CONTAINER_SIZE) {
+            MMC_LOG_ERROR("keys size: " << size << " exceeds limit: " << MAX_CONTAINER_SIZE);
+            return MMC_ERROR;
+        }
+        keys_.clear();
+        keys_.reserve(size);
+        for (std::size_t i = 0; i < size; ++i) {
+            std::string key;
+            packer.Deserialize(key);
+            keys_.emplace_back(std::move(key));
+        }
+        packer.Deserialize(srcMedia_);
+        packer.Deserialize(dstMedia_);
+        packer.Deserialize(flags_);
+        return MMC_OK;
+    }
+};
+
+struct EvictResponse : MsgBase {
+    Result ret_{MMC_OK};
+
+    EvictResponse() : MsgBase{0, ML_EVICT_RESP, 0} {}
+    explicit EvictResponse(Result ret) : MsgBase{0, ML_EVICT_RESP, 0}, ret_(ret) {}
+
+    Result Serialize(NetMsgPacker &packer) const override
+    {
+        packer.Serialize(msgVer);
+        packer.Serialize(msgId);
+        packer.Serialize(destRankId);
+        packer.Serialize(ret_);
+        return MMC_OK;
+    }
+
+    Result Deserialize(NetMsgUnpacker &packer) override
+    {
+        packer.Deserialize(msgVer);
+        packer.Deserialize(msgId);
+        packer.Deserialize(destRankId);
+        packer.Deserialize(ret_);
+        return MMC_OK;
+    }
+};
+
 } // namespace mmc
 } // namespace ock
 #endif // MF_HYBRID_MMC_MSG_CLIENT_META_H

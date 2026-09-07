@@ -508,6 +508,54 @@ int32_t mmcc_batch_exist(const char **keys, uint32_t keys_count, int32_t *exist_
 - `0`：成功
 - 其他：失败
 
+#### mmcc_prefetch_keys
+
+```c
+int32_t mmcc_prefetch_keys(const char **keys, uint32_t keys_count, uint16_t src_media, uint16_t dst_media,
+                           uint32_t flags);
+```
+
+**功能**
+
+将指定 keys 从源介质回温到目标介质。当前仅支持 SSD→DRAM，其他 src/dst 组合暂不支持，会返回 `MMC_INVALID_PARAM`。
+
+**参数**
+
+- `keys`：数据键数组，每个键长度小于256个字节。
+- `keys_count`：键的数量。
+- `src_media`：源介质类型（`MMC_MEDIA_HBM`/`MMC_MEDIA_DRAM`/`MMC_MEDIA_SSD`），默认行为传 `MMC_MEDIA_SSD`，预留参数。
+- `dst_media`：目标介质类型，默认行为传 `MMC_MEDIA_DRAM`，预留参数。
+- `flags`：预留标志，必须为 `0`。
+
+**返回值**
+
+- `0`：成功
+- 其他：失败
+
+#### mmcc_evict_keys
+
+```c
+int32_t mmcc_evict_keys(const char **keys, uint32_t keys_count, uint16_t src_media, uint16_t dst_media,
+                        uint32_t flags);
+```
+
+**功能**
+
+将指定 keys 从源介质驱逐到目标介质。当前仅支持 DRAM→SSD，其他 src/dst 组合暂不支持，会返回 `MMC_INVALID_PARAM`。
+
+**参数**
+
+- `keys`：数据键数组，每个键长度小于256个字节。
+- `keys_count`：键的数量。
+- `src_media`：源介质类型（`MMC_MEDIA_HBM`/`MMC_MEDIA_DRAM`/`MMC_MEDIA_SSD`），默认行为传 `MMC_MEDIA_DRAM`，预留参数。
+- `dst_media`：目标介质类型，默认行为传 `MMC_MEDIA_SSD`，预留参数。
+- `flags`：预留标志，必须为 `0`。
+
+**返回值**
+
+- `0`：成功
+- 其他：失败
+
 #### mmcc_batch_put
 
 ```c

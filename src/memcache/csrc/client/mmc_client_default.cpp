@@ -738,6 +738,40 @@ Result MmcClientDefault::BatchQuery(const std::vector<std::string> &keys, std::v
     return MMC_OK;
 }
 
+Result MmcClientDefault::PrefetchKeys(std::vector<std::string> keys, MediaType srcMedia, MediaType dstMedia,
+                                      uint32_t flags)
+{
+    MMC_VALIDATE_RETURN(metaNetClient_ != nullptr, "MetaNetClient is null", MMC_CLIENT_NOT_INIT);
+
+    if (keys.empty()) {
+        MMC_LOG_ERROR("client " << name_ << " prefetch invalid input, keys size: " << keys.size());
+        return MMC_INVALID_PARAM;
+    }
+
+    PrefetchRequest request{keys, static_cast<uint16_t>(srcMedia), static_cast<uint16_t>(dstMedia), flags};
+    PrefetchResponse response;
+    MMC_RETURN_ERROR(metaNetClient_->SyncCall(request, response, rpcRetryTimeOut_),
+                     "client " << name_ << " PrefetchKeys failed");
+    return response.ret_;
+}
+
+Result MmcClientDefault::EvictKeys(std::vector<std::string> keys, MediaType srcMedia, MediaType dstMedia,
+                                   uint32_t flags)
+{
+    MMC_VALIDATE_RETURN(metaNetClient_ != nullptr, "MetaNetClient is null", MMC_CLIENT_NOT_INIT);
+
+    if (keys.empty()) {
+        MMC_LOG_ERROR("client " << name_ << " evict invalid input, keys size: " << keys.size());
+        return MMC_INVALID_PARAM;
+    }
+
+    EvictRequest request{keys, static_cast<uint16_t>(srcMedia), static_cast<uint16_t>(dstMedia), flags};
+    EvictResponse response;
+    MMC_RETURN_ERROR(metaNetClient_->SyncCall(request, response, rpcRetryTimeOut_),
+                     "client " << name_ << " EvictKeys failed");
+    return response.ret_;
+}
+
 Result MmcClientDefault::BatchAddLease(const std::vector<std::string> &keys, uint64_t leaseTtlMs,
                                        std::vector<int> &results)
 {

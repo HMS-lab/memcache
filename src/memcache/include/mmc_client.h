@@ -205,6 +205,33 @@ int32_t mmcc_exist(const char *key, uint32_t flags);
 int32_t mmcc_batch_exist(const char **keys, uint32_t keys_count, int32_t *exist_results, uint32_t flags);
 
 /**
+ * @brief Prefetch keys from one medium to another. Currently only supports SSD to DRAM.
+ *        src_media/dst_media/flags are reserved params for multi-level prefetch.
+ *
+ * @param keys             [in] keys of data, the length of key is less than 256
+ * @param keys_count       [in] Count of keys
+ * @param src_media        [in] Source media type (MMC_MEDIA_HBM/DRAM/SSD), pass MMC_MEDIA_SSD for default behavior
+ * @param dst_media        [in] Destination media type (MMC_MEDIA_HBM/DRAM/SSD), pass MMC_MEDIA_DRAM for default
+ * @param flags            [in] Reserved flags
+ * @return 0 if successfully
+ */
+int32_t mmcc_prefetch_keys(const char **keys, uint32_t keys_count, uint16_t src_media, uint16_t dst_media,
+                           uint32_t flags);
+
+/**
+ * @brief Evict keys from one medium to another. Currently only supports DRAM to SSD.
+ *        src_media/dst_media/flags are reserved params for multi-level evict.
+ *
+ * @param keys             [in] keys of data, the length of key is less than 256
+ * @param keys_count       [in] Count of keys
+ * @param src_media        [in] Source media type (MMC_MEDIA_HBM/DRAM/SSD), pass MMC_MEDIA_DRAM for default behavior
+ * @param dst_media        [in] Destination media type (MMC_MEDIA_HBM/DRAM/SSD), pass MMC_MEDIA_SSD for default
+ * @param flags            [in] Reserved flags
+ * @return 0 if successfully
+ */
+int32_t mmcc_evict_keys(const char **keys, uint32_t keys_count, uint16_t src_media, uint16_t dst_media, uint32_t flags);
+
+/**
  * @brief Put multiple data objects into Distributed Memory Cache
  * This data operation supports both sync and async
  *

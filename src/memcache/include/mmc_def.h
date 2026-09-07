@@ -24,6 +24,12 @@
 #define MMC_TAG_OP_INFO_SIZE 256
 #define TLS_PATH_MAX_LEN     (TLS_PATH_SIZE - 1)
 
+/* Media type values, consistent with internal enum MediaType (see common/mmc_types.h) */
+#define MMC_MEDIA_HBM  0
+#define MMC_MEDIA_DRAM 1
+#define MMC_MEDIA_SSD  2
+#define MMC_MEDIA_NONE 3
+
 #ifdef __cplusplus
 extern "C" {
 #endif

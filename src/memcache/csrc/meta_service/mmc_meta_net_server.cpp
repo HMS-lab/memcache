@@ -90,6 +90,10 @@ Result ock::mmc::MetaNetServer::Start(NetEngineOptions &options)
                                       std::bind(&MetaNetServer::HandleUbsIoMetaDelete, this, std::placeholders::_1));
     server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::ML_STATS_REPORT_REQ,
                                       std::bind(&MetaNetServer::HandleStatsReport, this, std::placeholders::_1));
+    server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::ML_PREFETCH_REQ,
+                                      std::bind(&MetaNetServer::HandlePrefetch, this, std::placeholders::_1));
+    server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::ML_EVICT_REQ,
+                                      std::bind(&MetaNetServer::HandleEvict, this, std::placeholders::_1));
     server->RegNewLinkHandler(std::bind(&MetaNetServer::HandleNewLink, this, std::placeholders::_1));
     server->RegLinkBrokenHandler(std::bind(&MetaNetServer::HandleLinkBroken, this, std::placeholders::_1));
 
@@ -447,6 +451,34 @@ Result MetaNetServer::HandleBatchUpdateLease(const NetContextPtr &context)
     (void)ret;
     MMC_LOG_DEBUG("HandleBatchUpdateLease keys (size " << req.keys_.size() << ") finish: " << Join(req.keys_));
 
+    return context->Reply(req.msgId, resp);
+}
+
+Result MetaNetServer::HandlePrefetch(const NetContextPtr &context)
+{
+    MMC_ASSERT_LOG_AND_RETURN(context != nullptr, "context is nullptr", MMC_ERROR);
+    PrefetchRequest req;
+    context->GetRequest<PrefetchRequest>(req);
+
+    auto &metaMgrProxy = metaService_->GetMetaMgrProxy();
+    Result ret = metaMgrProxy->PrefetchKeys(req.keys_, static_cast<MediaType>(req.srcMedia_),
+                                            static_cast<MediaType>(req.dstMedia_), req.flags_);
+    MMC_LOG_DEBUG("HandlePrefetch keys (size " << req.keys_.size() << ") finish, ret: " << ret);
+    PrefetchResponse resp(ret);
+    return context->Reply(req.msgId, resp);
+}
+
+Result MetaNetServer::HandleEvict(const NetContextPtr &context)
+{
+    MMC_ASSERT_LOG_AND_RETURN(context != nullptr, "context is nullptr", MMC_ERROR);
+    EvictRequest req;
+    context->GetRequest<EvictRequest>(req);
+
+    auto &metaMgrProxy = metaService_->GetMetaMgrProxy();
+    Result ret = metaMgrProxy->EvictKeys(req.keys_, static_cast<MediaType>(req.srcMedia_),
+                                         static_cast<MediaType>(req.dstMedia_), req.flags_);
+    MMC_LOG_DEBUG("HandleEvict keys (size " << req.keys_.size() << ") finish, ret: " << ret);
+    EvictResponse resp(ret);
     return context->Reply(req.msgId, resp);
 }
 

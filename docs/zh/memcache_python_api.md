@@ -780,6 +780,62 @@ key_infos = store.batch_get_key_info(keys, flag=0)
   - `gva_list()`：获取每个 blob 对应的 GVA 列表。
   - `__str__()`：获取信息的字符串表示。
 
+#### prefetch
+
+```python
+result = store.prefetch(keys, src_media=2, dst_media=1, flags=0)
+```
+
+**功能**
+
+将指定 keys 从源介质回温到目标介质。当前仅支持 SSD→DRAM（`src_media=2, dst_media=1`），其他组合暂不支持。
+
+**参数**
+
+- `keys`：要回温的 key 列表。
+- `src_media`：源介质类型（0=HBM，1=DRAM，2=SSD），默认 `2`（SSD），预留参数。
+- `dst_media`：目标介质类型，默认 `1`（DRAM），预留参数。
+- `flags`：预留标志，必须为 `0`。
+
+**返回值**
+
+- `int`：`0` 表示成功，其他值表示失败。
+
+**示例**
+
+```python
+result = store.prefetch(["key1", "key2"])
+assert result == 0
+```
+
+#### evict
+
+```python
+result = store.evict(keys, src_media=1, dst_media=2, flags=0)
+```
+
+**功能**
+
+将指定 keys 从源介质驱逐到目标介质。当前仅支持 DRAM→SSD（`src_media=1, dst_media=2`），其他组合暂不支持。当 SSD 不可用或 DRAM 使用率高于回温水线时，DRAM 上的数据会被直接删除。
+
+**参数**
+
+- `keys`：要驱逐的 key 列表。
+- `src_media`：源介质类型（0=HBM，1=DRAM，2=SSD），默认 `1`（DRAM），预留参数。
+- `dst_media`：目标介质类型，默认 `2`（SSD），预留参数。
+- `flags`：预留标志，必须为 `0`。
+
+**返回值**
+
+- `int`：`0` 表示成功，其他值表示失败。
+
+**示例**
+
+```python
+result = store.evict(["key1", "key2"])
+assert result == 0
+```
+
 #### GVA 相关接口与常量
 
 #### get_key_info / batch_get_key_info 补充说明

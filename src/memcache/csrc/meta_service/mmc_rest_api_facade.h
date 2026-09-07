@@ -74,10 +74,10 @@ public:
     Result QueryKey(const std::string &key, nlohmann::json &result) const;
     Result BatchQueryKeys(const std::vector<std::string> &keys, nlohmann::json &result) const;
 
-    Result EvictKey(const std::string &key) const;
-    Result EvictKeys(const std::vector<std::string> &keys) const;
-    Result PrefetchKey(const std::string &key) const;
-    Result PrefetchKeys(const std::vector<std::string> &keys) const;
+    Result EvictKeys(const std::vector<std::string> &keys, MediaType srcMedia = MediaType::MEDIA_DRAM,
+                     MediaType dstMedia = MediaType::MEDIA_SSD, uint32_t flags = 0) const;
+    Result PrefetchKeys(const std::vector<std::string> &keys, MediaType srcMedia = MediaType::MEDIA_SSD,
+                        MediaType dstMedia = MediaType::MEDIA_DRAM, uint32_t flags = 0) const;
     Result GetAllKeysText(std::string &result) const;
 
     Result GetAllSegmentSnapshots(std::vector<RestSegmentSnapshot> &segments) const;

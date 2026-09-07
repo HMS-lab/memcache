@@ -762,6 +762,12 @@ PYBIND11_MODULE(_pymmc, m)
              py::arg("flag") = GET_KEY_INFO_FOR_LAYER_WISE)
         .def("batch_get_key_info", &MmcacheStore::BatchGetKeyInfo, py::call_guard<py::gil_scoped_release>(),
              py::arg("keys"), py::arg("flag") = GET_KEY_INFO_FOR_LAYER_WISE)
+        .def("prefetch", &MmcacheStore::PrefetchKeys, py::call_guard<py::gil_scoped_release>(), py::arg("keys"),
+             py::arg("src_media") = MMC_MEDIA_SSD, py::arg("dst_media") = MMC_MEDIA_DRAM, py::arg("flags") = 0,
+             "Prefetch keys from src_media to dst_media. Only SSD->DRAM supported. Returns 0 on success.")
+        .def("evict", &MmcacheStore::EvictKeys, py::call_guard<py::gil_scoped_release>(), py::arg("keys"),
+             py::arg("src_media") = MMC_MEDIA_DRAM, py::arg("dst_media") = MMC_MEDIA_SSD, py::arg("flags") = 0,
+             "Evict keys from src_media to dst_media. Only DRAM->SSD supported. Returns 0 on success.")
         .def("batch_add_lease", &MmcacheStore::BatchAddLease, py::call_guard<py::gil_scoped_release>(), py::arg("keys"),
              py::arg("leaseTtlMs") = 0)
         .def("batch_remove_lease", &MmcacheStore::BatchRemoveLease, py::call_guard<py::gil_scoped_release>(),

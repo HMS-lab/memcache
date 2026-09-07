@@ -457,6 +457,46 @@ MMC_API int32_t mmcc_batch_exist(const char **keys, const uint32_t keys_count, i
     return MMC_OK;
 }
 
+MMC_API int32_t mmcc_prefetch_keys(const char **keys, const uint32_t keys_count, uint16_t src_media, uint16_t dst_media,
+                                   uint32_t flags)
+{
+    MMC_VALIDATE_RETURN(MmcClientDefault::GetInstance() != nullptr, "client is not initialize", MMC_CLIENT_NOT_INIT);
+    MMC_VALIDATE_RETURN(keys != nullptr, "invalid param, keys is null", MMC_INVALID_PARAM);
+    MMC_VALIDATE_RETURN(keys_count != 0, "invalid param, keys_count: " << keys_count, MMC_INVALID_PARAM);
+
+    std::vector<std::string> keys_vector;
+    keys_vector.reserve(keys_count);
+    for (size_t i = 0; i < keys_count; ++i) {
+        if (Result ret = ValidateBatchKey(keys[i], i); ret != MMC_OK) {
+            return ret;
+        }
+        keys_vector.emplace_back(keys[i]);
+    }
+
+    return MmcClientDefault::GetInstance()->PrefetchKeys(std::move(keys_vector), static_cast<MediaType>(src_media),
+                                                         static_cast<MediaType>(dst_media), flags);
+}
+
+MMC_API int32_t mmcc_evict_keys(const char **keys, const uint32_t keys_count, uint16_t src_media, uint16_t dst_media,
+                                uint32_t flags)
+{
+    MMC_VALIDATE_RETURN(MmcClientDefault::GetInstance() != nullptr, "client is not initialize", MMC_CLIENT_NOT_INIT);
+    MMC_VALIDATE_RETURN(keys != nullptr, "invalid param, keys is null", MMC_INVALID_PARAM);
+    MMC_VALIDATE_RETURN(keys_count != 0, "invalid param, keys_count: " << keys_count, MMC_INVALID_PARAM);
+
+    std::vector<std::string> keys_vector;
+    keys_vector.reserve(keys_count);
+    for (size_t i = 0; i < keys_count; ++i) {
+        if (Result ret = ValidateBatchKey(keys[i], i); ret != MMC_OK) {
+            return ret;
+        }
+        keys_vector.emplace_back(keys[i]);
+    }
+
+    return MmcClientDefault::GetInstance()->EvictKeys(std::move(keys_vector), static_cast<MediaType>(src_media),
+                                                      static_cast<MediaType>(dst_media), flags);
+}
+
 MMC_API int32_t mmcc_batch_get(const char **keys, uint32_t keys_count, mmc_buffer *bufs, uint32_t flags, int *results)
 {
     MMC_VALIDATE_RETURN(keys != nullptr, "invalid param, keys is null", MMC_INVALID_PARAM);

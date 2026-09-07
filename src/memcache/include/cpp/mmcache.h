@@ -16,6 +16,7 @@
 #include <vector>
 #include <iostream>
 #include <memory>
+#include <sstream>
 
 #include "mmc.h"
 
@@ -327,6 +328,28 @@ public:
      * @return Vector of key infos
      */
     virtual std::vector<KeyInfo> BatchGetKeyInfo(const std::vector<std::string> &keys, uint32_t flag = 0) = 0;
+
+    /**
+     * @brief Prefetch keys from source media to dest media. Currently only supports SSD to DRAM.
+     * @param keys Vector of keys to prefetch
+     * @param srcMedia Source media type (MMC_MEDIA_HBM=0/DRAM=1/SSD=2), default MMC_MEDIA_SSD, reserved
+     * @param dstMedia Dest media type (MMC_MEDIA_HBM=0/DRAM=1/SSD=2), default MMC_MEDIA_DRAM, reserved
+     * @param flags Reserved
+     * @return 0 on success, negative value on error
+     */
+    virtual int PrefetchKeys(std::vector<std::string> keys, uint8_t srcMedia = MMC_MEDIA_SSD,
+                             uint8_t dstMedia = MMC_MEDIA_DRAM, uint32_t flags = 0) = 0;
+
+    /**
+     * @brief Evict keys from source media to dest media. Currently only supports DRAM to SSD.
+     * @param keys Vector of keys to evict
+     * @param srcMedia Source media type (MMC_MEDIA_HBM=0/DRAM=1/SSD=2), default MMC_MEDIA_DRAM, reserved
+     * @param dstMedia Dest media type (MMC_MEDIA_HBM=0/DRAM=1/SSD=2), default MMC_MEDIA_SSD, reserved
+     * @param flags Reserved
+     * @return 0 on success, negative value on error
+     */
+    virtual int EvictKeys(std::vector<std::string> keys, uint8_t srcMedia = MMC_MEDIA_DRAM,
+                          uint8_t dstMedia = MMC_MEDIA_SSD, uint32_t flags = 0) = 0;
 
     /**
      * @brief Add read leases for keys and cache returned blob infos locally

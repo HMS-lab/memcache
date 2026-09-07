@@ -394,6 +394,52 @@ virtual std::vector<KeyInfo> BatchGetKeyInfo(const std::vector<std::string> &key
 - `type_`：数据副本所在介质类型列表。
 - `gva_`：数据副本对应的 GVA 列表。
 
+#### PrefetchKeys
+
+```c++
+virtual int PrefetchKeys(std::vector<std::string> keys, uint8_t srcMedia = MMC_MEDIA_SSD,
+                         uint8_t dstMedia = MMC_MEDIA_DRAM, uint32_t flags = 0) = 0;
+```
+
+**功能**
+
+将指定 keys 从源介质回温到目标介质。当前仅支持 SSD→DRAM（`MMC_MEDIA_SSD` → `MMC_MEDIA_DRAM`），其他 src/dst 组合暂不支持，会返回 `MMC_INVALID_PARAM`。
+
+**参数**
+
+- `keys`：数据键列表（每个键长度 < 256字节）。
+- `srcMedia`：源介质类型（`MMC_MEDIA_HBM`=0/`MMC_MEDIA_DRAM`=1/`MMC_MEDIA_SSD`=2），默认 `MMC_MEDIA_SSD`，预留参数。
+- `dstMedia`：目标介质类型，默认 `MMC_MEDIA_DRAM`，预留参数。
+- `flags`：预留标志，必须为 `0`。
+
+**返回值**
+
+- `0`：成功
+- 其他：失败
+
+#### EvictKeys
+
+```c++
+virtual int EvictKeys(std::vector<std::string> keys, uint8_t srcMedia = MMC_MEDIA_DRAM,
+                      uint8_t dstMedia = MMC_MEDIA_SSD, uint32_t flags = 0) = 0;
+```
+
+**功能**
+
+将指定 keys 从源介质驱逐到目标介质。当前仅支持 DRAM→SSD（`MMC_MEDIA_DRAM` → `MMC_MEDIA_SSD`），其他 src/dst 组合暂不支持，会返回 `MMC_INVALID_PARAM`。当 SSD 不可用或 DRAM 使用率高于回温水线时，DRAM 上的 blob 会被直接删除。
+
+**参数**
+
+- `keys`：数据键列表（每个键长度 < 256字节）。
+- `srcMedia`：源介质类型（`MMC_MEDIA_HBM`=0/`MMC_MEDIA_DRAM`=1/`MMC_MEDIA_SSD`=2），默认 `MMC_MEDIA_DRAM`，预留参数。
+- `dstMedia`：目标介质类型，默认 `MMC_MEDIA_SSD`，预留参数。
+- `flags`：预留标志，必须为 `0`。
+
+**返回值**
+
+- `0`：成功
+- 其他：失败
+
 #### BatchAddLease
 
 ```c++

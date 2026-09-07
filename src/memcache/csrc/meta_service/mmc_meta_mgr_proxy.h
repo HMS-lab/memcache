@@ -167,24 +167,16 @@ public:
 
     Result BatchExistKey(const BatchIsExistRequest &req, BatchIsExistResponse &resp);
 
-    Result PrefetchKeys(const std::vector<std::string> &keys)
+    Result PrefetchKeys(std::vector<std::string> keys, MediaType srcMedia = MediaType::MEDIA_SSD,
+                        MediaType dstMedia = MediaType::MEDIA_DRAM, uint32_t flags = 0)
     {
-        return metaMangerPtr_->PrefetchKeys(keys);
+        return metaMangerPtr_->PrefetchKeys(std::move(keys), srcMedia, dstMedia, flags);
     }
 
-    Result PrefetchKey(const std::string &key)
+    Result EvictKeys(std::vector<std::string> keys, MediaType srcMedia = MediaType::MEDIA_DRAM,
+                     MediaType dstMedia = MediaType::MEDIA_SSD, uint32_t flags = 0)
     {
-        return metaMangerPtr_->PrefetchKey(key);
-    }
-
-    Result EvictKey(const std::string &key)
-    {
-        return metaMangerPtr_->EvictKey(key);
-    }
-
-    Result EvictKeys(const std::vector<std::string> &keys)
-    {
-        return metaMangerPtr_->EvictKeys(keys);
+        return metaMangerPtr_->EvictKeys(std::move(keys), srcMedia, dstMedia, flags);
     }
 
     Result Query(const QueryRequest &req, QueryResponse &resp)

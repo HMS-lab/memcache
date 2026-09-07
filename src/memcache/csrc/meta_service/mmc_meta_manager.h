@@ -270,13 +270,18 @@ public:
     nlohmann::json GetAllSegmentInfo() const;
 
     /**
-     * @brief Prefetch keys from lower tier (e.g. SSD) to upper tier (e.g. DRAM)
+     * @brief Prefetch keys from src media to dst media.
+     *        Currently only supports SSD to DRAM, other combos are not supported yet.
      * @param keys          [in] keys of the meta objects to be prefetched
+     * @param srcMedia      [in] source media type, default MEDIA_SSD (reserved)
+     * @param dstMedia      [in] destination media type, default MEDIA_DRAM (reserved)
+     * @param flags         [in] reserved, not used yet
      */
-    Result PrefetchKeys(const std::vector<std::string> &keys);
+    Result PrefetchKeys(std::vector<std::string> keys, MediaType srcMedia = MediaType::MEDIA_SSD,
+                        MediaType dstMedia = MediaType::MEDIA_DRAM, uint32_t flags = 0);
 
     /**
-     * @brief Prefetch a single key from lower tier to upper tier
+     * @brief Prefetch a single key from SSD to DRAM.
      * @param key           [in] key of the meta object to be prefetched
      */
     Result PrefetchKey(const std::string &key)
@@ -285,15 +290,20 @@ public:
     }
 
     /**
-     * @brief Evict keys from upper tier (e.g. DRAM) to lower tier (e.g. SSD),
-     *        or remove the upper tier blob directly when SSD is unavailable or
-     *        DRAM usage is above the rewarm watermark
+     * @brief Evict keys from src media to dst media.
+     *        Currently only supports DRAM to SSD, other combos are not supported yet.
+     *        When SSD is unavailable or DRAM usage is above the rewarm watermark,
+     *        the DRAM blob is removed directly.
      * @param keys          [in] keys of the meta objects to be evicted
+     * @param srcMedia      [in] source media type, default MEDIA_DRAM (reserved)
+     * @param dstMedia      [in] destination media type, default MEDIA_SSD (reserved)
+     * @param flags         [in] reserved, not used yet
      */
-    Result EvictKeys(const std::vector<std::string> &keys);
+    Result EvictKeys(std::vector<std::string> keys, MediaType srcMedia = MediaType::MEDIA_DRAM,
+                     MediaType dstMedia = MediaType::MEDIA_SSD, uint32_t flags = 0);
 
     /**
-     * @brief Evict a single key from upper tier to lower tier
+     * @brief Evict a single key from DRAM to SSD.
      * @param key           [in] key of the meta object to be evicted
      */
     Result EvictKey(const std::string &key)

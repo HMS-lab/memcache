@@ -1314,11 +1314,19 @@ nlohmann::json MmcMetaManager::GetAllSegmentInfo() const
     return globalAllocator_->GetAllSegmentInfo();
 }
 
-Result MmcMetaManager::PrefetchKeys(const std::vector<std::string> &keys)
+Result MmcMetaManager::PrefetchKeys(std::vector<std::string> keys, MediaType srcMedia, MediaType dstMedia,
+                                    uint32_t flags)
 {
+    (void)flags;
+    MMC_LOG_DEBUG("PrefetchKeys called, keys size: " << keys.size());
     if (keys.empty()) {
         MMC_LOG_INFO("PrefetchKeys: keys is empty, silently passing the function");
         return MMC_OK;
+    }
+    if (srcMedia != MEDIA_SSD || dstMedia != MEDIA_DRAM) {
+        MMC_LOG_ERROR("PrefetchKeys: only SSD->DRAM is supported currently, srcMedia: " << srcMedia
+                                                                                        << ", dstMedia: " << dstMedia);
+        return MMC_INVALID_PARAM;
     }
     uint64_t operateId = GenerateOperateId(UINT32_MAX);
     std::vector<MmcMemMetaDesc> objMetas(keys.size());
@@ -1330,10 +1338,17 @@ Result MmcMetaManager::PrefetchKeys(const std::vector<std::string> &keys)
     return ret;
 }
 
-Result MmcMetaManager::EvictKeys(const std::vector<std::string> &keys)
+Result MmcMetaManager::EvictKeys(std::vector<std::string> keys, MediaType srcMedia, MediaType dstMedia, uint32_t flags)
 {
+    (void)flags;
+    MMC_LOG_DEBUG("EvictKeys called, keys size: " << keys.size());
     if (keys.empty()) {
         MMC_LOG_INFO("EvictKeys called with empty keys");
+        return MMC_INVALID_PARAM;
+    }
+    if (srcMedia != MEDIA_DRAM || dstMedia != MEDIA_SSD) {
+        MMC_LOG_ERROR("EvictKeys: only DRAM->SSD is supported currently, srcMedia: " << srcMedia
+                                                                                     << ", dstMedia: " << dstMedia);
         return MMC_INVALID_PARAM;
     }
     for (const auto &key : keys) {

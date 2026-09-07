@@ -178,3 +178,137 @@ TEST_F(TestProtoMsg, UpdateRequest_EqualityOperators)
     EXPECT_TRUE(a != c);
     EXPECT_FALSE(a != b);
 }
+
+// PrefetchRequest serialization/deserialization — keys roundtrip, opcode 26
+TEST_F(TestProtoMsg, PrefetchRequest_SerializeDeserialize)
+{
+    PrefetchRequest req{{"key1", "key2", "key3"}};
+    EXPECT_EQ(req.msgId, ML_PREFETCH_REQ);
+
+    NetMsgPacker packer;
+    ASSERT_EQ(req.Serialize(packer), MMC_OK);
+    auto serialized = packer.String();
+
+    PrefetchRequest req2;
+    NetMsgUnpacker unpacker(serialized);
+    ASSERT_EQ(req2.Deserialize(unpacker), MMC_OK);
+    EXPECT_EQ(req2.keys_, req.keys_);
+    EXPECT_EQ(req2.msgId, ML_PREFETCH_REQ);
+}
+
+// PrefetchRequest serialization/deserialization — empty keys
+TEST_F(TestProtoMsg, PrefetchRequest_EmptyKeys)
+{
+    PrefetchRequest req;
+    NetMsgPacker packer;
+    ASSERT_EQ(req.Serialize(packer), MMC_OK);
+
+    PrefetchRequest req2;
+    NetMsgUnpacker unpacker(packer.String());
+    ASSERT_EQ(req2.Deserialize(unpacker), MMC_OK);
+    EXPECT_TRUE(req2.keys_.empty());
+}
+
+// PrefetchResponse serialization/deserialization — success/failure
+TEST_F(TestProtoMsg, PrefetchResponse_SerializeDeserialize)
+{
+    PrefetchResponse resp{MMC_OK};
+    EXPECT_EQ(resp.msgId, ML_PREFETCH_RESP);
+    NetMsgPacker packer;
+    ASSERT_EQ(resp.Serialize(packer), MMC_OK);
+
+    PrefetchResponse resp2;
+    NetMsgUnpacker unpacker(packer.String());
+    ASSERT_EQ(resp2.Deserialize(unpacker), MMC_OK);
+    EXPECT_EQ(resp2.ret_, MMC_OK);
+    EXPECT_EQ(resp2.msgId, ML_PREFETCH_RESP);
+
+    PrefetchResponse failResp{MMC_ERROR};
+    NetMsgPacker failPacker;
+    ASSERT_EQ(failResp.Serialize(failPacker), MMC_OK);
+    PrefetchResponse failResp2;
+    NetMsgUnpacker failUnpacker(failPacker.String());
+    ASSERT_EQ(failResp2.Deserialize(failUnpacker), MMC_OK);
+    EXPECT_EQ(failResp2.ret_, MMC_ERROR);
+}
+
+// EvictRequest serialization/deserialization — keys roundtrip, opcode 27
+TEST_F(TestProtoMsg, EvictRequest_SerializeDeserialize)
+{
+    EvictRequest req{{"key1", "key2", "key3"}};
+    EXPECT_EQ(req.msgId, ML_EVICT_REQ);
+
+    NetMsgPacker packer;
+    ASSERT_EQ(req.Serialize(packer), MMC_OK);
+    auto serialized = packer.String();
+
+    EvictRequest req2;
+    NetMsgUnpacker unpacker(serialized);
+    ASSERT_EQ(req2.Deserialize(unpacker), MMC_OK);
+    EXPECT_EQ(req2.keys_, req.keys_);
+    EXPECT_EQ(req2.msgId, ML_EVICT_REQ);
+}
+
+// EvictRequest serialization/deserialization — empty keys
+TEST_F(TestProtoMsg, EvictRequest_EmptyKeys)
+{
+    EvictRequest req;
+    NetMsgPacker packer;
+    ASSERT_EQ(req.Serialize(packer), MMC_OK);
+
+    EvictRequest req2;
+    NetMsgUnpacker unpacker(packer.String());
+    ASSERT_EQ(req2.Deserialize(unpacker), MMC_OK);
+    EXPECT_TRUE(req2.keys_.empty());
+}
+
+// EvictResponse serialization/deserialization — success/failure
+TEST_F(TestProtoMsg, EvictResponse_SerializeDeserialize)
+{
+    EvictResponse resp{MMC_OK};
+    EXPECT_EQ(resp.msgId, ML_EVICT_RESP);
+    NetMsgPacker packer;
+    ASSERT_EQ(resp.Serialize(packer), MMC_OK);
+
+    EvictResponse resp2;
+    NetMsgUnpacker unpacker(packer.String());
+    ASSERT_EQ(resp2.Deserialize(unpacker), MMC_OK);
+    EXPECT_EQ(resp2.ret_, MMC_OK);
+    EXPECT_EQ(resp2.msgId, ML_EVICT_RESP);
+
+    EvictResponse failResp{MMC_ERROR};
+    NetMsgPacker failPacker;
+    ASSERT_EQ(failResp.Serialize(failPacker), MMC_OK);
+    EvictResponse failResp2;
+    NetMsgUnpacker failUnpacker(failPacker.String());
+    ASSERT_EQ(failResp2.Deserialize(failUnpacker), MMC_OK);
+    EXPECT_EQ(failResp2.ret_, MMC_ERROR);
+}
+
+// PrefetchRequest oversized keys_ container guard
+TEST_F(TestProtoMsg, PrefetchRequest_OversizedKeysVector)
+{
+    NetMsgPacker packer;
+    int16_t msgVer = 0;
+    int16_t msgId = static_cast<int16_t>(ML_PREFETCH_REQ);
+    uint32_t destRankId = 0;
+    packer.Serialize(msgVer);
+    packer.Serialize(msgId);
+    packer.Serialize(destRankId);
+    const std::size_t hugeSize = static_cast<std::size_t>(MAX_CONTAINER_SIZE) + 1;
+    packer.Serialize(hugeSize);
+
+    PrefetchRequest req;
+    NetMsgUnpacker unpacker(packer.String());
+    EXPECT_EQ(req.Deserialize(unpacker), MMC_ERROR);
+}
+
+// Prefetch/Evict opcode enumeration: 26/27, REQ/RESP 对共享同一 ID
+TEST_F(TestProtoMsg, PrefetchEvict_OpcodeEnumeration)
+{
+    EXPECT_EQ(static_cast<int16_t>(ML_PREFETCH_REQ), 26);
+    EXPECT_EQ(static_cast<int16_t>(ML_EVICT_REQ), 27);
+    EXPECT_EQ(static_cast<int16_t>(ML_PREFETCH_REQ), static_cast<int16_t>(ML_PREFETCH_RESP));
+    EXPECT_EQ(static_cast<int16_t>(ML_EVICT_REQ), static_cast<int16_t>(ML_EVICT_RESP));
+    EXPECT_NE(static_cast<int16_t>(ML_PREFETCH_REQ), static_cast<int16_t>(ML_EVICT_REQ));
+}

@@ -132,6 +132,10 @@ public:
 
     std::vector<KeyInfo> BatchGetKeyInfo(const std::vector<std::string> &keys, uint32_t flag = 0) override;
 
+    int PrefetchKeys(std::vector<std::string> keys, uint8_t srcMedia, uint8_t dstMedia, uint32_t flags) override;
+
+    int EvictKeys(std::vector<std::string> keys, uint8_t srcMedia, uint8_t dstMedia, uint32_t flags) override;
+
     std::vector<int> BatchAddLease(const std::vector<std::string> &keys, uint64_t leaseTtlMs = 0) override;
 
     int BatchRemoveLease(const std::vector<std::string> &keys) override;

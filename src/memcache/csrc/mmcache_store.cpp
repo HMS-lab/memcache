@@ -438,6 +438,48 @@ std::vector<KeyInfo> MmcacheStore::BatchGetKeyInfo(const std::vector<std::string
     return infoList;
 }
 
+int MmcacheStore::PrefetchKeys(std::vector<std::string> keys, uint8_t srcMedia, uint8_t dstMedia, uint32_t flags)
+{
+    if (keys.empty()) {
+        MMC_LOG_DEBUG("key vector is empty");
+        return MMC_INVALID_PARAM;
+    }
+
+    const char **ckeys = new (std::nothrow) const char *[keys.size()];
+    if (ckeys == nullptr) {
+        MMC_LOG_ERROR("Cannot malloc memory for keys! keys.size=" << keys.size());
+        return MMC_MALLOC_FAILED;
+    }
+    for (size_t i = 0; i < keys.size(); ++i) {
+        ckeys[i] = keys[i].c_str();
+    }
+
+    auto ret = mmcc_prefetch_keys(ckeys, keys.size(), srcMedia, dstMedia, flags);
+    delete[] ckeys;
+    return ret;
+}
+
+int MmcacheStore::EvictKeys(std::vector<std::string> keys, uint8_t srcMedia, uint8_t dstMedia, uint32_t flags)
+{
+    if (keys.empty()) {
+        MMC_LOG_DEBUG("key vector is empty");
+        return MMC_INVALID_PARAM;
+    }
+
+    const char **ckeys = new (std::nothrow) const char *[keys.size()];
+    if (ckeys == nullptr) {
+        MMC_LOG_ERROR("Cannot malloc memory for keys! keys.size=" << keys.size());
+        return MMC_MALLOC_FAILED;
+    }
+    for (size_t i = 0; i < keys.size(); ++i) {
+        ckeys[i] = keys[i].c_str();
+    }
+
+    auto ret = mmcc_evict_keys(ckeys, keys.size(), srcMedia, dstMedia, flags);
+    delete[] ckeys;
+    return ret;
+}
+
 std::vector<int> MmcacheStore::BatchPutFrom(const std::vector<std::string> &keys, const std::vector<void *> &buffers,
                                             const std::vector<size_t> &sizes, const int32_t direct,
                                             const ReplicateConfig &replicateConfig)

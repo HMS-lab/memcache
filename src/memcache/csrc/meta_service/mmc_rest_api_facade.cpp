@@ -406,28 +406,18 @@ Result MmcRestApiFacade::BatchQueryKeys(const std::vector<std::string> &keys, nl
     return MMC_OK;
 }
 
-Result MmcRestApiFacade::EvictKey(const std::string &key) const
+Result MmcRestApiFacade::EvictKeys(const std::vector<std::string> &keys, MediaType srcMedia, MediaType dstMedia,
+                                   uint32_t flags) const
 {
     MMC_VALIDATE_RETURN(metaMgrProxy_ != nullptr, "meta manager proxy is nullptr", MMC_NOT_INITIALIZED);
-    return metaMgrProxy_->EvictKey(key);
+    return metaMgrProxy_->EvictKeys(keys, srcMedia, dstMedia, flags);
 }
 
-Result MmcRestApiFacade::EvictKeys(const std::vector<std::string> &keys) const
+Result MmcRestApiFacade::PrefetchKeys(const std::vector<std::string> &keys, MediaType srcMedia, MediaType dstMedia,
+                                      uint32_t flags) const
 {
     MMC_VALIDATE_RETURN(metaMgrProxy_ != nullptr, "meta manager proxy is nullptr", MMC_NOT_INITIALIZED);
-    return metaMgrProxy_->EvictKeys(keys);
-}
-
-Result MmcRestApiFacade::PrefetchKey(const std::string &key) const
-{
-    MMC_VALIDATE_RETURN(metaMgrProxy_ != nullptr, "meta manager proxy is nullptr", MMC_NOT_INITIALIZED);
-    return metaMgrProxy_->PrefetchKey(key);
-}
-
-Result MmcRestApiFacade::PrefetchKeys(const std::vector<std::string> &keys) const
-{
-    MMC_VALIDATE_RETURN(metaMgrProxy_ != nullptr, "meta manager proxy is nullptr", MMC_NOT_INITIALIZED);
-    return metaMgrProxy_->PrefetchKeys(keys);
+    return metaMgrProxy_->PrefetchKeys(keys, srcMedia, dstMedia, flags);
 }
 
 Result MmcRestApiFacade::GetKeyCount(size_t &count) const

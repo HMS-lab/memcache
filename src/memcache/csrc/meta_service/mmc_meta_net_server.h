@@ -76,6 +76,10 @@ private:
 
     Result HandleStatsReport(const NetContextPtr &context);
 
+    Result HandlePrefetch(const NetContextPtr &context);
+
+    Result HandleEvict(const NetContextPtr &context);
+
 private:
     NetEnginePtr engine_;
     MmcMetaServicePtr metaService_;
