@@ -185,6 +185,8 @@ std::string local_config_to_string(const local_config &config)
     oss << "  log_level: " << config.log_level << "\n";
     oss << "  world_size: " << config.world_size << "\n";
     oss << "  protocol: " << config.protocol << "\n";
+    oss << "  tag: " << config.tag << "\n";
+    oss << "  tag_op_info: " << config.tag_op_info << "\n";
     oss << "  hcom_url: " << config.hcom_url << "\n";
     oss << "  dram_size: " << config.dram_size << "\n";
     oss << "  hbm_size: " << config.hbm_size << "\n";

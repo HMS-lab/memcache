@@ -254,6 +254,8 @@ Result MmcLocalServiceDefault::InitBm()
     mmc_bm_create_config_t createConfig = {.id = options_.createId,
                                            .memberSize = options_.worldSize,
                                            .dataOpType = options_.dataOpType,
+                                           .tag = options_.tag,
+                                           .tagOpInfo = options_.tagOpInfo,
                                            .localDRAMSize = options_.localDRAMSize,
                                            .localMaxDRAMSize = options_.localMaxDRAMSize,
                                            .localHBMSize = options_.localHBMSize,

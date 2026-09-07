@@ -395,7 +395,10 @@ public:
 
         AddStrConf(OKC_MMC_LOCAL_SERVICE_PROTOCOL,
                    VStrEnum::Create(OKC_MMC_LOCAL_SERVICE_PROTOCOL.first, LOCAL_SERVER_PROTOCAL_ENUM_STR),
-                   1);                                                      // REQUIRED
+                   1); // REQUIRED
+        AddStrConf(OKC_MMC_LOCAL_SERVICE_TAG, VStrLength::Create(OKC_MMC_LOCAL_SERVICE_TAG.first, MMC_TAG_SIZE - 1), 0);
+        AddStrConf(OKC_MMC_LOCAL_SERVICE_TAG_OP_INFO,
+                   VStrLength::Create(OKC_MMC_LOCAL_SERVICE_TAG_OP_INFO.first, MMC_TAG_OP_INFO_SIZE - 1), 0);
         AddStrConf(OKC_MMC_LOCAL_SERVICE_DRAM_SIZE, VNoCheck::Create(), 1); // REQUIRED
         AddStrConf(OKC_MMC_LOCAL_SERVICE_MAX_DRAM_SIZE, VNoCheck::Create(), 0);
         AddStrConf(OKC_MMC_LOCAL_SERVICE_HBM_SIZE, VNoCheck::Create(), 0);
@@ -458,6 +461,8 @@ public:
         SafeCopy(GetString(ConfConstant::OKC_MMC_LOCAL_SERVICE_BACKEND_ID), config.backendId, DISCOVERY_URL_SIZE);
         config.createId = 0;
         SafeCopy(GetString(ConfConstant::OKC_MMC_LOCAL_SERVICE_PROTOCOL), config.dataOpType, PROTOCOL_SIZE);
+        SafeCopy(GetString(ConfConstant::OKC_MMC_LOCAL_SERVICE_TAG), config.tag, MMC_TAG_SIZE);
+        SafeCopy(GetString(ConfConstant::OKC_MMC_LOCAL_SERVICE_TAG_OP_INFO), config.tagOpInfo, MMC_TAG_OP_INFO_SIZE);
         config.localDRAMSize = GetUInt64(ConfConstant::OKC_MMC_LOCAL_SERVICE_DRAM_SIZE.first, GB_MEM_BYTES);
         config.localMaxDRAMSize =
             GetUInt64(ConfConstant::OKC_MMC_LOCAL_SERVICE_MAX_DRAM_SIZE.first, config.localDRAMSize);

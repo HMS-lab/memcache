@@ -104,6 +104,23 @@ void DefineMmcStructModule(py::module_ &m)
              device_uboe, device_sdma.
          )pbdoc")
             .def_property(
+                "tag", [](const local_config &cfg) { return std::string(cfg.tag); },
+                [](local_config &cfg, const std::string &value) { SafeCopy(value, cfg.tag, sizeof(cfg.tag)); },
+                R"pbdoc(
+             Tag of this rank in MemFabric Big Memory, used with tag_op_info to control the
+             data op type (protocol) between tag pairs, e.g. tag1.
+         )pbdoc")
+            .def_property(
+                "tag_op_info", [](const local_config &cfg) { return std::string(cfg.tag_op_info); },
+                [](local_config &cfg, const std::string &value) {
+                    SafeCopy(value, cfg.tag_op_info, sizeof(cfg.tag_op_info));
+                },
+                R"pbdoc(
+             Data op type between tags, separated by commas, e.g. "tag1:HOST_TCP:tag2,tag2:DEVICE_RDMA:tag3".
+             Op type whitelist: DEVICE_SDMA, DEVICE_RDMA, DEVICE_URMA, DEVICE_UBOE, HOST_RDMA,
+             HOST_TCP, HOST_URMA, HOST_SHM, AIV_SDMA, DEVICE_MTE.
+         )pbdoc")
+            .def_property(
                 "hcom_url", [](const local_config &cfg) { return std::string(cfg.hcom_url); },
                 [](local_config &cfg, const std::string &value) {
                     SafeCopy(value, cfg.hcom_url, sizeof(cfg.hcom_url));

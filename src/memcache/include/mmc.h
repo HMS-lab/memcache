@@ -60,6 +60,16 @@ typedef struct {
     // host_rdma, host_urma and host_tcp need hcom; host_shm does not need hcom
     char protocol[PROTOCOL_SIZE];
 
+    // Tag of this rank in MemFabric Big Memory, used together with tag_op_info
+    // to control the data op type (protocol) between tag pairs, e.g. tag1
+    char tag[MMC_TAG_SIZE];
+
+    // Data op type between tags, separated by commas, e.g.:
+    // "tag1:DEVICE_SDMA:tag1,tag1:DEVICE_RDMA:tag2"
+    // Op type whitelist: DEVICE_SDMA, DEVICE_RDMA, DEVICE_URMA, DEVICE_UBOE,
+    // HOST_RDMA, HOST_TCP, HOST_URMA, HOST_SHM, AIV_SDMA, DEVICE_MTE
+    char tag_op_info[MMC_TAG_OP_INFO_SIZE];
+
     // If the protocol is host_rdma, the ip needs to be set as RDMA network card ip. Use 'show_gids' command to query it
     char hcom_url[DISCOVERY_URL_SIZE];
 

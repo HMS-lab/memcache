@@ -69,6 +69,8 @@ bool Configuration::Setup(const local_config *config)
     res &= SetWithTypeAutoConvert(ConfConstant::OCK_MMC_LOG_LEVEL.first, config->log_level);
     res &= SetWithTypeAutoConvert(ConfConstant::OKC_MMC_LOCAL_SERVICE_WORLD_SIZE.first, config->world_size);
     res &= SetWithTypeAutoConvert(ConfConstant::OKC_MMC_LOCAL_SERVICE_PROTOCOL.first, config->protocol);
+    res &= SetWithTypeAutoConvert(ConfConstant::OKC_MMC_LOCAL_SERVICE_TAG.first, config->tag);
+    res &= SetWithTypeAutoConvert(ConfConstant::OKC_MMC_LOCAL_SERVICE_TAG_OP_INFO.first, config->tag_op_info);
     res &= SetWithTypeAutoConvert(ConfConstant::OKC_MMC_LOCAL_SERVICE_BM_HCOM_URL.first, config->hcom_url);
     res &= SetWithTypeAutoConvert(ConfConstant::OKC_MMC_LOCAL_SERVICE_DRAM_SIZE.first, config->dram_size);
     res &= SetWithTypeAutoConvert(ConfConstant::OKC_MMC_LOCAL_SERVICE_HBM_SIZE.first, config->hbm_size);

@@ -14,13 +14,15 @@
 
 #include <stdint.h>
 
-#define DISCOVERY_URL_SIZE  1024
-#define PATH_MAX_SIZE       1024
-#define PROTOCOL_SIZE       64
-#define KV_EVENT_FIELD_SIZE 256
-#define MAX_BATCH_OP_COUNT  16384
-#define TLS_PATH_SIZE       256
-#define TLS_PATH_MAX_LEN    (TLS_PATH_SIZE - 1)
+#define DISCOVERY_URL_SIZE   1024
+#define PATH_MAX_SIZE        1024
+#define PROTOCOL_SIZE        64
+#define KV_EVENT_FIELD_SIZE  256
+#define MAX_BATCH_OP_COUNT   16384
+#define TLS_PATH_SIZE        256
+#define MMC_TAG_SIZE         32
+#define MMC_TAG_OP_INFO_SIZE 256
+#define TLS_PATH_MAX_LEN     (TLS_PATH_SIZE - 1)
 
 #ifdef __cplusplus
 extern "C" {
@@ -116,6 +118,8 @@ typedef struct {
     uint32_t dynamicConfigInterval;
     char configFilePath[PATH_MAX_SIZE];
     char bmIpPortDomain[DISCOVERY_URL_SIZE]; // original (domain) form of config_store_url, for periodic re-resolution
+    char tag[MMC_TAG_SIZE];
+    char tagOpInfo[MMC_TAG_OP_INFO_SIZE];
 } mmc_local_service_config_t;
 
 typedef struct {

@@ -110,8 +110,8 @@ Result MmcBmProxy::InternalCreateBm(const mmc_bm_create_config_t &createConfig)
     option.dataOpType = opType;
     option.enable56BitsGva = true;
     option.flags = createConfig.flags;
-    option.tag[0] = '\0';
-    option.tagOpInfo[0] = '\0';
+    SafeCopy(createConfig.tag, option.tag, MMC_TAG_SIZE);
+    SafeCopy(createConfig.tagOpInfo, option.tagOpInfo, MMC_TAG_OP_INFO_SIZE);
     handle_ = MFSmemApi::SmemBmCreate2(createConfig.id, &option);
     if (handle_ == nullptr) {
         MMC_LOG_ERROR("Failed to create smem bm");

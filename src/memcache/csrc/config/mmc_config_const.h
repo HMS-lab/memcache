@@ -78,6 +78,8 @@ constexpr auto OKC_MMC_LOCAL_SERVICE_BM_IP_PORT_DOMAIN =
     std::make_pair("ock.mmc.local_service.config_store_url_domain", "");
 
 constexpr auto OKC_MMC_LOCAL_SERVICE_PROTOCOL = std::make_pair("ock.mmc.local_service.protocol", "host_rdma");
+constexpr auto OKC_MMC_LOCAL_SERVICE_TAG = std::make_pair("ock.mmc.local_service.tag", "");
+constexpr auto OKC_MMC_LOCAL_SERVICE_TAG_OP_INFO = std::make_pair("ock.mmc.local_service.tag_op_info", "");
 constexpr auto OKC_MMC_LOCAL_SERVICE_DRAM_SIZE = std::make_pair("ock.mmc.local_service.dram.size", "128MB");
 constexpr auto OKC_MMC_LOCAL_SERVICE_MAX_DRAM_SIZE = std::make_pair("ock.mmc.local_service.max.dram.size", "1TB");
 constexpr auto OKC_MMC_LOCAL_SERVICE_HBM_SIZE = std::make_pair("ock.mmc.local_service.hbm.size", "0");
