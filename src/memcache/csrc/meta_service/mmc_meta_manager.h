@@ -452,13 +452,18 @@ private:
 
     bool CheckActiveLease(const std::string &key, const MmcMemObjMetaPtr &meta, const MmcBlobFilterPtr &filter);
 
-    void PushRemoveList(const std::string &key, const MmcMemObjMetaPtr &meta, const MmcBlobFilterPtr &filter = nullptr,
-                        bool triggerSsdPreFree = false);
+    void PushRemoveList(const std::string &key, const MmcMemObjMetaPtr &meta, const MmcBlobFilterPtr &filter,
+                        bool triggerSsdPreFree);
+
+    // 同步执行删除列表（FreeBlobs + removed 回调）。仅在异步入队失败时兜底调用，
+    // 契约：调用方必须已持有 meta->Mutex()
+    void DoRemoveBlobs(const std::string &key, const MmcMemObjMetaPtr &meta, const MmcBlobFilterPtr &filter,
+                       bool triggerSsdPreFree);
 
     EvictResult EvictCallBackFunction(const std::string &key, const MmcMemObjMetaPtr &objMeta, MediaType srcMediaType);
 
     EvictResult EvictRemoveSrc(const std::string &key, const MmcMemObjMetaPtr &objMeta,
-                               const MmcBlobFilterPtr &srcFilter, MediaType srcMediaType, MediaType dstMedium);
+                               const MmcBlobFilterPtr &srcFilter, MediaType dstMedium);
     EvictResult EvictRemoveSrc(const std::string &key, const MmcMemObjMetaPtr &objMeta, MediaType srcMediaType,
                                MediaType dstMedium);
 

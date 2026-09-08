@@ -908,6 +908,7 @@ Result MmcMetaManager::UpdateState(const std::string &key, const MmcLocation &lo
 bool MmcMetaManager::CheckActiveLease(const std::string &key, const MmcMemObjMetaPtr &meta,
                                       const MmcBlobFilterPtr &filter)
 {
+    // 契约：调用方必须已持有 meta->Mutex()，因此 GetBlobs 遍历是安全的
     bool hasActiveLease = false;
     uint32_t leaseUseCount = 0;
     uint64_t leaseRemainTtlMs = 0;
@@ -937,43 +938,35 @@ void MmcMetaManager::PushRemoveList(const std::string &key, const MmcMemObjMetaP
     const MmcThreadPoolPtr &pool = hasActiveLease ? removeThreadPool_ : threadPool_;
 
     auto future = pool->Enqueue(
-        [&](const std::string keyL, const MmcMemObjMetaPtr metaL, MmcGlobalAllocatorPtr allocator,
-            MmcBlobFilterPtr filterL, bool triggerSsdPreFreeL) {
+        [this](const std::string keyL, const MmcMemObjMetaPtr metaL, MmcBlobFilterPtr filterL,
+               bool triggerSsdPreFreeL) {
             std::unique_lock<std::mutex> guard(metaL->Mutex());
-            auto blobs = metaL->FreeBlobs(keyL, allocator, filterL, true, triggerSsdPreFreeL);
-
-            {
-                std::lock_guard<std::mutex> cbLock(changeCallbacks_.mutex);
-                if (changeCallbacks_.removed) {
-                    for (const auto &blob : blobs) {
-                        changeCallbacks_.removed(keyL, blob->Rank(), blob->Type());
-                    }
-                }
-            }
-
-            if (metaL->NumBlobs() == 0) {
-                metaContainer_->Erase(keyL);
-            }
+            DoRemoveBlobs(keyL, metaL, filterL, triggerSsdPreFreeL);
             return MMC_OK;
         },
-        key, meta, globalAllocator_, filter, triggerSsdPreFree);
-
-    std::vector<MmcMemBlobPtr> blobs;
+        key, meta, filter, triggerSsdPreFree);
     if (!future.valid()) {
-        // already locked when call, no need lock again
-        blobs = meta->FreeBlobs(key, globalAllocator_, filter, true, triggerSsdPreFree);
-        {
-            std::lock_guard<std::mutex> cbLock(changeCallbacks_.mutex);
-            if (changeCallbacks_.removed) {
-                for (const auto &blob : blobs) {
-                    changeCallbacks_.removed(key, blob->Rank(), blob->Type());
-                }
+        // 异步入队失败（线程池已停止）：调用方已持锁，直接同步执行
+        DoRemoveBlobs(key, meta, filter, triggerSsdPreFree);
+    }
+}
+
+void MmcMetaManager::DoRemoveBlobs(const std::string &key, const MmcMemObjMetaPtr &meta, const MmcBlobFilterPtr &filter,
+                                   bool triggerSsdPreFree)
+{
+    // 契约：调用方必须已持有 meta->Mutex()（异步 lambda 内自行加锁，同步兜底由调用方持锁）
+    auto blobs = meta->FreeBlobs(key, globalAllocator_, filter, true, triggerSsdPreFree);
+    {
+        std::lock_guard<std::mutex> cbLock(changeCallbacks_.mutex);
+        if (changeCallbacks_.removed) {
+            for (const auto &blob : blobs) {
+                changeCallbacks_.removed(key, blob->Rank(), blob->Type());
             }
         }
-        if (meta->NumBlobs() == 0) {
-            metaContainer_->Erase(key);
-        }
     }
+    // 不在此处 Erase：容器层删除由各调用方负责（evict 外层/Remove/RemoveAll 已完成容器删除），
+    // 异步重复 Erase 既有 ABA 风险（可能删掉并发重建的新对象），
+    // 也会与 evict 外层/EraseAll 持有的容器写锁形成自死锁，此处只需释放 blob
 }
 
 Result MmcMetaManager::BlobDeleteRpc(const std::string &key, const MmcMemBlobDesc &blob)
@@ -1658,24 +1651,23 @@ Result MmcMetaManager::ReplicateBlob(const std::string &key, const MmcLocation &
 
 namespace {
 
-bool HasRemainingBlobsAfterEvict(const MmcMemObjMetaPtr &objMeta, uint32_t srcRank, MediaType srcMedia,
-                                 MediaType dstMedia)
+bool HasRemainingBlobsAfterEvict(const MmcMemObjMetaPtr &objMeta, const MmcBlobFilterPtr &srcFilter, MediaType dstMedia)
 {
-    bool removeAllRanks = (srcRank == UINT32_MAX);
+    // filter 为 nullptr 时 MatchFilter 恒命中，即全部 blob 都会被释放，对应无剩余（REMOVE）
     auto blobs = objMeta->GetBlobs();
 
     for (auto &blob : blobs) {
         if (blob == nullptr) {
             continue;
         }
-        auto blobMedia = static_cast<MediaType>(blob->Type());
-        if (blobMedia == srcMedia && (removeAllRanks || blob->Rank() == srcRank)) {
+        // 与异步 FreeBlobs 使用同一过滤语义：命中的 blob 才会被释放，其余视为保留
+        if (blob->MatchFilter(srcFilter)) {
             continue;
         }
 
         MMC_LOG_DEBUG("HasRemainingBlobsAfterEvict remaining blob media="
-                      << static_cast<int>(blobMedia) << " rank=" << blob->Rank()
-                      << " srcMedia=" << static_cast<int>(srcMedia) << " dstMedia=" << static_cast<int>(dstMedia));
+                      << static_cast<int>(blob->Type()) << " rank=" << blob->Rank() << " srcMedia="
+                      << static_cast<int>(srcFilter->mediaType_) << " dstMedia=" << static_cast<int>(dstMedia));
         return true;
     }
     return false;
@@ -1684,12 +1676,10 @@ bool HasRemainingBlobsAfterEvict(const MmcMemObjMetaPtr &objMeta, uint32_t srcRa
 } // namespace
 
 EvictResult MmcMetaManager::EvictRemoveSrc(const std::string &key, const MmcMemObjMetaPtr &objMeta,
-                                           const MmcBlobFilterPtr &srcFilter, MediaType srcMediaType,
-                                           MediaType dstMedium)
+                                           const MmcBlobFilterPtr &srcFilter, MediaType dstMedium)
 {
-    PushRemoveList(key, objMeta, srcFilter);
-    return HasRemainingBlobsAfterEvict(objMeta, UINT32_MAX, srcMediaType, dstMedium) ? EvictResult::MOVE_DOWN
-                                                                                     : EvictResult::REMOVE;
+    PushRemoveList(key, objMeta, srcFilter, false);
+    return HasRemainingBlobsAfterEvict(objMeta, srcFilter, dstMedium) ? EvictResult::MOVE_DOWN : EvictResult::REMOVE;
 }
 
 EvictResult MmcMetaManager::EvictRemoveSrc(const std::string &key, const MmcMemObjMetaPtr &objMeta,
@@ -1700,7 +1690,7 @@ EvictResult MmcMetaManager::EvictRemoveSrc(const std::string &key, const MmcMemO
         MMC_LOG_ERROR("Evict skip key=" << key << " from " << srcMediaType << ", create filter failed");
         return EvictResult::FAIL;
     }
-    return EvictRemoveSrc(key, objMeta, srcFilter, srcMediaType, dstMedium);
+    return EvictRemoveSrc(key, objMeta, srcFilter, dstMedium);
 }
 
 EvictResult MmcMetaManager::DispatchMoveBlob(const std::string &key, const MmcMemObjMetaPtr &objMeta,
@@ -1711,7 +1701,9 @@ EvictResult MmcMetaManager::DispatchMoveBlob(const std::string &key, const MmcMe
         [this, objMeta, srcFilter](const std::string keyL, const MmcLocation srcL, const MmcLocation dstL) {
             auto ret = MoveBlob(keyL, srcL, dstL);
             if (ret != MMC_OK) {
-                PushRemoveList(keyL, objMeta, srcFilter);
+                // 池线程内未持有 memObj 锁，fallback 需自行加锁
+                std::unique_lock<std::mutex> guard(objMeta->Mutex());
+                PushRemoveList(keyL, objMeta, srcFilter, false);
                 MMC_LOG_WARN("key: " << keyL << " move blob from " << srcL << " to " << dstL
                                      << " not successful: " << ret << ", remove src blob");
             }
@@ -1720,7 +1712,7 @@ EvictResult MmcMetaManager::DispatchMoveBlob(const std::string &key, const MmcMe
         key, src, dst);
     if (!future.valid()) {
         MMC_LOG_WARN("key: " << key << " move blob from " << src << " to " << dst << " not successful");
-        return EvictRemoveSrc(key, objMeta, srcFilter, srcMediaType, dstMedium);
+        return EvictRemoveSrc(key, objMeta, srcFilter, dstMedium);
     }
     return EvictResult::MOVE_DOWN;
 }
@@ -1757,7 +1749,7 @@ EvictResult MmcMetaManager::EvictCallBackFunction(const std::string &key, const 
         MMC_LOG_DEBUG("Evict REMOVE key=" << key << " from " << srcMediaType
                                           << " reason=no_space, freeSize=" << freeSize << ", need=" << objMeta->Size());
         TP_TRACE_END(TP_MMC_META_EVICT, MMC_OK);
-        return EvictRemoveSrc(key, objMeta, srcFilter, srcMediaType, dstMedium);
+        return EvictRemoveSrc(key, objMeta, srcFilter, dstMedium);
     }
 
     MmcLocation src{UINT32_MAX, srcMediaType};
