@@ -25,6 +25,7 @@
 #include "mmc_logger.h"
 #include "mmc_meta_service.h"
 #include "mmc_def.h"
+#include "smem_logger_api.h"
 
 using namespace testing;
 using namespace std;
@@ -95,6 +96,7 @@ class TestMmcMetaConfigReload : public testing::Test {
 public:
     void SetUp() override
     {
+        ASSERT_EQ(MFLoggerApi::LoadLibrary(), MMC_OK);
         originalLevel_ = MmcOutLogger::Instance().GetLogLevel();
         svc_ = MmcMakeRef<MmcMetaService>("test-meta-config-reload");
         ASSERT_NE(svc_, nullptr);

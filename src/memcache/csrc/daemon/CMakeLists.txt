@@ -12,20 +12,22 @@ aux_source_directory(. DAEMON_SRCS)
 
 set(MMC_META_SERVICE_BUILDABLE ON)
 if (BUILD_PYTHON STREQUAL "ON")
-    if ((NOT DEFINED PYTHON_LIBRARY) OR ("${PYTHON_LIBRARY}" MATCHES "NOTFOUND"))
+    # pybind11 may return a bare library name even when the embedding library is absent.
+    if (NOT EXISTS "${PYTHON_LIBRARY}")
         set(MMC_META_SERVICE_BUILDABLE OFF)
-        message(WARNING "skip building mmc_meta_service: PYTHON_LIBRARY is NOTFOUND")
+        message(WARNING "skip building mmc_meta_service: Python embedding library '${PYTHON_LIBRARY}' does not exist; "
+                        "install the matching Python development library to build the executable")
     endif ()
 endif ()
 
 if (MMC_META_SERVICE_BUILDABLE)
-    add_executable(mmc_meta_service ${DAEMON_SRCS} $<TARGET_OBJECTS:ptracer_object> $<TARGET_OBJECTS:config_store_object>)
+    add_executable(mmc_meta_service ${DAEMON_SRCS})
 
     target_compile_options(mmc_meta_service PRIVATE -fPIC -Wno-float-equal)
 
     target_link_options(mmc_meta_service PRIVATE -pie)
 
-    target_link_libraries(mmc_meta_service PUBLIC mmc_shared pthread acc_tcp_net_static)
+    target_link_libraries(mmc_meta_service PUBLIC mmc_shared pthread dl)
 
     if (BUILD_PYTHON STREQUAL "ON")
         target_link_libraries(mmc_meta_service PRIVATE pybind11::embed)

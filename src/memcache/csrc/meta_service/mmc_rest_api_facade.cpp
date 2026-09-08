@@ -23,7 +23,6 @@
 #include "mmc_logger.h"
 #include "mmc_meta_metric_manager.h"
 #include "mmc_client_metric_store.h"
-#include "smem_config_store_errno.h"
 
 namespace {
 

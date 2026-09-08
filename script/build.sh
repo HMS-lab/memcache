@@ -112,8 +112,6 @@ cmake \
 
 ${MAKE_CMD} install -j"${MMC_BUILD_JOBS}" -C build/
 
-FABRIC_PROJ_DIR=${PROJ_DIR}/3rdparty/memfabric_hybrid
-
 mkdir -p "${PROJ_DIR}/src/memcache/python/memcache_hybrid/lib"
 \cp -v "${PROJ_DIR}/output/memcache/lib64/libmf_memcache.so" "${PROJ_DIR}/src/memcache/python/memcache_hybrid/lib"
 if [ "${BUILD_UBSIO:-OFF}" == "ON" ]; then
@@ -128,8 +126,6 @@ rm -f "${PROJ_DIR}"/src/memcache/python/memcache_hybrid/_pymmc.cpython*.so
 cd "${PROJ_DIR}/src/memcache/python"
 rm -rf build memcache_hybrid.egg-info
 export LD_LIBRARY_PATH="${PROJ_DIR}/src/memcache/python/memcache_hybrid/lib":$LD_LIBRARY_PATH # fix `auditwheel repair` failed
-export LD_LIBRARY_PATH="${FABRIC_PROJ_DIR}/output/smem/lib64":$LD_LIBRARY_PATH # fix `auditwheel repair` failed
-export LD_LIBRARY_PATH="${FABRIC_PROJ_DIR}/output/hybm/lib64":$LD_LIBRARY_PATH # fix `auditwheel repair` failed
 if [ "${BUILD_UBSIO:-OFF}" == "ON" ]; then
     export LD_LIBRARY_PATH="${PROJ_DIR}/output/3rdparty/ubsio/lib":$LD_LIBRARY_PATH # fix `auditwheel repair` failed
 fi

@@ -18,7 +18,6 @@
 #include <type_traits>
 #include <mmc_functions.h>
 
-#include "smem.h"
 #include "mmc_kv_parser.h"
 
 namespace ock {

@@ -29,7 +29,7 @@
 
 #include "spdlogger4c.h"
 #include "spdlogger.h"
-#include "mf_out_logger.h"
+#include "smem_logger_api.h"
 
 #include "mmc_config_reload_utils.h"
 #include "mmc_configuration.h"
@@ -299,7 +299,11 @@ int MmcMetaServiceProcess::InitLogger(const mmc_meta_service_config_t &options)
         std::cerr << "Failed to set log level " << options.logLevel << std::endl;
         return -1;
     }
-    mf::OutLogger::Instance().SetLogLevel(static_cast<mf::LogLevel>(options.logLevel));
+    if (MFLoggerApi::LoadLibrary() != MMC_OK) {
+        std::cerr << "Failed to load MemFabric logger API" << std::endl;
+        return -1;
+    }
+    MFLoggerApi::SetLogLevel(options.logLevel);
     ret = SPDLOG_Init(logPath.c_str(), options.logLevel, options.logRotationFileSize, options.logRotationFileCount,
                       options.logOutputTarget);
     if (ret != 0) {
@@ -307,7 +311,7 @@ int MmcMetaServiceProcess::InitLogger(const mmc_meta_service_config_t &options)
         return -1;
     }
     MmcOutLogger::Instance().SetExternalLogFunction(SPDLOG_LogMessage);
-    mf::OutLogger::Instance().SetExternalLogFunction(SPDLOG_LogMessage);
+    MFLoggerApi::SetExternLogger(SPDLOG_LogMessage);
     ret = SPDLOG_AuditInit(logAuditPath.c_str(), options.logRotationFileSize, options.logRotationFileCount,
                            options.logOutputTarget);
     if (ret != 0) {

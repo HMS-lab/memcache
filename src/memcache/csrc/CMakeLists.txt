@@ -30,11 +30,6 @@ include_directories(
         ${PROJECT_MMC_SRC_BASE}/csrc/proto
         ${PROJECT_MMC_SRC_BASE}/csrc/under_api/mf_smem
         ${PROJECT_MMC_SRC_BASE}/csrc/under_api/ubs_io
-        ${PROJECT_SMEM_SRC_BASE}/include/host
-        ${PROJECT_SMEM_SRC_BASE}/csrc/common
-        ${PROJECT_SMEM_SRC_BASE}/csrc/config_store
-        ${PROJECT_UTIL_SRC_BASE}/ptracer/include
-        ${PROJECT_ACCLINKS_SRC_BASE}/include
         ${PROJECT_3RDPARTY_BIN_DIR}/spdlog/include/
         ${PROJECT_3RDPARTY_SRC_DIR}/log/spdlog/include
         ${PROJECT_3RDPARTY_SRC_DIR}/nlohmann/json/single_include/
@@ -123,7 +118,6 @@ set(PLATFORM_SRC ${MMC_SRC_COMMON}
 ## build the static and shared library
 add_library(mmc_objects OBJECT ${PLATFORM_SRC})
 target_include_directories(mmc_objects BEFORE PUBLIC ${PROJECT_MMC_SRC_BASE}/csrc/under_api/mf_smem)
-target_link_libraries(mmc_objects PUBLIC config_store_object)
 target_compile_options(mmc_objects PRIVATE -fPIC -Wno-float-equal)
 target_compile_definitions(mmc_objects PRIVATE GIT_LAST_COMMIT=${MMC_GIT_COMMIT_HASH})
 if (MMC_ENABLE_KV_EVENTS)
@@ -132,9 +126,9 @@ endif ()
 # 注：MMC_ENABLE_KV_EVENTS / MSGPACK_NO_BOOST 已在顶层 add_compile_definitions 全局开启（ON 时），
 # 保证库与测试 TU 类布局一致。
 
-add_library(mmc_static STATIC $<TARGET_OBJECTS:mmc_objects> $<TARGET_OBJECTS:ptracer_object> $<TARGET_OBJECTS:config_store_object>)
+add_library(mmc_static STATIC $<TARGET_OBJECTS:mmc_objects>)
 set_target_properties(mmc_static PROPERTIES OUTPUT_NAME "mf_memcache")
-target_link_libraries(mmc_static PUBLIC pthread acc_tcp_net_static prometheus-cpp-simpleapi)
+target_link_libraries(mmc_static PUBLIC pthread dl prometheus-cpp-simpleapi)
 if (MMC_ENABLE_KV_EVENTS)
     target_link_libraries(mmc_static PUBLIC ${MMC_KV_EVENTS_ZMQ_LIBRARY} ${MMC_KV_EVENTS_SODIUM_LIBRARY})
 endif ()
@@ -150,9 +144,9 @@ else (
 )
 endif ()
 
-add_library(mmc_shared SHARED $<TARGET_OBJECTS:mmc_objects> $<TARGET_OBJECTS:ptracer_object> $<TARGET_OBJECTS:config_store_object>)
+add_library(mmc_shared SHARED $<TARGET_OBJECTS:mmc_objects>)
 set_target_properties(mmc_shared PROPERTIES OUTPUT_NAME "mf_memcache")
-target_link_libraries(mmc_shared PUBLIC pthread acc_tcp_net_static prometheus-cpp-simpleapi)
+target_link_libraries(mmc_shared PUBLIC pthread dl prometheus-cpp-simpleapi)
 if (MMC_ENABLE_KV_EVENTS)
     target_link_libraries(mmc_shared PUBLIC ${MMC_KV_EVENTS_ZMQ_LIBRARY} ${MMC_KV_EVENTS_SODIUM_LIBRARY})
 endif ()

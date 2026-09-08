@@ -15,7 +15,7 @@ if (NOT PROJECT_VERSION_RAW MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
     message(FATAL_ERROR "Invalid version format in VERSION file: '${PROJECT_VERSION_RAW}'")
 endif ()
 project(memcache VERSION ${PROJECT_VERSION_RAW} LANGUAGES CXX C)
-message(STATUS "in memfabric cmakefile BUILD_FROM_MEMCACHE: ${BUILD_FROM_MEMCACHE}, version: ${PROJECT_VERSION_RAW}.")
+message(STATUS "MemCache version: ${PROJECT_VERSION_RAW}.")
 
 list(GET PROJECT_VERSION_RAW 0 DUMMY)
 string(REPLACE "." ";" VERSION_LIST "${PROJECT_VERSION_RAW}")
@@ -207,44 +207,18 @@ else ()
     message(STATUS "Not set CMAKE_PREFIX_PATH, and initialize to: ${CMAKE_PREFIX_PATH}")
 endif ()
 
-# memfabric_hybrid defines PROJECT_SMEM_SRC_BASE / PROJECT_UTIL_SRC_BASE in its
-# own CMakeLists scope (add_subdirectory), which is not visible to this scope.
-# Define them here so downstream include_directories resolve to the submodule.
-set(PROJECT_SMEM_SRC_BASE ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/memfabric_hybrid/src/smem)
-set(PROJECT_UTIL_SRC_BASE ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/memfabric_hybrid/src/util/csrc)
-
 add_subdirectory(3rdparty)
 
 # Enable -Werror for project's own source/test directories only (after 3rdparty).
 # Third-party submodules (e.g. prometheus-cpp-lite) may have code that triggers
 # warnings like -Wfloat-equal; compiling them with -Werror would break the build.
-# memfabric_hybrid has its own -Werror in its CMakeLists.txt, so it is unaffected.
 if (${CMAKE_BUILD_TYPE} MATCHES "RELEASE")
     add_compile_options(-Werror)
 endif ()
 
-include_directories(
-        ${PROJECT_SMEM_SRC_BASE}/include/host
-        ${PROJECT_UTIL_SRC_BASE}
-)
-
 # include ubs-io cmake after TARGET_INSTALL_DIR set
 include(cmake/config_ubsio.cmake)
 
-set(HYBRID_SRC ${PROJECT_SOURCE_DIR}/3rdparty/memfabric_hybrid/src)
-file(GLOB_RECURSE ALL_HEADERS
-        "${HYBRID_SRC}/*.h"
-)
-list(FILTER ALL_HEADERS EXCLUDE REGEX "${HYBRID_SRC}/hybm/csrc/driver/npu_direct_rdma/.*")
-
-set(INCLUDE_DIRS "")
-foreach (header ${ALL_HEADERS})
-    get_filename_component(HEADER_DIR ${header} PATH)
-    list(APPEND INCLUDE_DIRS ${HEADER_DIR})
-endforeach ()
-list(REMOVE_DUPLICATES INCLUDE_DIRS)
-
-include_directories(${INCLUDE_DIRS})
 add_compile_definitions(PROJECT_VERSION_RAW=\"${PROJECT_VERSION_RAW}\")
 add_compile_definitions(VERSION_MAJOR=${VERSION_MAJOR}
         VERSION_MINOR=${VERSION_MINOR}

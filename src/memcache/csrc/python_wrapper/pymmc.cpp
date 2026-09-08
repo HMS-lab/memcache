@@ -21,7 +21,6 @@
 
 namespace py = pybind11;
 using namespace ock::mmc;
-using namespace ock::mf;
 
 void DefineMmcStructModule(py::module_ &m)
 {
@@ -797,7 +796,8 @@ PYBIND11_MODULE(_pymmc, m)
                 py::gil_scoped_release release;
                 return self.GetInto(key, reinterpret_cast<void *>(buffer_ptr), size, direct);
             },
-            py::arg("key"), py::arg("buffer_ptr"), py::arg("size"), py::arg("direct") = SMEMB_COPY_G2H,
+            py::arg("key"), py::arg("buffer_ptr"), py::arg("size"),
+            py::arg("direct") = static_cast<int32_t>(SMEMB_COPY_G2H),
             "Get object data directly into a pre-allocated buffer")
         .def(
             "batch_get_into",
@@ -811,7 +811,8 @@ PYBIND11_MODULE(_pymmc, m)
                 py::gil_scoped_release release;
                 return self.BatchGetInto(keys, buffers, sizes, direct);
             },
-            py::arg("keys"), py::arg("buffer_ptrs"), py::arg("sizes"), py::arg("direct") = SMEMB_COPY_G2H,
+            py::arg("keys"), py::arg("buffer_ptrs"), py::arg("sizes"),
+            py::arg("direct") = static_cast<int32_t>(SMEMB_COPY_G2H),
             "Get object data directly into pre-allocated buffers for multiple "
             "keys")
         .def(
@@ -829,7 +830,8 @@ PYBIND11_MODULE(_pymmc, m)
                 TP_TRACE_END(TP_MMC_PYBIND_GET_LAYERS, 0);
                 return ret;
             },
-            py::arg("key"), py::arg("buffer_ptrs"), py::arg("sizes"), py::arg("direct") = SMEMB_COPY_G2H)
+            py::arg("key"), py::arg("buffer_ptrs"), py::arg("sizes"),
+            py::arg("direct") = static_cast<int32_t>(SMEMB_COPY_G2H))
         .def(
             "batch_get_into_layers",
             [](MmcacheStore &self, const std::vector<std::string> &keys,
@@ -850,7 +852,8 @@ PYBIND11_MODULE(_pymmc, m)
                 TP_TRACE_END(TP_MMC_PYBIND_BATCH_GET_LAYERS, 0);
                 return ret;
             },
-            py::arg("keys"), py::arg("buffer_ptrs"), py::arg("sizes"), py::arg("direct") = SMEMB_COPY_G2H)
+            py::arg("keys"), py::arg("buffer_ptrs"), py::arg("sizes"),
+            py::arg("direct") = static_cast<int32_t>(SMEMB_COPY_G2H))
         .def(
             "get_local_service_id",
             [](MmcacheStore &self) {
@@ -867,8 +870,9 @@ PYBIND11_MODULE(_pymmc, m)
                 py::gil_scoped_release release;
                 return self.PutFrom(key, reinterpret_cast<void *>(buffer_ptr), size, direct, replicateConfig);
             },
-            py::arg("key"), py::arg("buffer_ptr"), py::arg("size"), py::arg("direct") = SMEMB_COPY_H2G,
-            py::arg("replicateConfig") = defaultConfig, "Put object data directly from a pre-allocated buffer")
+            py::arg("key"), py::arg("buffer_ptr"), py::arg("size"),
+            py::arg("direct") = static_cast<int32_t>(SMEMB_COPY_H2G), py::arg("replicateConfig") = defaultConfig,
+            "Put object data directly from a pre-allocated buffer")
         .def(
             "batch_put_from",
             [](MmcacheStore &self, const std::vector<std::string> &keys, const std::vector<uintptr_t> &buffer_ptrs,
@@ -881,8 +885,8 @@ PYBIND11_MODULE(_pymmc, m)
                 py::gil_scoped_release release;
                 return self.BatchPutFrom(keys, buffers, sizes, direct, replicateConfig);
             },
-            py::arg("keys"), py::arg("buffer_ptrs"), py::arg("sizes"), py::arg("direct") = SMEMB_COPY_H2G,
-            py::arg("replicateConfig") = defaultConfig,
+            py::arg("keys"), py::arg("buffer_ptrs"), py::arg("sizes"),
+            py::arg("direct") = static_cast<int32_t>(SMEMB_COPY_H2G), py::arg("replicateConfig") = defaultConfig,
             "Put object data directly from pre-allocated buffers for multiple "
             "keys")
         .def(
@@ -900,8 +904,8 @@ PYBIND11_MODULE(_pymmc, m)
                 TP_TRACE_END(TP_MMC_PYBIND_PUT_LAYERS, 0);
                 return ret;
             },
-            py::arg("key"), py::arg("buffer_ptrs"), py::arg("sizes"), py::arg("direct") = SMEMB_COPY_H2G,
-            py::arg("replicateConfig") = defaultConfig)
+            py::arg("key"), py::arg("buffer_ptrs"), py::arg("sizes"),
+            py::arg("direct") = static_cast<int32_t>(SMEMB_COPY_H2G), py::arg("replicateConfig") = defaultConfig)
         .def(
             "batch_put_from_layers",
             [](MmcacheStore &self, const std::vector<std::string> &keys,
@@ -922,8 +926,8 @@ PYBIND11_MODULE(_pymmc, m)
                 TP_TRACE_END(TP_MMC_PYBIND_BATCH_PUT_LAYERS, 0);
                 return ret;
             },
-            py::arg("keys"), py::arg("buffer_ptrs"), py::arg("sizes"), py::arg("direct") = SMEMB_COPY_H2G,
-            py::arg("replicateConfig") = defaultConfig)
+            py::arg("keys"), py::arg("buffer_ptrs"), py::arg("sizes"),
+            py::arg("direct") = static_cast<int32_t>(SMEMB_COPY_H2G), py::arg("replicateConfig") = defaultConfig)
         .def(
             "batch_alloc",
             [](MmcacheStore &self, const std::vector<std::string> &keys, const std::vector<size_t> &sizes,
@@ -949,7 +953,8 @@ PYBIND11_MODULE(_pymmc, m)
                 py::gil_scoped_release release;
                 return self.BatchCopy(gvaVec, bufVec, sizes, direct);
             },
-            py::arg("gva_ptrs"), py::arg("buffer_ptrs"), py::arg("sizes"), py::arg("direct") = SMEMB_COPY_G2L)
+            py::arg("gva_ptrs"), py::arg("buffer_ptrs"), py::arg("sizes"),
+            py::arg("direct") = static_cast<int32_t>(SMEMB_COPY_G2L))
         .def(
             "batch_copy_layers",
             [](MmcacheStore &self, const std::vector<uintptr_t> &gva_ptrs,
@@ -977,7 +982,8 @@ PYBIND11_MODULE(_pymmc, m)
                 py::gil_scoped_release release;
                 return self.BatchCopy(gvaVec, bufVec, sizeVec, direct);
             },
-            py::arg("gva_ptrs"), py::arg("buffer_ptrs"), py::arg("sizes"), py::arg("direct") = SMEMB_COPY_G2L)
+            py::arg("gva_ptrs"), py::arg("buffer_ptrs"), py::arg("sizes"),
+            py::arg("direct") = static_cast<int32_t>(SMEMB_COPY_G2L))
         .def(
             "batch_write_finish",
             [](MmcacheStore &self, const std::vector<std::string> &keys, const std::vector<int32_t> &writeResults) {

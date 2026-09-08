@@ -15,7 +15,7 @@
 #include "nlohmann/json.hpp"
 
 #include "mmc_logger.h"
-#include "mf_tls_util.h"
+#include "mmc_tls_util.h"
 
 #include "mmc_http_server.h"
 
@@ -620,9 +620,9 @@ bool MmcHttpServer::SetupTls()
     if (!tlsOption_.tlsPkPwd.empty()) {
         if (decrypterLibPath_.empty()) {
             MMC_LOG_WARN("No decrypter provided, using default decrypter handler");
-            server_->RegisterDecryptHandler(mf::MfTlsUtil::DefaultDecrypter);
+            server_->RegisterDecryptHandler(MmcTlsUtil::DefaultDecrypter);
         } else {
-            const auto decrypter = mf::MfTlsUtil::LoadDecryptFunction(decrypterLibPath_.c_str());
+            const auto decrypter = MmcTlsUtil::LoadDecryptFunction(decrypterLibPath_.c_str());
             if (decrypter == nullptr) {
                 MMC_LOG_ERROR("Failed to load customized decrypt function from " << decrypterLibPath_);
                 return false;

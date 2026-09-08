@@ -16,7 +16,6 @@
 #include "mmc_meta_manager.h"
 #include "mmc_bm_proxy.h"
 #include "mmc_ref.h"
-#include "smem_bm.h"
 #include "gtest/gtest.h"
 
 namespace {

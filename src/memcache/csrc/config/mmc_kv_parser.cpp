@@ -14,7 +14,7 @@
 
 #include <linux/limits.h>
 
-#include "mf_file_util.h"
+#include "mmc_file_util.h"
 #include "mmc_functions.h"
 #include "common/mmc_functions.h"
 
@@ -52,7 +52,7 @@ Result KVParser::FromFile(const std::string &filePath)
         return MMC_ERROR;
     }
     /* open file to read */
-    if (!mf::FileUtil::CheckFileSize(path, MAX_CONF_FILE_SIZE)) {
+    if (!FileUtil::CheckFileSize(path, MAX_CONF_FILE_SIZE)) {
         MMC_LOG_ERROR("Config file size exceeds 10 MB");
         return MMC_ERROR;
     }

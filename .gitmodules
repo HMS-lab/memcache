@@ -6,10 +6,6 @@
 	path = test/3rdparty/mockcpp
 	url = https://github.com/sinojelly/mockcpp.git
 	branch = tags/v2.7
-[submodule "3rdparty/memfabric_hybrid"]
-	path = 3rdparty/memfabric_hybrid
-	url = https://gitcode.com/Ascend/memfabric_hybrid.git
-	branch = master
 [submodule "3rdparty/log/spdlog"]
 	path = 3rdparty/log/spdlog
 	url = https://gitcode.com/GitHub_Trending/sp/spdlog.git

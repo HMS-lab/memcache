@@ -1,0 +1,27 @@
+/*
+ * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
+ * MemCache_Hybrid is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *          http://license.coscl.org.cn/MulanPSL2
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ * See the Mulan PSL v2 for more details.
+*/
+#ifndef MEMCACHE_SMEM_VERSION_API_H
+#define MEMCACHE_SMEM_VERSION_API_H
+
+#include "mmc_common_includes.h"
+
+namespace ock {
+namespace mmc {
+
+using smemGetAbiVersionFunc = uint32_t (*)();
+
+Result CheckMemfabricAbiVersion(void *handle);
+
+} // namespace mmc
+} // namespace ock
+
+#endif // MEMCACHE_SMEM_VERSION_API_H

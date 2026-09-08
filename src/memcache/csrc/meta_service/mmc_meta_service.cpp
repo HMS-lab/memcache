@@ -26,7 +26,6 @@
 #include "mmc_smem_bm_helper.h"
 #include "spdlogger4c.h"
 #include "spdlogger.h"
-#include "smem_store_factory.h"
 
 namespace ock {
 namespace mmc {

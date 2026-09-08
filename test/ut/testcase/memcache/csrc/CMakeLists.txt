@@ -6,6 +6,8 @@ file(GLOB_RECURSE mmc_test_src
         ${CMAKE_CURRENT_SOURCE_DIR}/config/*
         ${CMAKE_CURRENT_SOURCE_DIR}/log/*
         ${CMAKE_CURRENT_SOURCE_DIR}/proto/*
+        ${CMAKE_CURRENT_SOURCE_DIR}/net/*
+        ${CMAKE_CURRENT_SOURCE_DIR}/under_api/mf_smem/*
         ${CMAKE_CURRENT_SOURCE_DIR}/under_api/ubs_io/*
         ${CMAKE_CURRENT_SOURCE_DIR}/client/*
 )
@@ -32,6 +34,11 @@ ADD_UNIT_TEST(test_mmc_test
         BUILD_FLAGS -fpermissive --coverage -DMSGPACK_NO_BOOST
 )
 add_dependencies(test_mmc_test mock_mf_smem)
+target_link_options(test_mmc_test PRIVATE
+        -Wl,--wrap=dlopen,--wrap=dlsym,--wrap=dlerror,--wrap=dlclose)
+set_property(TARGET test_mmc_test APPEND PROPERTY
+        BUILD_RPATH "${PROJECT_OUTPUT_PATH}/test/mock_mf_smem/lib64"
+)
 set_tests_properties(test_mmc_test PROPERTIES
         ENVIRONMENT "MEMFABRIC_HYBRID_EXTEND_LIB_PATH=${PROJECT_OUTPUT_PATH}/test/mock_mf_smem/lib64"
 )

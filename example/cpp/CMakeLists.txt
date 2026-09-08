@@ -6,11 +6,6 @@ if (("${BUILD_CPP_EXAMPLE}" STREQUAL "") OR ("${BUILD_CPP_EXAMPLE}" STREQUAL "OF
     project(memcache_cpp_test VERSION 1.0 LANGUAGES CXX C)
     set(CMAKE_SKIP_RPATH TRUE)
     set(CMAKE_CXX_STANDARD 17)
-    set(MF_PATH $ENV{MEMFABRIC_HYBRID_HOME_PATH})
-    message(STATUS "MF_PATH: ${MF_PATH}")
-    if ("${MF_PATH}" STREQUAL "")
-        message(FATAL_ERROR "MEMFABRIC_HYBRID_HOME_PATH memfabric_hybrid path not found!")
-    endif ()
     set(ASCEND_CANN_PACKAGE_PATH $ENV{ASCEND_HOME_PATH})
     if ("${ASCEND_CANN_PACKAGE_PATH}" STREQUAL "")
         message(FATAL_ERROR "ASCEND_HOME_PATH ascend cann path not found!")
@@ -25,7 +20,6 @@ if (("${BUILD_CPP_EXAMPLE}" STREQUAL "") OR ("${BUILD_CPP_EXAMPLE}" STREQUAL "OF
     # 递归查找所有头文件目录
     file(GLOB_RECURSE ALL_HEADERS
             "${CMAKE_CURRENT_SOURCE_DIR}/*.h"
-            "${MF_PATH}/*.h"
             "${MCC_PATH}/*.h"
     )
 
@@ -47,7 +41,6 @@ if (("${BUILD_CPP_EXAMPLE}" STREQUAL "") OR ("${BUILD_CPP_EXAMPLE}" STREQUAL "OF
 
     # 递归查找所有头文件目录
     file(GLOB_RECURSE ALL_SO
-            "${MF_PATH}/*.so"
             "${MCC_PATH}/*.so"
     )
 

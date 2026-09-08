@@ -1,12 +1,6 @@
 file(GLOB_RECURSE UT_SOURCE_FILES *.cpp
         testcase/*
         ../stub/*
-        ${PROJECT_SMEM_SRC_BASE}/csrc/common/*
-        ${PROJECT_SMEM_SRC_BASE}/csrc/config_store/*
-        ${PROJECT_SMEM_SRC_BASE}/csrc/net/*
-        ${PROJECT_SMEM_SRC_BASE}/csrc/smem_bm/*
-        ${PROJECT_SMEM_SRC_BASE}/csrc/smem_shm/*
-        ${PROJECT_SMEM_SRC_BASE}/csrc/smem.cpp
         ${PROJECT_MMC_SRC_BASE}/csrc/client/*
         ${PROJECT_MMC_SRC_BASE}/csrc/common/*
         ${PROJECT_MMC_SRC_BASE}/csrc/config/*
@@ -22,18 +16,14 @@ file(GLOB_RECURSE UT_SOURCE_FILES *.cpp
         ${PROJECT_MMC_SRC_BASE}/csrc/mmc_client.cpp
         ${PROJECT_MMC_SRC_BASE}/csrc/mmc_service.cpp
 )
+list(FILTER UT_SOURCE_FILES EXCLUDE REGEX ".*/(store_test|smem_test|shem_wrapper_test)\\.cpp$")
+list(FILTER UT_SOURCE_FILES EXCLUDE REGEX ".*/shmem_wrapper/.*")
 
 set(TEST_SRC_INCLUDE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/testcase/memcache/include)
 
 include_directories(
         ${TEST_SRC_INCLUDE_PATH}
         ${PROJECT_MMC_SRC_BASE}/csrc/under_api/mf_smem
-        ${PROJECT_SMEM_SRC_BASE}/include/host
-        ${PROJECT_SMEM_SRC_BASE}/csrc
-        ${PROJECT_SMEM_SRC_BASE}/csrc/net
-        ${PROJECT_SMEM_SRC_BASE}/csrc/common
-        ${PROJECT_SMEM_SRC_BASE}/csrc/config_store
-        ${PROJECT_SMEM_SRC_BASE}/csrc/under_api/hybm_core
         ${PROJECT_MMC_SRC_BASE}/include
         ${PROJECT_MMC_SRC_BASE}/include/cpp
         ${PROJECT_MMC_SRC_BASE}/csrc/
@@ -50,7 +40,6 @@ include_directories(
         ${PROJECT_MMC_SRC_BASE}/csrc/local_service
         ${PROJECT_MMC_SRC_BASE}/csrc/proto
         ${PROJECT_MMC_SRC_BASE}/csrc/under_api/ubs_io
-        ${PROJECT_MMC_SRC_BASE}/../util/csrc
         ${ASCEND_CANN_PACKAGE_PATH}/aarch64-linux/include/
 )
 
@@ -59,7 +48,7 @@ FUNCTION(ADD_UNIT_TEST TEST_NAME)
     set(MULTI_VALUE_ARGS FILES BUILD_FLAGS DEPENDS INCLUDE_PATHS LINK_LIBRARIES THIRDPARTY_DEPENDS)
     cmake_parse_arguments(ADD_UNIT_TEST "" "${ONE_VALUE_ARGS}" "${MULTI_VALUE_ARGS}" ${ARGN})
     set(TEST_TARGET_NAME ${TEST_NAME})
-    add_executable(${TEST_TARGET_NAME} ${ADD_UNIT_TEST_FILES} $<TARGET_OBJECTS:ptracer_object> $<TARGET_OBJECTS:config_store_object>)
+    add_executable(${TEST_TARGET_NAME} ${ADD_UNIT_TEST_FILES})
     target_link_directories(${TEST_TARGET_NAME} PUBLIC ${PROJECT_OUTPUT_PATH}/acc_links/lib64/)
     target_link_directories(${TEST_TARGET_NAME} PUBLIC ${PROJECT_3RDPARTY_BIN_DIR}/spdlog/lib/)
     target_link_directories(${TEST_TARGET_NAME} PUBLIC ${GTEST_BUILD_LIB_DIR}/lib)
@@ -94,7 +83,7 @@ ENDFUNCTION()
 
 set(TEST_INCLUDE_PATHS ../../src/memcache/)
 set(TEST_SRC_PATHS ${CMAKE_CURRENT_SOURCE_DIR})
-set(TEST_DEPEND_LIBS mmc_static gtest dl acc_tcp_net_static gcov pthread)
+set(TEST_DEPEND_LIBS mmc_static gtest dl gcov pthread)
 
 add_subdirectory(testcase/memcache/csrc/net)
 add_subdirectory(testcase/memcache/csrc/meta_service)

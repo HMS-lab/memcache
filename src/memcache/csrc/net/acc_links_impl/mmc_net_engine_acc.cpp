@@ -13,9 +13,7 @@
 
 #include <chrono>
 
-#include "mf_tls_util.h"
-#include "acc_def.h"
-#include "acc_tcp_server.h"
+#include "mmc_tls_util.h"
 #include "mmc_net_link_acc.h"
 #include "mmc_net_ctx_store.h"
 #include "mmc_msg_base.h"
@@ -176,7 +174,7 @@ Result NetEngineAcc::StopInner()
         server_->Stop();
         server_ = nullptr;
     }
-    mf::MfTlsUtil::CloseTlsLib();
+    MmcTlsUtil::CloseTlsLib();
     return MMC_OK;
 }
 
@@ -680,11 +678,11 @@ Result NetEngineAcc::RegisterDecryptHandler(const std::string &decryptLibPath) c
 {
     if (decryptLibPath.empty()) {
         MMC_LOG_WARN("No decrypter provided, using default decrypter handler");
-        server_->RegisterDecryptHandler(mf::MfTlsUtil::DefaultDecrypter);
+        server_->RegisterDecryptHandler(MmcTlsUtil::DefaultDecrypter);
         return MMC_OK;
     }
 
-    const auto decrypter = mf::MfTlsUtil::LoadDecryptFunction(decryptLibPath.c_str());
+    const auto decrypter = MmcTlsUtil::LoadDecryptFunction(decryptLibPath.c_str());
     if (decrypter == nullptr) {
         MMC_LOG_ERROR("failed to load customized decrypt function");
         return MMC_ERROR;

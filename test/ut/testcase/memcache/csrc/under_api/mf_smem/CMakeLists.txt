@@ -10,6 +10,7 @@
 
 file(GLOB_RECURSE mf_smem_src
         ${CMAKE_CURRENT_SOURCE_DIR}/mf_smem_api_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/mf_runtime_loader_test.cpp
 )
 ADD_UNIT_TEST(test_mf_smem_api
         FILES ${mf_smem_src} ${TEST_SRC_PATHS}/ut_main.cpp
@@ -17,3 +18,5 @@ ADD_UNIT_TEST(test_mf_smem_api
         LINK_LIBRARIES ${TEST_DEPEND_LIBS}
         BUILD_FLAGS -fpermissive --coverage
 )
+target_link_options(test_mf_smem_api PRIVATE
+        -Wl,--wrap=dlopen,--wrap=dlsym,--wrap=dlerror,--wrap=dlclose)

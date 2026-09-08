@@ -17,7 +17,7 @@
 #include "mmc_kv_parser.h"
 #include "mmc_logger.h"
 #include "mmc_meta_service.h"
-#include "mf_out_logger.h"
+#include "smem_logger_api.h"
 #include "spdlogger4c.h"
 
 namespace ock {
@@ -33,11 +33,11 @@ static bool ApplyMetaLogLevelFromConfig(int32_t newLogLevel)
         MMC_LOG_ERROR("Invalid log level " << newLogLevel);
         return false;
     }
-    mf::OutLogger::Instance().SetLogLevel(static_cast<mf::LogLevel>(newLogLevel));
+    MFLoggerApi::SetLogLevel(newLogLevel);
     if (SPDLOG_ResetLogLevel(newLogLevel) != 0) {
         MMC_LOG_ERROR("Failed to reset spdlog log level to " << newLogLevel << ", roll back all meta loggers");
         MmcOutLogger::Instance().SetLogLevel(oldLogLevel);
-        mf::OutLogger::Instance().SetLogLevel(static_cast<mf::LogLevel>(oldLogLevel));
+        MFLoggerApi::SetLogLevel(static_cast<int32_t>(oldLogLevel));
         return false;
     }
     MMC_LOG_TRACE("meta log_level hot-reloaded to " << newLogLevel);

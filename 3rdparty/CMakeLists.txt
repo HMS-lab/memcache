@@ -212,13 +212,3 @@ unset(CMAKE_POLICY_VERSION_MINIMUM)
 if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12)
     target_compile_options(prometheus-cpp-simpleapi PRIVATE -include stdexcept)
 endif ()
-
-####################################################################
-# MemFabric_Hybrid
-####################################################################
-
-set(_ACTUAL_BUILD_TESTS ${BUILD_TESTS})
-set(BUILD_TESTS OFF)
-set(BUILD_FROM_MEMCACHE ON)
-add_subdirectory(memfabric_hybrid)
-set(BUILD_TESTS ${_ACTUAL_BUILD_TESTS})

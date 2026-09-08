@@ -26,8 +26,7 @@
 #include "mmc_meta_net_server.h"
 #include "mmc_meta_mgr_proxy.h"
 #include "mmc_periodic_task.h"
-#include "smem_config_store.h"
-#include "smem_ha_config_store.h"
+#include "smem_config_store_api.h"
 #include "kv_event/mmc_kv_event_runtime.h"
 
 namespace ock {

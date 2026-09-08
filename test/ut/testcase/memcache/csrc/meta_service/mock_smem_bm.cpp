@@ -10,7 +10,7 @@
  * See the Mulan PSL v2 for more details.
 */
 #include <map>
-#include "smem_bm.h"
+#include "smem_bm_def.h"
 
 static uint64_t g_spaces[SMEM_MEM_TYPE_BUTT] = {0};
 static std::map<uint64_t, uint64_t> g_registBuffer{};
@@ -31,6 +31,7 @@ extern "C" void MockSmemBmResetLastCreate2Option()
 }
 
 // 实现所有函数返回0或默认值
+extern "C" {
 int32_t smem_bm_config_init(smem_bm_config_t *config)
 {
     return 0;
@@ -174,4 +175,5 @@ int32_t smem_bm_gva_to_va(smem_bm_t handle, void *gva, smem_bm_mem_type_t vaMemT
 int32_t smem_bm_get_meta_service_info(char *ip, size_t ipLen, uint16_t *port)
 {
     return 0;
+}
 }

@@ -9,10 +9,17 @@
 * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 * See the Mulan PSL v2 for more details.
 */
+#include <mutex>
+
 #include "gtest/gtest.h"
+#include "mmc_common_includes.h"
+
+#define private public
+#include "smem_acc_api.h"
+#undef private
 
 // 先按正常方式包含 acc_links 头文件，避免 private->public 宏干扰其内部实现。
-#include "acc_tcp_server.h"
+#include "mmc_acc_runtime.h"
 
 #define private public
 #include "mmc_net_engine_acc.h"
@@ -26,63 +33,48 @@ using namespace ock::mmc;
 /* 最小可实例化的 TcpLink，仅用于 HandleNewLink / HandleLinkBroken 的单元测试。 */
 class TestTcpLink final : public ock::acc::AccTcpLinkComplex {
 public:
-    explicit TestTcpLink(uint32_t id) : AccTcpLinkComplex(-1, "127.0.0.1:0", id) {}
+    struct State {
+        uint32_t id;
+        uint64_t context;
+    };
 
-    int32_t BlockSend(void *, uint32_t) override
-    {
-        return 0;
-    }
-    int32_t BlockRecv(void *, uint32_t) override
-    {
-        return 0;
-    }
-    int32_t PollingInput(int32_t) const override
-    {
-        return 0;
-    }
-    int32_t SetSendTimeout(uint32_t) const override
-    {
-        return 0;
-    }
-    int32_t SetReceiveTimeout(uint32_t) const override
-    {
-        return 0;
-    }
-    int32_t EnableNonBlocking() const override
-    {
-        return 0;
-    }
-    void Close() override {}
-    bool IsConnected() const override
-    {
-        return true;
-    }
+    explicit TestTcpLink(uint32_t id) : AccTcpLinkComplex(&state_, false), state_{id, 0} {}
 
-    int32_t NonBlockSend(int16_t, const ock::acc::AccDataBufferPtr &, const ock::acc::AccDataBufferPtr &) override
-    {
-        return 0;
-    }
-    int32_t NonBlockSend(int16_t, uint32_t, const ock::acc::AccDataBufferPtr &,
-                         const ock::acc::AccDataBufferPtr &) override
-    {
-        return 0;
-    }
-    int32_t NonBlockSend(int16_t, int16_t, uint32_t, const ock::acc::AccDataBufferPtr &,
-                         const ock::acc::AccDataBufferPtr &) override
-    {
-        return 0;
-    }
-    int32_t EnqueueAndModifyEpoll(const ock::acc::AccMsgHeader &, const ock::acc::AccDataBufferPtr &,
-                                  const ock::acc::AccDataBufferPtr &) override
-    {
-        return 0;
-    }
+private:
+    State state_;
 };
 
 class TestNetEngineAccIgnoredRank : public testing::Test {
 public:
-    void SetUp() override {}
-    void TearDown() override {}
+    void SetUp() override
+    {
+        originalId_ = MFAccApi::gSmemAccLinkId;
+        originalSetContext_ = MFAccApi::gSmemAccLinkSetContext;
+        originalGetContext_ = MFAccApi::gSmemAccLinkGetContext;
+        originalRelease_ = MFAccApi::gSmemAccLinkRelease;
+        MFAccApi::gSmemAccLinkId = [](smem_acc_link_t link) { return static_cast<TestTcpLink::State *>(link)->id; };
+        MFAccApi::gSmemAccLinkSetContext = [](smem_acc_link_t link, uint64_t context) {
+            static_cast<TestTcpLink::State *>(link)->context = context;
+        };
+        MFAccApi::gSmemAccLinkGetContext = [](smem_acc_link_t link) {
+            return static_cast<TestTcpLink::State *>(link)->context;
+        };
+        MFAccApi::gSmemAccLinkRelease = [](smem_acc_link_t) {};
+    }
+
+    void TearDown() override
+    {
+        MFAccApi::gSmemAccLinkId = originalId_;
+        MFAccApi::gSmemAccLinkSetContext = originalSetContext_;
+        MFAccApi::gSmemAccLinkGetContext = originalGetContext_;
+        MFAccApi::gSmemAccLinkRelease = originalRelease_;
+    }
+
+private:
+    smemAccLinkIdFunc originalId_{nullptr};
+    smemAccLinkSetContextFunc originalSetContext_{nullptr};
+    smemAccLinkGetContextFunc originalGetContext_{nullptr};
+    smemAccLinkReleaseFunc originalRelease_{nullptr};
 };
 
 // 与 mmc_net_engine_acc.cpp 中的 INVALID_RANK_ID 保持一致。
@@ -95,7 +87,7 @@ TEST_F(TestNetEngineAccIgnoredRank, HandleNewLink_InvalidRankId_AddsToIgnoredSet
     req.rankId = INVALID_RANK_ID_FOR_TEST;
     TcpLinkPtr link(new TestTcpLink(42));
 
-    Result ret = engine.HandleNewLink(req, link);
+    auto ret = engine.HandleNewLink(req, link);
     EXPECT_EQ(ret, MMC_OK);
     EXPECT_EQ(engine.ignoredRankLinkIds_.count(42), 1U);
 }
@@ -108,7 +100,7 @@ TEST_F(TestNetEngineAccIgnoredRank, HandleNewLink_ValidRankId_AddsToPeerLinkMap)
     req.rankId = 7;
     TcpLinkPtr link(new TestTcpLink(43));
 
-    Result ret = engine.HandleNewLink(req, link);
+    auto ret = engine.HandleNewLink(req, link);
     EXPECT_EQ(ret, MMC_OK);
     EXPECT_EQ(engine.ignoredRankLinkIds_.count(43), 0U);
 
@@ -130,7 +122,7 @@ TEST_F(TestNetEngineAccIgnoredRank, HandleLinkBroken_IgnoredLink_ErasesFromSetAn
 
     TcpLinkPtr link(new TestTcpLink(42));
 
-    Result ret = engine.HandleLinkBroken(link);
+    auto ret = engine.HandleLinkBroken(link);
     EXPECT_EQ(ret, MMC_OK);
     EXPECT_EQ(engine.ignoredRankLinkIds_.count(42), 0U);
     EXPECT_FALSE(brokenHandlerCalled);

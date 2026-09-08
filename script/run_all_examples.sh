@@ -224,11 +224,6 @@ find_mf_set_env() {
     return 1
 }
 
-# Find memfabric_hybrid installed via pip (no set_env.sh in pip package).
-find_mf_pip_dir() {
-    python3 -c "import memfabric_hybrid, os; print(os.path.dirname(memfabric_hybrid.__file__))" 2>/dev/null
-}
-
 # Tracks whether source_all_cpp_env has already been called in this run,
 # to suppress duplicate "Sourcing ..." log messages on repeated invocations.
 _SOURCED_CPP_ENV=false
@@ -240,30 +235,6 @@ source_all_cpp_env() {
             info "Sourcing memfabric env: $mf_env"
         fi
         source "$mf_env"
-    else
-        local mf_pip
-        if mf_pip=$(find_mf_pip_dir) && [[ -n "$mf_pip" ]] && [[ -d "$mf_pip/include" ]]; then
-            export MEMFABRIC_HYBRID_HOME_PATH="$mf_pip"
-            if [[ ":${LD_LIBRARY_PATH:-}:" != *":$mf_pip/lib:"* ]]; then
-                export LD_LIBRARY_PATH="$mf_pip/lib:${LD_LIBRARY_PATH:-}"
-            fi
-            # Workaround: pip-installed memfabric_hybrid wheel ships libs as
-            # `libfoo.so` (no SONAME link), but binaries link against versioned
-            # SONAMEs (e.g. `libhcom.so.0`). Create the missing symlink in-place.
-            if [[ -d "$mf_pip/lib" ]]; then
-                local so so_base
-                for so in "$mf_pip/lib"/*.so; do
-                    [[ -f "$so" ]] || continue
-                    so_base=$(basename "$so" .so)
-                    if [[ ! -e "$mf_pip/lib/${so_base}.so.0" ]]; then
-                        ln -sf "$(basename "$so")" "$mf_pip/lib/${so_base}.so.0"
-                    fi
-                done
-            fi
-            if ! $_SOURCED_CPP_ENV; then
-                info "memfabric_hybrid not at /usr/local; using pip install at $mf_pip"
-            fi
-        fi
     fi
     local mc_env
     if mc_env=$(find_set_env); then
@@ -345,124 +316,6 @@ build_project() {
     bash "$SCRIPT_DIR/build_and_pack_run.sh" --build_mode RELEASE --build_test OFF
 }
 
-# memfabric_hybrid is a separate pip package that memcache_hybrid depends on.
-# The required minimum is declared in memcache's setup.py install_requires
-# (single source of truth), so this logic tracks version bumps automatically
-# without editing this script. When the needed version is not installed (or not
-# on the public pip index yet) we build the wheel locally from the 3rdparty
-# submodule; the memcache CMake build already compiled memfabric's C++ libs +
-# pybind modules (it builds memfabric as a subdirectory), so this only assembles
-# the wheel — no redundant C++ compilation. On success the wheel path is left
-# in MEMFABRIC_WHL.
-MEMFABRIC_WHL=""
-
-# Print the minimum memfabric_hybrid version memcache requires, parsed from
-# src/memcache/python/setup.py install_requires (e.g. "memfabric_hybrid>=1.2.0"
-# -> "1.2.0"). Non-zero exit means the requirement could not be determined.
-memfabric_required_version() {
-    python3 - "$PROJECT_DIR" <<'PY' 2>/dev/null
-import re, ast, os, sys
-setup_py = os.path.join(sys.argv[1], "src/memcache/python/setup.py")
-try:
-    txt = open(setup_py).read()
-except OSError:
-    sys.exit(1)
-m = re.search(r'install_requires\s*=\s*(\[[^\]]*\])', txt, re.S)
-if not m:
-    sys.exit(1)
-try:
-    reqs = ast.literal_eval(m.group(1))
-except (ValueError, SyntaxError):
-    sys.exit(1)
-for r in reqs:
-    mm = re.search(r'memfabric_hybrid\s*>=\s*([0-9][0-9.]*)', r)
-    if mm:
-        print(mm.group(1).rstrip("."))
-        break
-PY
-}
-
-memfabric_version_ok() {
-    local required
-    required=$(memfabric_required_version) || {
-        info "cannot determine required memfabric_hybrid version from setup.py"
-        return 1
-    }
-    python3 - "$required" <<'PY' 2>/dev/null
-import sys
-from importlib.metadata import version, PackageNotFoundError
-req = [int(x) for x in sys.argv[1].split(".")[:3]]
-while len(req) < 3: req.append(0)
-try:
-    v = version('memfabric_hybrid')
-except PackageNotFoundError:
-    raise SystemExit(1)
-parts = [int(x) for x in v.split('.')[:3]]
-while len(parts) < 3: parts.append(0)
-raise SystemExit(0 if parts >= req else 1)
-PY
-}
-
-build_memfabric_wheel() {
-    local fabric_dir="$PROJECT_DIR/3rdparty/memfabric_hybrid"
-    local mf_py_dir="$fabric_dir/src/smem/python/memfabric_hybrid"
-    local mf_pkg_dir="$mf_py_dir/memfabric_hybrid"
-    local out_dir="$PROJECT_DIR/output/3rdparty/memfabric_hybrid/wheel"
-    MEMFABRIC_WHL=""
-
-    [[ -f "$fabric_dir/output/smem/lib64/libmf_smem.so" ]] || {
-        info "memfabric C++ artifacts not built; cannot build memfabric wheel"
-        return 1
-    }
-    local mf_version
-    mf_version="$(cat "$fabric_dir/VERSION" | tr -d '[:space:]')"
-    export MEMFABRIC_VERSION="$mf_version"
-
-    # Warn if the vendored 3rdparty memfabric is older than memcache's setup.py
-    # requires — catches a version bump that forgot to update the submodule.
-    local required
-    if required=$(memfabric_required_version) && [[ -n "$required" ]]; then
-        if ! python3 - "$mf_version" "$required" <<'PY' 2>/dev/null
-import sys
-a = [int(x) for x in sys.argv[1].split(".")[:3]]
-b = [int(x) for x in sys.argv[2].split(".")[:3]]
-while len(a) < 3: a.append(0)
-while len(b) < 3: b.append(0)
-raise SystemExit(0 if a >= b else 1)
-PY
-        then
-            info "warning: vendored memfabric_hybrid ${mf_version} < memcache requirement ${required}"
-        fi
-    fi
-
-    info "Building memfabric_hybrid ${mf_version} wheel from 3rdparty artifacts ..."
-    mkdir -p "$mf_pkg_dir/lib"
-    \cp -f "$fabric_dir/output/smem/lib64/libmf_smem.so" "$mf_pkg_dir/lib/"
-    \cp -f "$fabric_dir/output/hybm/lib64/libmf_hybm_core.so" "$mf_pkg_dir/lib/"
-    \cp -f "$fabric_dir/output/acc_offload/lib64/libmf_acc_offload.so" "$mf_pkg_dir/lib/"
-    mkdir -p "$mf_pkg_dir/include/smem/host" "$mf_pkg_dir/include/smem/device" "$mf_pkg_dir/include/hybm"
-    cp -f "$fabric_dir/output/smem/include/host/"*.h "$mf_pkg_dir/include/smem/host/" 2>/dev/null || true
-    cp -f "$fabric_dir/output/smem/include/device/"*.h "$mf_pkg_dir/include/smem/device/" 2>/dev/null || true
-    cp -f "$fabric_dir/output/hybm/include/"*.h "$mf_pkg_dir/include/hybm/" 2>/dev/null || true
-
-    rm -f "$mf_pkg_dir"/_pymf_hybrid*.so "$mf_pkg_dir"/_pymf_transfer*.so "$mf_pkg_dir"/_pymf_acc_offload*.so
-    \cp -f "$PROJECT_DIR"/build/3rdparty/memfabric_hybrid/src/smem/csrc/python_wrapper/memfabric_hybrid/_pymf_hybrid*.so "$mf_pkg_dir/"
-    \cp -f "$PROJECT_DIR"/build/3rdparty/memfabric_hybrid/src/smem/csrc/python_wrapper/mk_transfer_adapter/_pymf_transfer*.so "$mf_pkg_dir/"
-    \cp -f "$PROJECT_DIR"/build/3rdparty/memfabric_hybrid/src/acc_offload/csrc/python_wrapper/_pymf_acc_offload*.so "$mf_pkg_dir/"
-
-    ( cd "$mf_py_dir" && rm -rf build dist memfabric_hybrid.egg-info \
-        && LD_LIBRARY_PATH="$mf_pkg_dir/lib:${LD_LIBRARY_PATH:-}" python3 setup.py bdist_wheel ) || {
-        info "memfabric wheel build failed"
-        return 1
-    }
-    mkdir -p "$out_dir"
-    cp -f "$mf_py_dir"/dist/*.whl "$out_dir/"
-    rm -rf "$mf_py_dir"/dist "$mf_py_dir"/build "$mf_py_dir"/memfabric_hybrid.egg-info
-    rm -rf "$mf_pkg_dir/lib" "$mf_pkg_dir/include" "$mf_pkg_dir"/_pymf_*.so
-    MEMFABRIC_WHL="$(ls -1 "$out_dir"/memfabric_hybrid-*.whl 2>/dev/null | head -1)"
-    [[ -n "$MEMFABRIC_WHL" ]]
-}
-
 # True if memcache_hybrid is importable AND its installed version is >= the
 # project's VERSION file. The base image may ship an older memcache_hybrid
 # (e.g. 1.1.1) that lacks APIs the examples use (e.g. L2G); comparing against
@@ -492,23 +345,6 @@ ensure_python_deps() {
         return 0
     fi
     build_project
-    # memcache_hybrid depends on memfabric_hybrid>=1.2.0 (a separate pip package
-    # not yet on the public index). If it is not installed at a compatible
-    # version, build the wheel from the 3rdparty artifacts (CMake already
-    # compiled them above) and install it locally; then install memcache with
-    # --no-deps so pip never reaches the network and never errors on
-    # "memfabric_hybrid not found". This must happen before installing memcache
-    # (from wheel or from source), otherwise memcache_hybrid installs but fails
-    # to import due to the missing memfabric dependency.
-    if ! memfabric_version_ok; then
-        if build_memfabric_wheel; then
-            info "Installing memfabric wheel: $(basename "$MEMFABRIC_WHL")"
-            pip install --no-deps --force-reinstall "$MEMFABRIC_WHL" 2>/dev/null || return 1
-        else
-            info "memfabric_hybrid>=1.2.0 unavailable (not installed and wheel build failed)"
-            return 1
-        fi
-    fi
     local whl
     whl=$(find_whl)
     if [[ -n "$whl" ]]; then
@@ -525,18 +361,16 @@ ensure_python_deps() {
 ensure_cpp_deps() {
     # 1. Already set?
     if [[ -n "${MEMCACHE_HYBRID_HOME_PATH:-}" ]] && \
-       [[ -d "$MEMCACHE_HYBRID_HOME_PATH/include" ]] && \
-       [[ -n "${MEMFABRIC_HYBRID_HOME_PATH:-}" ]]; then
+       [[ -d "$MEMCACHE_HYBRID_HOME_PATH/include" ]]; then
         info "MEMCACHE_HYBRID_HOME_PATH: $MEMCACHE_HYBRID_HOME_PATH"
-        info "MEMFABRIC_HYBRID_HOME_PATH: $MEMFABRIC_HYBRID_HOME_PATH"
         source_all_cpp_env
         return 0
     fi
 
     # 2. Installed at default location?
-    if find_set_env >/dev/null || find_mf_set_env >/dev/null; then
+    if find_set_env >/dev/null; then
         source_all_cpp_env
-        if [[ -n "${MEMFABRIC_HYBRID_HOME_PATH:-}" ]]; then
+        if [[ -n "${MEMCACHE_HYBRID_HOME_PATH:-}" ]]; then
             return 0
         fi
     fi
@@ -551,7 +385,7 @@ ensure_cpp_deps() {
     info "Installing run package: $(basename "$run_pkg")"
     bash "$run_pkg" --no-check || return 1
     source_all_cpp_env
-    if [[ -n "${MEMFABRIC_HYBRID_HOME_PATH:-}" ]]; then
+    if [[ -n "${MEMCACHE_HYBRID_HOME_PATH:-}" ]]; then
         return 0
     fi
     return 1

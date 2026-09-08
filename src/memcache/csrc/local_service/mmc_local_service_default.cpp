@@ -15,7 +15,6 @@
 #include <chrono>
 #include <thread>
 
-#include "smem_bm.h"
 #include "smem_bm_api.h"
 #include "mmc_meta_net_client.h"
 #include "mmc_msg_client_meta.h"

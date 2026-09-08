@@ -14,9 +14,9 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/googletest/googletest/i
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/googletest/googlemock/include)
 
 include_directories(
-        ${PROJECT_SMEM_SRC_BASE}/include/host
-        ${PROJECT_HYBM_SRC_BASE}/include
-        ${PROJECT_ACCLINKS_SRC_BASE}/include
+        ${PROJECT_MMC_SRC_BASE}/csrc/common
+        ${PROJECT_MMC_SRC_BASE}/csrc/under_api/mf_smem
+        ${PROJECT_MMC_SRC_BASE}/csrc/net/acc_links_impl
         ${PROJECT_3RDPARTY_SRC_DIR}/nlohmann/json/single_include/
         ${PROJECT_3RDPARTY_SRC_DIR}/prometheus-cpp-lite/simpleapi/include
         ${PROJECT_3RDPARTY_SRC_DIR}/prometheus-cpp-lite/core/include

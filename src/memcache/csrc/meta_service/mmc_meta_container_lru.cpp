@@ -20,7 +20,7 @@
 #include <unordered_map>
 
 #include "mmc_mem_obj_meta.h"
-#include "mf_rwlock.h"
+#include "mmc_rwlock.h"
 #include "mmc_meta_container.h"
 
 namespace ock {
@@ -39,21 +39,21 @@ private:
     };
     std::unordered_map<Key, ValueLruItem> metaMap_;
     std::list<Key> lruLists_[MEDIA_NONE];
-    ock::mf::ReadWriteLock lruLock_;
-    ock::mf::ReadWriteLock metaLock_;
+    MmcReadWriteLock lruLock_;
+    MmcReadWriteLock metaLock_;
     std::function<MediaType(const Value &)> getTypeFunc_;
 
 public:
     Result Insert(const Key &key, const Value &value) override
     {
-        ock::mf::WriteGuard lockGuard(metaLock_);
+        MmcWriteGuard lockGuard(metaLock_);
         auto iter = metaMap_.find(key);
         if (iter != metaMap_.end()) {
             return MMC_DUPLICATED_OBJECT;
         }
 
         // insert into LRU and create lruItem
-        ock::mf::WriteGuard lrucLockGuard(lruLock_);
+        MmcWriteGuard lrucLockGuard(lruLock_);
         MediaType blobType = GetBlobType(value);
         if (blobType == MEDIA_NONE) {
             MMC_LOG_ERROR("Failed to Insert, no medium registered. ");
@@ -77,7 +77,7 @@ public:
 
     Result Get(const Key &key, Value &value) override
     {
-        ock::mf::ReadGuard lockGuard(metaLock_);
+        MmcReadGuard lockGuard(metaLock_);
         auto iter = metaMap_.find(key);
         if (iter != metaMap_.end()) {
             value = iter->second.value_;
@@ -95,7 +95,7 @@ public:
 
     Result Erase(const Key &key, Value &value) override
     {
-        ock::mf::WriteGuard lockGuard(metaLock_);
+        MmcWriteGuard lockGuard(metaLock_);
         auto iter = metaMap_.find(key);
         if (iter == metaMap_.end()) {
             MMC_LOG_DEBUG("Key " << key << " not found in MmcMetaContainer. ErrCode: " << MMC_UNMATCHED_KEY);
@@ -108,7 +108,7 @@ public:
             return MMC_ERROR;
         }
         if (valueItem.mediaType_ != MEDIA_NONE) {
-            ock::mf::WriteGuard lruLockGuard(lruLock_);
+            MmcWriteGuard lruLockGuard(lruLock_);
             lruLists_[valueItem.mediaType_].erase(valueItem.lruIter_);
         }
         return MMC_OK;
@@ -116,8 +116,8 @@ public:
 
     Result EraseAll(std::function<void(const Key &, const Value &)> removeFunc) override
     {
-        mf::WriteGuard metaGuard(metaLock_);
-        mf::WriteGuard lruGuard(lruLock_);
+        MmcWriteGuard metaGuard(metaLock_);
+        MmcWriteGuard lruGuard(lruLock_);
 
         for (auto &pair : metaMap_) {
             removeFunc(pair.first, pair.second.value_);
@@ -132,10 +132,10 @@ public:
 
     void EraseIf(std::function<bool(const Key &, const Value &)> matchFunc) override
     {
-        ock::mf::WriteGuard lockGuard(metaLock_);
+        MmcWriteGuard lockGuard(metaLock_);
         for (auto iter = metaMap_.begin(); iter != metaMap_.end();) {
             if (matchFunc(iter->first, iter->second.value_)) {
-                ock::mf::WriteGuard lruLockGuard(lruLock_);
+                MmcWriteGuard lruLockGuard(lruLock_);
                 if (iter->second.mediaType_ != MEDIA_NONE) {
                     lruLists_[iter->second.mediaType_].erase(iter->second.lruIter_);
                 }
@@ -149,7 +149,7 @@ public:
     void IterateIf(std::function<bool(const Key &, const Value &)> matchFunc,
                    std::map<Key, Value> &matchedValues) override
     {
-        ock::mf::ReadGuard lockGuard(metaLock_);
+        MmcReadGuard lockGuard(metaLock_);
         for (auto iter = metaMap_.begin(); iter != metaMap_.end();) {
             if (matchFunc(iter->first, iter->second.value_)) {
                 matchedValues.emplace(std::make_pair(iter->first, iter->second.value_));
@@ -160,7 +160,7 @@ public:
 
     void GetAllKeys(std::vector<Key> &keys) override
     {
-        ock::mf::ReadGuard lockGuard(metaLock_);
+        MmcReadGuard lockGuard(metaLock_);
         keys.reserve(metaMap_.size());
         for (const auto &pair : metaMap_) {
             keys.push_back(pair.first);
@@ -170,13 +170,13 @@ public:
 
     size_t GetKeyCount() override
     {
-        ock::mf::ReadGuard lockGuard(metaLock_);
+        MmcReadGuard lockGuard(metaLock_);
         return metaMap_.size();
     }
 
     Result Promote(const Key &key)
     {
-        ock::mf::ReadGuard lockGuard(metaLock_);
+        MmcReadGuard lockGuard(metaLock_);
         auto iter = metaMap_.find(key);
         if (iter == metaMap_.end()) {
             MMC_LOG_ERROR("Promote: Key " << key << " not found in MmcMetaContainer. ErrCode: " << MMC_UNMATCHED_KEY);
@@ -192,7 +192,7 @@ public:
 
     MediaType GetMediaType(const Key &key) override
     {
-        ock::mf::ReadGuard lockGuard(metaLock_);
+        MmcReadGuard lockGuard(metaLock_);
         auto iter = metaMap_.find(key);
         if (iter == metaMap_.end()) {
             return MEDIA_NONE;
@@ -202,10 +202,10 @@ public:
 
     Result InsertLru(const Key &key, MediaType type)
     {
-        ock::mf::ReadGuard lockGuard(metaLock_);
+        MmcReadGuard lockGuard(metaLock_);
         auto iter = metaMap_.find(key);
         if (iter != metaMap_.end()) {
-            ock::mf::WriteGuard lockGuard(lruLock_);
+            MmcWriteGuard lockGuard(lruLock_);
             if (iter->second.mediaType_ != MEDIA_NONE) {
                 lruLists_[iter->second.mediaType_].erase(iter->second.lruIter_);
                 iter->second.mediaType_ = MEDIA_NONE;
@@ -224,14 +224,14 @@ public:
 
     Result RemoveFromLru(const Key &key, MediaType type)
     {
-        ock::mf::ReadGuard lockGuard(metaLock_);
+        MmcReadGuard lockGuard(metaLock_);
         auto iter = metaMap_.find(key);
         if (iter == metaMap_.end()) {
             MMC_LOG_WARN("RemoveFromLru: Key " << key << " not found.");
             return MMC_UNMATCHED_KEY;
         }
         if (iter->second.mediaType_ == type) {
-            ock::mf::WriteGuard lockGuard(lruLock_);
+            MmcWriteGuard lockGuard(lruLock_);
             lruLists_[type].erase(iter->second.lruIter_);
             iter->second.mediaType_ = MEDIA_NONE;
             MMC_LOG_DEBUG("Removed LRU entry, key=" << key << ", type=" << type);
@@ -246,8 +246,8 @@ public:
             MMC_LOG_ERROR("Invalid mediaType: " << mediaType);
             return false;
         }
-        ock::mf::WriteGuard lockGuard(metaLock_);
-        ock::mf::WriteGuard lruLockGuard(lruLock_);
+        MmcWriteGuard lockGuard(metaLock_);
+        MmcWriteGuard lruLockGuard(lruLock_);
         if (lruLists_[mediaType].empty()) {
             MMC_LOG_ERROR("Unable to evict, LRU list is empty");
             return false;
@@ -330,7 +330,7 @@ private:
     {
         // 只支持在同层级内部更新
         if (lruItem.mediaType_ != MEDIA_NONE) {
-            ock::mf::WriteGuard lockGuard(lruLock_);
+            MmcWriteGuard lockGuard(lruLock_);
             lruLists_[lruItem.mediaType_].erase(lruItem.lruIter_);
             lruLists_[lruItem.mediaType_].push_front(key);
             lruItem.lruIter_ = lruLists_[lruItem.mediaType_].begin();

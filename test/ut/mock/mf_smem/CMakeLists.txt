@@ -4,7 +4,7 @@ add_library(mock_mf_smem SHARED
         ${CMAKE_CURRENT_SOURCE_DIR}/../../testcase/memcache/csrc/meta_service/mock_smem_bm.cpp
 )
 target_include_directories(mock_mf_smem PRIVATE
-        ${PROJECT_SMEM_SRC_BASE}/include/host
+        ${PROJECT_MMC_SRC_BASE}/csrc/under_api/mf_smem
 )
 set_target_properties(mock_mf_smem PROPERTIES
         OUTPUT_NAME "mf_smem"

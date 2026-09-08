@@ -15,8 +15,7 @@
 
 #include <atomic>
 
-#include "acc_http_server.h"
-#include "acc_http_request_context.h"
+#include "mmc_http_runtime.h"
 
 #include "mmc_rest_api_facade.h"
 

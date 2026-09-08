@@ -11,16 +11,24 @@
 # See the Mulan PSL v2 for more details.
 
 import ctypes
+from enum import IntEnum
 import os
 import sys
 
-from memfabric_hybrid import bm
 
-L2G = bm.BmCopyType.L2G  # 拷贝方向：本地 HBM → 全局空间
-G2L = bm.BmCopyType.G2L  # 拷贝方向：全局空间 → 本地 HBM
-G2H = bm.BmCopyType.G2H  # 拷贝方向：全局空间 → 本地 Host DRAM
-H2G = bm.BmCopyType.H2G  # 拷贝方向：本地 Host DRAM → 全局空间
-AUTO = bm.BmCopyType.AUTO  # 拷贝方向：自动推断方向
+class _BmCopyType(IntEnum):
+    L2G = 0
+    G2L = 1
+    G2H = 2
+    H2G = 3
+    AUTO = 9
+
+
+L2G = _BmCopyType.L2G  # 拷贝方向：本地 HBM → 全局空间
+G2L = _BmCopyType.G2L  # 拷贝方向：全局空间 → 本地 HBM
+G2H = _BmCopyType.G2H  # 拷贝方向：全局空间 → 本地 Host DRAM
+H2G = _BmCopyType.H2G  # 拷贝方向：本地 Host DRAM → 全局空间
+AUTO = _BmCopyType.AUTO  # 拷贝方向：自动推断方向
 
 __all__ = [
     "DistributedObjectStore",
@@ -35,8 +43,6 @@ __all__ = [
     "H2G",
     "AUTO",
 ]
-
-import memfabric_hybrid
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)

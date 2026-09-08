@@ -10,6 +10,9 @@ ADD_UNIT_TEST(test_local_service
         BUILD_FLAGS -fpermissive --coverage
 )
 add_dependencies(test_local_service mock_mf_smem)
+set_property(TARGET test_local_service APPEND PROPERTY
+        BUILD_RPATH "${PROJECT_OUTPUT_PATH}/test/mock_mf_smem/lib64"
+)
 set_tests_properties(test_local_service PROPERTIES
         ENVIRONMENT "MEMFABRIC_HYBRID_EXTEND_LIB_PATH=${PROJECT_OUTPUT_PATH}/test/mock_mf_smem/lib64"
 )

@@ -170,7 +170,6 @@ public:
 
 private:
     static Result LoadAllSymbols();
-    static Result LoadSymbol(const char *symbolName, void **target);
     static void ClearAllSymbols();
 
 private:

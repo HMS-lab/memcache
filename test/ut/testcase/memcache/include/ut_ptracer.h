@@ -27,16 +27,21 @@ typedef struct {
     uint64_t (*current_time_ns)();                                               /* function hook to get time in ns */
 } ptracer;
 
-extern ptracer g_tracer;
+extern ptracer g_mmc_tracer;
 
 typedef struct {
     int32_t tracerType;       /* 1 default tracer with file dumper */
     const char *dumpFilePath; /* dir path of dump file */
 } ptracer_config_t;
 
-int32_t ptracer_init(ptracer_config_t *config);
-void ptracer_uninit(void);
-const char *ptracer_get_last_err_msg(void);
+int32_t mmc_ptracer_init(ptracer_config_t *config);
+void mmc_ptracer_uninit(void);
+const char *mmc_ptracer_get_last_err_msg(void);
+
+#define g_tracer                 g_mmc_tracer
+#define ptracer_init             mmc_ptracer_init
+#define ptracer_uninit           mmc_ptracer_uninit
+#define ptracer_get_last_err_msg mmc_ptracer_get_last_err_msg
 
 /**
  * @brief Start to trace

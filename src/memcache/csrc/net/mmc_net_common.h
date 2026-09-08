@@ -13,8 +13,8 @@
 #define MEM_FABRIC_MOBS_NET_COMMON_H
 
 #include "mmc_common_includes.h"
-#include "mf_ipv4_validator.h"
 #include "mmc_def.h"
+#include "mmc_ip_validator.h"
 
 namespace ock {
 namespace mmc {
@@ -40,7 +40,7 @@ struct NetEngineOptions {
     uint16_t threadCount = 2;     /* worker thread count */
     uint16_t rankId = UINT16_MAX; /* rank id */
     bool startListener = false;   /* start listener or not */
-    mmc_tls_config tlsOption;     /* TLS communication options */
+    mmc_tls_config tlsOption{};   /* TLS communication options */
     int32_t logLevel = 3;
     ExternalLog logFunc = nullptr;
 
@@ -69,31 +69,12 @@ inline std::string NetEngineOptions::ToString() const
 
 inline Result NetEngineOptions::ExtractIpPortFromUrl(const std::string &url, NetEngineOptions &option)
 {
-    using namespace mf;
-    auto result = SocketAddressParserMgr::getInstance().CreateParser(url);
-    MMC_ASSERT_LOG_AND_RETURN(result != nullptr, "result is nullptr", MMC_INVALID_PARAM);
-    std::string ipStr = result->GetIp();
-    std::string portStr = std::to_string(result->GetPort());
-    if (!result->IsIpv6()) {
-        /* verify ip and port */
-        Ipv4PortValidator validator1("IndexServiceUrl");
-        validator1.Initialize();
-        if (!(validator1.Validate(ipStr + ":" + portStr))) {
-            MMC_LOG_ERROR("Failed to extract url");
-            return MMC_INVALID_PARAM;
-        }
-    }
-
-    /* covert port */
-    long tmpPort = 0;
-    if (!StrUtil::String2Uint<long>(portStr, tmpPort)) {
-        MMC_LOG_ERROR("Failed to extract url");
-        return MMC_INVALID_PARAM;
-    }
+    UrlParser parser;
+    MMC_ASSERT_LOG_AND_RETURN(parser.Initialize(url), "Failed to extract url", MMC_INVALID_PARAM);
 
     /* set ip and port */
-    option.ip = ipStr;
-    option.port = tmpPort;
+    option.ip = parser.GetIp();
+    option.port = parser.GetPort();
     return MMC_OK;
 }
 } // namespace mmc

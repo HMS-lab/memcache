@@ -12,7 +12,7 @@
 #ifndef MEM_FABRIC_MMC_NET_COMMON_ACC_H
 #define MEM_FABRIC_MMC_NET_COMMON_ACC_H
 
-#include "acc_tcp_server.h"
+#include "mmc_acc_runtime.h"
 #include "mmc_common_includes.h"
 #include "mmc_net_link_map.h"
 
