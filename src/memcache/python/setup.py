@@ -77,7 +77,9 @@ setup(
     url="https://gitcode.com/Ascend/memcache",
     license="Mulan PSL v2",
     python_requires=">=3.8",
-    install_requires=[],
+    install_requires=[
+        "memfabric_hybrid>=1.3.0,<1.4.0",
+    ],
     zip_safe=False,
     package_data={"memcache_hybrid": ["_pymmc.cpython*.so", "lib/**", "config/**", "VERSION"]},
     cmdclass={
