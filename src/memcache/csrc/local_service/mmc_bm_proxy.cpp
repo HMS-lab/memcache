@@ -57,12 +57,20 @@ Result MmcBmProxy::InitBm(const mmc_bm_init_config_t &initConfig, const mmc_bm_c
         return MMC_ERROR;
     }
 
+    ptracer_config_t ptraceConfig{.tracerType = 1, .dumpFilePath = "/var/log/memfabric_hybrid"};
+    const auto ptracerRet = ptracer_init(&ptraceConfig);
+    if (ptracerRet != MMC_OK) {
+        MMC_LOG_WARN("Failed to bind MMC ptracer to MF, result: " << ptracerRet
+                                                                  << ", error: " << ptracer_get_last_err_msg());
+    }
+
     bmRankId_ = MFSmemApi::SmemBmGetRankId();
 
     auto ret = InternalCreateBm(createConfig);
     if (ret != MMC_OK) {
         MMC_LOG_ERROR("Internal create bm failed");
         MFSmemApi::SmemBmUninit(0);
+        ptracer_uninit();
         MFSmemApi::SmemUninit();
         return ret;
     }
@@ -71,6 +79,7 @@ Result MmcBmProxy::InitBm(const mmc_bm_init_config_t &initConfig, const mmc_bm_c
         MMC_LOG_ERROR("Failed to join smem bm");
         MFSmemApi::SmemBmDestroy(handle_);
         MFSmemApi::SmemBmUninit(0);
+        ptracer_uninit();
         MFSmemApi::SmemUninit();
         return MMC_ERROR;
     }
@@ -135,6 +144,7 @@ void MmcBmProxy::DestroyBm()
         std::fill(gvas_, gvas_ + MEDIA_NONE, nullptr);
     }
     MFSmemApi::SmemBmUninit(0);
+    ptracer_uninit();
     MFSmemApi::SmemUninit();
     MFSmemApi::CleanupLibrary();
     started_ = false;
