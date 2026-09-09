@@ -12,6 +12,8 @@
 #ifndef MMC_META_SERVICE_PROCESS_H
 #define MMC_META_SERVICE_PROCESS_H
 
+#include <csignal>
+
 #include "mmc_leader_election.h"
 #include "mmc_configuration.h"
 
@@ -50,6 +52,8 @@ private:
     static int ExtractIpPortFromUrl(const std::string &url, std::string &ip, uint16_t &port);
     static void RegisterSignal();
     static void SignalInterruptHandler(const int signal);
+    static void RegisterFatalSignal();
+    static void FatalSignalHandler(int signal, siginfo_t *info, void *ucontext);
     static int InitLogger(const mmc_meta_service_config_t &options);
     void StartConfigPolling();
     static acc::AccTlsOption BuildMetricsTlsOption(const mmc_meta_service_config_t &config);

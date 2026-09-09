@@ -12,7 +12,10 @@
 #ifndef MEMFABRIC_HYBRID_MMC_LOGGER_H
 #define MEMFABRIC_HYBRID_MMC_LOGGER_H
 
+#include <algorithm>
 #include <atomic>
+#include <cstdarg>
+#include <cstdio>
 #include <ctime>
 #include <cstring>
 #include <iostream>
@@ -174,6 +177,54 @@ private:
 
     const char *logLevelDesc_[BUTT_LEVEL] = {"DEBUG", "INFO", "WARN", "ERROR", "FATAL", "TRACE"};
 };
+
+inline std::atomic<int> &SignalLogFd()
+{
+    static std::atomic<int> fd{STDERR_FILENO};
+    return fd;
+}
+
+inline void SetSignalLogFd(int fd)
+{
+    const int dupFd = (fd <= 0) ? -1 : dup(fd);
+    if (dupFd >= 0) {
+        const int oldFd = SignalLogFd().exchange(dupFd, std::memory_order_relaxed);
+        if (oldFd > STDERR_FILENO) {
+            close(oldFd);
+        }
+    }
+}
+
+inline int GetSignalLogFd()
+{
+    return SignalLogFd().load(std::memory_order_relaxed);
+}
+
+inline void LogSignalSafe(const char *buf, size_t len)
+{
+    const int fd = GetSignalLogFd();
+    while (len > 0) {
+        ssize_t n = write(fd, buf, len);
+        if (n <= 0) {
+            break;
+        }
+        buf += n;
+        len -= static_cast<size_t>(n);
+    }
+}
+
+constexpr int MMC_SIGNAL_LOG_BUF_SIZE = 512;
+
+inline void LogSignalSafeFormat(const char *fmt, ...)
+{
+    char buf[MMC_SIGNAL_LOG_BUF_SIZE];
+    std::va_list args;
+    va_start(args, fmt);
+    int len = std::vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+    len = std::max(len, 0);
+    LogSignalSafe(buf, static_cast<size_t>(std::min(len, MMC_SIGNAL_LOG_BUF_SIZE - 1)));
+}
 } // namespace mmc
 } // namespace ock
 
@@ -209,6 +260,14 @@ private:
 #define MMC_LOG_ERROR(ARGS) MMC_OUT_LOG(ock::mmc::ERROR_LEVEL, ARGS)
 #define MMC_LOG_FATAL(ARGS) MMC_OUT_LOG(ock::mmc::FATAL_LEVEL, ARGS)
 #define MMC_LOG_TRACE(ARGS) MMC_OUT_LOG(ock::mmc::TRACE_LEVEL, ARGS)
+
+// Signal-safe logging with a [MMC file:line func] header, used for section banners.
+#define MMC_LOG_ERROR_SIGNAL_SAFE(USER_FMT, ...)                                                              \
+    ock::mmc::LogSignalSafeFormat("[MMC %s:%d %s] " USER_FMT, MMC_LOG_FILENAME_SHORT, __LINE__, __FUNCTION__, \
+                                  ##__VA_ARGS__)
+
+// Signal-safe logging without the header, used for multi-line section content.
+#define MMC_LOG_SIGNAL_SAFE(USER_FMT, ...) ock::mmc::LogSignalSafeFormat(USER_FMT, ##__VA_ARGS__)
 
 #define MMC_AUDIT_LOG(MSG) MMC_OUT_AUDIT_LOG(MSG)
 

@@ -15,10 +15,14 @@
 #include <csignal>
 #include <chrono>
 #include <cstring>
+#include <execinfo.h>
 #include <fcntl.h>
 #include <iostream>
+#include <sys/resource.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <thread>
+#include <ucontext.h>
 #include <unistd.h>
 
 #pragma GCC diagnostic push
@@ -76,6 +80,7 @@ int MmcMetaServiceProcess::MainForPython()
     }
 
     RegisterSignal();
+    RegisterFatalSignal();
 
     ptracer_config_t ptraceConfig{.tracerType = 1, .dumpFilePath = "/var/log/memfabric_hybrid"};
     const auto result = ptracer_init(&ptraceConfig);
@@ -282,6 +287,182 @@ void MmcMetaServiceProcess::SignalInterruptHandler(const int signal)
 {
     g_receivedExitSignal = signal;
     g_processExitRequested = 1;
+}
+
+void MmcMetaServiceProcess::RegisterFatalSignal()
+{
+    struct sigaction action {};
+    action.sa_sigaction = FatalSignalHandler;
+    action.sa_flags = SA_SIGINFO | SA_RESETHAND;
+    sigemptyset(&action.sa_mask);
+
+    const int fatalSignals[] = {SIGABRT, SIGBUS, SIGSEGV, SIGFPE, SIGILL, SIGSYS};
+    for (int sig : fatalSignals) {
+        if (sigaction(sig, &action, nullptr) != 0) {
+            std::cerr << "Register fatal signal " << sig << " handler failed" << std::endl;
+        }
+    }
+
+    // SIGPIPE is an expected runtime event: log and continue, do not terminate
+    struct sigaction pipeAction {};
+    pipeAction.sa_sigaction = FatalSignalHandler;
+    pipeAction.sa_flags = SA_SIGINFO;
+    sigemptyset(&pipeAction.sa_mask);
+    if (sigaction(SIGPIPE, &pipeAction, nullptr) != 0) {
+        std::cerr << "Register SIGPIPE handler failed" << std::endl;
+    }
+}
+
+namespace {
+void PrintSignalInfo(siginfo_t *info)
+{
+    MMC_LOG_ERROR_SIGNAL_SAFE("============================ SIGINFO ============================\n");
+    MMC_LOG_SIGNAL_SAFE(
+        "Fatal signal caught, signo=%d code=%d errno=%d sender_pid=%d sender_uid=%u addr=%p addr_lsb=%d\n",
+        info->si_signo, info->si_code, info->si_errno, info->si_pid, static_cast<unsigned int>(info->si_uid),
+        info->si_addr, info->si_addr_lsb);
+
+#ifdef si_pkey
+    MMC_LOG_SIGNAL_SAFE("pkey=%d\n", info->si_pkey);
+#endif
+#ifdef si_call_addr
+    MMC_LOG_SIGNAL_SAFE("call_addr=%p\n", info->si_call_addr);
+#endif
+}
+
+void DumpProcFile(const char *path)
+{
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) {
+        return;
+    }
+    char buf[4096];
+    ssize_t n = 0;
+    while ((n = read(fd, buf, sizeof(buf))) > 0) {
+        ock::mmc::LogSignalSafe(buf, static_cast<size_t>(n));
+    }
+    close(fd);
+}
+
+void PrintRegistersX86(void *ucontext)
+{
+#if defined(__x86_64__)
+    auto *ctx = static_cast<ucontext_t *>(ucontext);
+    const greg_t *gregs = ctx->uc_mcontext.gregs;
+    struct RegisterField {
+        const char *name;
+        int index;
+    };
+    const RegisterField kFields[] = {
+        {"rax", REG_RAX}, {"rbx", REG_RBX}, {"rcx", REG_RCX},    {"rdx", REG_RDX},       {"rsi", REG_RSI},
+        {"rdi", REG_RDI}, {"rbp", REG_RBP}, {"rsp", REG_RSP},    {"r8", REG_R8},         {"r9", REG_R9},
+        {"r10", REG_R10}, {"r11", REG_R11}, {"r12", REG_R12},    {"r13", REG_R13},       {"r14", REG_R14},
+        {"r15", REG_R15}, {"rip", REG_RIP}, {"eflags", REG_EFL}, {"trapno", REG_TRAPNO}, {"err", REG_ERR},
+        {"cr2", REG_CR2},
+    };
+    constexpr int kFieldCount = static_cast<int>(sizeof(kFields) / sizeof(kFields[0]));
+    constexpr int kRegsPerLine = 4;
+    for (int i = 0; i < kFieldCount; i++) {
+        const char *sep = (i % kRegsPerLine == kRegsPerLine - 1 || i == kFieldCount - 1) ? "\n" : " ";
+        MMC_LOG_SIGNAL_SAFE("%s=0x%016llx%s", kFields[i].name, static_cast<unsigned long long>(gregs[kFields[i].index]),
+                            sep);
+    }
+#else
+    (void)ucontext;
+#endif
+}
+
+void PrintRegistersAarch64(void *ucontext)
+{
+#if defined(__aarch64__)
+    auto *ctx = static_cast<ucontext_t *>(ucontext);
+    const mcontext_t &mc = ctx->uc_mcontext;
+    constexpr int kGeneralRegCount = 31; // x0..x30, x29 即 fp、x30 即 lr
+    constexpr int kRegsPerLine = 4;
+    for (int i = 0; i < kGeneralRegCount; i++) {
+        const char *sep = (i % kRegsPerLine == kRegsPerLine - 1 || i == kGeneralRegCount - 1) ? "\n" : " ";
+        MMC_LOG_SIGNAL_SAFE("x%d=0x%016llx%s", i, static_cast<unsigned long long>(mc.regs[i]), sep);
+    }
+    MMC_LOG_SIGNAL_SAFE("sp=0x%016llx pc=0x%016llx pstate=0x%016llx\n", static_cast<unsigned long long>(mc.sp),
+                        static_cast<unsigned long long>(mc.pc), static_cast<unsigned long long>(mc.pstate));
+#else
+    (void)ucontext;
+#endif
+}
+
+void PrintRegisters(void *ucontext)
+{
+    MMC_LOG_ERROR_SIGNAL_SAFE("============================ REGISTERS ============================\n");
+    if (ucontext == nullptr) {
+        MMC_LOG_SIGNAL_SAFE("ucontext is null, skip register dump\n");
+        return;
+    }
+    PrintRegistersX86(ucontext);
+    PrintRegistersAarch64(ucontext);
+}
+
+void PrintUsage()
+{
+    MMC_LOG_ERROR_SIGNAL_SAFE("============================ USAGE ============================\n");
+    struct rusage usage {};
+    if (getrusage(RUSAGE_SELF, &usage) == 0) {
+        MMC_LOG_SIGNAL_SAFE("cpu_user=%ld.%06lds cpu_sys=%ld.%06lds maxrss_kb=%ld minflt=%ld majflt=%ld "
+                            "inblock=%ld oublock=%ld nvcsw=%ld nivcsw=%ld\n",
+                            static_cast<long>(usage.ru_utime.tv_sec), static_cast<long>(usage.ru_utime.tv_usec),
+                            static_cast<long>(usage.ru_stime.tv_sec), static_cast<long>(usage.ru_stime.tv_usec),
+                            static_cast<long>(usage.ru_maxrss), static_cast<long>(usage.ru_minflt),
+                            static_cast<long>(usage.ru_majflt), static_cast<long>(usage.ru_inblock),
+                            static_cast<long>(usage.ru_oublock), static_cast<long>(usage.ru_nvcsw),
+                            static_cast<long>(usage.ru_nivcsw));
+    }
+    DumpProcFile("/proc/loadavg");
+    DumpProcFile("/proc/meminfo");
+}
+
+void PrintMemoryMaps()
+{
+    MMC_LOG_ERROR_SIGNAL_SAFE("============================ MEMORY MAPS ============================\n");
+    DumpProcFile("/proc/self/maps");
+}
+
+void PrintBacktrace()
+{
+    MMC_LOG_ERROR_SIGNAL_SAFE("============================ BACKTRACE ============================\n");
+
+    constexpr unsigned int kBacktraceWatchdogSeconds = 2;
+    struct sigaction watchdogAction {};
+    struct sigaction oldAction {};
+    watchdogAction.sa_handler = [](int) { raise(SIGQUIT); };
+    sigaction(SIGALRM, &watchdogAction, &oldAction);
+    alarm(kBacktraceWatchdogSeconds);
+
+    void *btBuf[64];
+    int btSize = backtrace(btBuf, 64);
+    backtrace_symbols_fd(btBuf, btSize, GetSignalLogFd());
+
+    alarm(0);
+    sigaction(SIGALRM, &oldAction, nullptr);
+}
+} // namespace
+
+void MmcMetaServiceProcess::FatalSignalHandler(int sig, siginfo_t *info, void *ucontext)
+{
+    PrintSignalInfo(info);
+    PrintRegisters(ucontext);
+    PrintUsage();
+    PrintBacktrace();
+    PrintMemoryMaps();
+
+    if (sig == SIGPIPE) {
+        return;
+    }
+
+    // Fatal signal: restore default action and re-raise to produce a core dump
+    struct sigaction action {};
+    action.sa_handler = SIG_DFL;
+    sigemptyset(&action.sa_mask);
+    sigaction(sig, &action, nullptr);
+    (void)raise(sig);
 }
 
 int MmcMetaServiceProcess::InitLogger(const mmc_meta_service_config_t &options)

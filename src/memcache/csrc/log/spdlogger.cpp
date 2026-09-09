@@ -10,9 +10,11 @@
  * See the Mulan PSL v2 for more details.
 */
 #include "spdlogger.h"
+#include <cstdio>
 #include <sys/stat.h>
 #include <vector>
 #include "spdlog/sinks/stdout_color_sinks.h"
+#include "mmc_logger.h"
 
 namespace ock::mmc::log {
 thread_local std::string SpdLogger::gLastErrorMessage;
@@ -103,7 +105,12 @@ void SpdLogger::BuildSinks(const InitOptions &options, bool needFile, bool needS
     if (needFile) {
         spdlog::file_event_handlers handlers;
         handlers.before_open = &BeforeOpenCallback;
-        handlers.after_open = &AfterOpenCallback;
+        handlers.after_open = [this](const spdlog::filename_t &filename, std::FILE *fileStream) {
+            AfterOpenCallback(filename, fileStream);
+            if (this == &GetInstance()) {
+                ock::mmc::SetSignalLogFd(::fileno(fileStream));
+            }
+        };
         handlers.after_close = &AfterCloseCallback;
         mFileSink = std::make_shared<ReopenableRotatingFileSinkMt>(options.path, options.rotationFileSize,
                                                                    options.rotationFileCount, true, handlers);
