@@ -395,6 +395,48 @@ TEST_F(TestMmcMetaManager, AllocAndBatchExistKey)
     metaMng->Stop();
 }
 
+TEST_F(TestMmcMetaManager, BatchExist)
+{
+    MmcLocation loc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo locInfo{0, 1000000};
+    uint64_t defaultTtl = 2000;
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 60U);
+    metaMng->Start();
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    metaMng->Mount(loc, locInfo, blobMap, false);
+
+    AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+    for (uint16_t i = 0U; i < 5U; ++i) {
+        string key = "batchExistKey_" + std::to_string(i);
+        MmcMemMetaDesc objMeta;
+        ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
+        metaMng->UpdateState(key, loc, MMC_WRITE_OK, 1);
+    }
+
+    std::vector<std::string> allExistKeys;
+    std::vector<std::string> partExistKeys;
+    for (uint16_t i = 0U; i < 5U; ++i) {
+        allExistKeys.push_back("batchExistKey_" + std::to_string(i));
+    }
+    partExistKeys.push_back("batchExistKey_2");
+    partExistKeys.push_back("batchExistKey_3");
+    partExistKeys.push_back("missingKey_0");
+
+    std::vector<Result> allExistResults;
+    ASSERT_EQ(metaMng->BatchExist(allExistKeys, allExistResults), MMC_OK);
+    ASSERT_TRUE(allExistResults == std::vector<Result>(allExistKeys.size(), MMC_OK));
+
+    constexpr size_t partUnmatchedIdx = 2;
+    std::vector<Result> partResults;
+    ASSERT_EQ(metaMng->BatchExist(partExistKeys, partResults), MMC_OK);
+    ASSERT_EQ(partResults.size(), 3U);
+    EXPECT_EQ(partResults[0], MMC_OK);
+    EXPECT_EQ(partResults[1], MMC_OK);
+    EXPECT_EQ(partResults[partUnmatchedIdx], MMC_UNMATCHED_KEY);
+
+    metaMng->Stop();
+}
+
 TEST_F(TestMmcMetaManager, Remove)
 {
     MmcLocation loc{0, MEDIA_DRAM};

@@ -363,15 +363,17 @@ Result MmcMetaMgrProxy::BatchExistKey(const BatchIsExistRequest &req, BatchIsExi
 {
     MmcMetaMetricManager &metricManager = MmcMetaMetricManager::GetInstance();
     metricManager.IncrementRequestCounter(RestMetricType::BATCH_EXIST_KEY, UINT32_MAX);
-    resp.results_.reserve(req.keys_.size());
-    for (size_t i = 0; i < req.keys_.size(); ++i) {
+    // 聚合预取：批量交由 MmcMetaManager::BatchExist 一次异步按 rank 回温，避免逐 key 单条预取
+    auto ret = metaMangerPtr_->BatchExist(req.keys_, resp.results_);
+    if (ret != MMC_OK) {
+        MMC_LOG_ERROR("batch exist failed, ret: " << ret);
+    }
+    for (size_t i = 0; i < resp.results_.size(); ++i) {
         metricManager.IncrementRequestCounter(RestMetricType::EXIST_KEY, UINT32_MAX);
-        auto ret = metaMangerPtr_->ExistKey(req.keys_[i]);
-        if (ret != MMC_OK && ret != MMC_UNMATCHED_KEY) {
-            MMC_LOG_ERROR("get key: " << req.keys_[i] << " unexpected result: " << ret);
+        if (resp.results_[i] != MMC_OK && resp.results_[i] != MMC_UNMATCHED_KEY) {
+            MMC_LOG_ERROR("get key: " << req.keys_[i] << " unexpected result: " << resp.results_[i]);
         }
-        resp.results_.emplace_back(ret);
-        IncrementResultCounter(metricManager, RestMetricType::EXIST_KEY, ret, UINT32_MAX);
+        IncrementResultCounter(metricManager, RestMetricType::EXIST_KEY, resp.results_[i], UINT32_MAX);
     }
     IncrementBatchResultCounter(metricManager, RestMetricType::BATCH_EXIST_KEY, resp.results_, UINT32_MAX);
     return MMC_OK;

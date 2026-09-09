@@ -12,7 +12,7 @@
 
 """Brief description of the module.
 Interactive calling of memcache_hybrid
-Available commands: put, get, remove, quit
+Available commands: put, get, remove, batch_exist, get_info, batch_get_info, quit
 """
 
 import faulthandler
@@ -30,7 +30,11 @@ print("set_device returned: {}".format(ret))
 
 STORE = DistributedObjectStore()
 DEFAULT_REPLICA_NUMBER = 1
-AVAILABLE_COMMANDS = "'put <key> <value>', 'get <key>', 'remove <key>' or 'quit'/'exit'"
+AVAILABLE_COMMANDS = (
+    "'put <key> <value>', 'get <key>', 'remove <key>', "
+    "'batch_exist <key1 ...>', 'get_info <key>', "
+    "'batch_get_info <key1 ...>' or 'quit'/'exit'"
+)
 
 
 def set_up():
@@ -62,6 +66,24 @@ def remove(key: str):
     if res != 0:
         raise ValueError(f"remove failed, res={res}")
     print(f"Remove operation succeeded")
+
+
+def batch_exist(keys: list):
+    print(f"Executing batch_exist operation: keys={keys}")
+    results = STORE.batch_is_exist(keys)
+    print(f"Batch exist result: {list(zip(keys, results))}")
+
+
+def get_info(key: str):
+    print(f"Executing get_info operation: key={key}")
+    info = STORE.get_key_info(key)
+    print(f"Key info result: {info}")
+
+
+def batch_get_info(keys: list):
+    print(f"Executing batch_get_info operation: keys={keys}")
+    infos = STORE.batch_get_key_info(keys)
+    print(f"Batch key info result: {list(zip(keys, infos))}")
 
 
 def stop():
@@ -99,6 +121,21 @@ def main():
                     print("Usage: remove <key>")
                 else:
                     remove(parts[1])
+            elif command == 'batch_exist':
+                if len(parts) < 2:
+                    print("Usage: batch_exist <key1> [key2 ...]")
+                else:
+                    batch_exist(parts[1:])
+            elif command == 'get_info':
+                if len(parts) != 2:
+                    print("Usage: get_info <key>")
+                else:
+                    get_info(parts[1])
+            elif command == 'batch_get_info':
+                if len(parts) < 2:
+                    print("Usage: batch_get_info <key1> [key2 ...]")
+                else:
+                    batch_get_info(parts[1:])
             elif command in ('quit', 'exit'):
                 print("Preparing to exit...")
                 break

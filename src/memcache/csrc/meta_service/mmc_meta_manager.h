@@ -281,7 +281,15 @@ public:
                         MediaType dstMedia = MediaType::MEDIA_DRAM, uint32_t flags = 0);
 
     /**
-     * @brief Prefetch a single key from SSD to DRAM.
+    * @brief Asynchronously prefetch keys from lower tier to upper tier, grouped by rank.
+    *        Unlike PrefetchKeys (which waits for rewarm completion), it only submits the
+    *        rewarm tasks to the rewarm pool in background and returns immediately.
+    * @param keys          [in] keys of the meta objects to be prefetched
+    */
+    Result PrefetchKeysAsync(const std::vector<std::string> &keys);
+
+    /**
+    * @brief Prefetch a single key from SSD to DRAM.
      * @param key           [in] key of the meta object to be prefetched
      */
     Result PrefetchKey(const std::string &key)
@@ -316,6 +324,12 @@ public:
      * @param key          [in] key of the meta object
      */
     Result ExistKey(const std::string &key);
+    /**
+     * @brief Batch exist check; prefetch SSD-resident keys via aggregated rewarm
+     * @param keys          [in] keys of the meta objects
+     * @param results       [out] per-key exist results; MMC_OK if exist, MMC_UNMATCHED_KEY otherwise
+     */
+    Result BatchExist(const std::vector<std::string> &keys, std::vector<Result> &results);
 
     /**
      * @brief Rewarm blob from SSD to DRAM (P5: SSD→DRAM回温)
@@ -437,6 +451,8 @@ public:
     }
 
 private:
+    Result ExistKeyCore(const std::string &key, MmcMemObjMetaPtr &memObj, MmcMemBlobPtr &upperBlob,
+                        MmcMemBlobPtr &lowerBlob);
     Result ResolveAndFillMetaDesc(const std::string &key, uint64_t operateId, MmcBlobFilterPtr filterPtr,
                                   const MmcMemObjMetaPtr &memObj, MmcMemMetaDesc &objMeta);
 
@@ -524,7 +540,8 @@ private:
                               std::vector<DeferredLockEntry> &deferredLockList);
 
     void RewarmRankGroup(uint32_t rank, std::vector<RewarmEntry> &group, const std::vector<std::string> &keys,
-                         uint32_t opRankId, uint32_t opSeq, std::vector<MmcMemMetaDesc> &objMetas);
+                         uint32_t opRankId, uint32_t opSeq, std::vector<MmcMemMetaDesc> &objMetas,
+                         bool attachReadLease = true);
 
     void AttachReadLocks(const std::vector<std::string> &keys, uint32_t opRankId, uint32_t opSeq,
                          std::vector<MmcMemMetaDesc> &objMetas, std::vector<DeferredLockEntry> &deferredLockList);
@@ -540,7 +557,7 @@ private:
                        const MmcMemBlobDesc &dstDesc, MediaType dstMedia);
 
     Result ApplyRewarm(const std::string &key, RewarmEntry &entry, MmcMemBlobPtr &dstBlob, const RewarmCtx &ctx,
-                       MmcMemMetaDesc &objMeta);
+                       MmcMemMetaDesc &objMeta, bool attachReadLease = true);
 
 private:
     std::mutex mutex_;

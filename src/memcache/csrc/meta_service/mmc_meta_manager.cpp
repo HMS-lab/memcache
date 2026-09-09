@@ -518,7 +518,7 @@ void MmcMetaManager::RollbackEntry(const std::string &key, const RewarmEntry &en
 }
 
 Result MmcMetaManager::ApplyRewarm(const std::string &key, RewarmEntry &entry, MmcMemBlobPtr &dstBlob,
-                                   const RewarmCtx &ctx, MmcMemMetaDesc &objMeta)
+                                   const RewarmCtx &ctx, MmcMemMetaDesc &objMeta, bool attachReadLease)
 {
     if (entry.memObj == nullptr || dstBlob == nullptr) {
         MMC_LOG_ERROR("rewarm apply: memObj or dstBlob is null, key=" << key);
@@ -548,16 +548,18 @@ Result MmcMetaManager::ApplyRewarm(const std::string &key, RewarmEntry &entry, M
         return ret;
     }
 
-    ret = dstBlob->UpdateState(key, entry.opRankId, entry.opSeq, MMC_READ_START);
-    if (ret != MMC_OK) {
-        MMC_LOG_WARN("READ_START failed after WRITE_OK for key=" << key << ", ret=" << ret);
-        MmcBlobFilterPtr rbFilter = MmcMakeRef<MmcBlobFilter>(dstBlob->GetDesc().rank_, ctx.dstMedia, NONE);
-        entry.memObj->FreeBlobs(key, globalAllocator_, rbFilter, false);
-        if (entry.memObj->NumBlobs() == 0) {
-            metaContainer_->Erase(key);
+    if (attachReadLease) {
+        ret = dstBlob->UpdateState(key, entry.opRankId, entry.opSeq, MMC_READ_START);
+        if (ret != MMC_OK) {
+            MMC_LOG_WARN("READ_START failed after WRITE_OK for key=" << key << ", ret=" << ret);
+            MmcBlobFilterPtr rbFilter = MmcMakeRef<MmcBlobFilter>(dstBlob->GetDesc().rank_, ctx.dstMedia, NONE);
+            entry.memObj->FreeBlobs(key, globalAllocator_, rbFilter, false);
+            if (entry.memObj->NumBlobs() == 0) {
+                metaContainer_->Erase(key);
+            }
+            releaseSsdLease("after READ_START failed");
+            return ret;
         }
-        releaseSsdLease("after READ_START failed");
-        return ret;
     }
 
     releaseSsdLease("after rewarm");
@@ -576,7 +578,7 @@ Result MmcMetaManager::ApplyRewarm(const std::string &key, RewarmEntry &entry, M
 
 void MmcMetaManager::RewarmRankGroup(uint32_t rank, std::vector<RewarmEntry> &group,
                                      const std::vector<std::string> &keys, uint32_t opRankId, uint32_t opSeq,
-                                     std::vector<MmcMemMetaDesc> &objMetas)
+                                     std::vector<MmcMemMetaDesc> &objMetas, bool attachReadLease)
 {
     size_t groupSize = group.size();
     if (groupSize == 0) {
@@ -614,7 +616,8 @@ void MmcMetaManager::RewarmRankGroup(uint32_t rank, std::vector<RewarmEntry> &gr
                 MmcMetaMetricManager::GetInstance().IncrementRewarmFailCounter(group[j].ssdDesc.rank_);
                 continue;
             }
-            Result ret = ApplyRewarm(keys[group[j].index], group[j], group[j].dstBlob, ctx, objMetas[group[j].index]);
+            Result ret = ApplyRewarm(keys[group[j].index], group[j], group[j].dstBlob, ctx, objMetas[group[j].index],
+                                     attachReadLease);
             if (ret != MMC_OK) {
                 MmcMetaMetricManager::GetInstance().IncrementRewarmFailCounter(group[j].ssdDesc.rank_);
             }
@@ -688,9 +691,9 @@ void MmcMetaManager::PendingWaitAndFill(const std::vector<std::string> &keys, ui
     }
 }
 
-Result MmcMetaManager::ExistKey(const std::string &key)
+Result MmcMetaManager::ExistKeyCore(const std::string &key, MmcMemObjMetaPtr &memObj, MmcMemBlobPtr &upperBlob,
+                                    MmcMemBlobPtr &lowerBlob)
 {
-    MmcMemObjMetaPtr memObj;
     auto ret = metaContainer_->Get(key, memObj);
     if (ret != MMC_OK) {
         if (ret == MMC_UNMATCHED_KEY) {
@@ -707,23 +710,57 @@ Result MmcMetaManager::ExistKey(const std::string &key)
         return ret;
     }
 
+    // 在持有锁的单次遍历内完成分类并返回上层/低层可读 blob，
+    // 调用方据此判断预取资格，无需再次加锁或再次读 blobs。
     std::unique_lock<std::mutex> guard(memObj->Mutex());
-    MmcBlobFilterPtr filterPtr = MmcMakeRef<MmcBlobFilter>(UINT32_MAX, MEDIA_NONE, READABLE);
-    std::vector<MmcMemBlobPtr> blobs = memObj->GetBlobs(filterPtr);
-    if (blobs.empty()) {
+    auto classified = ClassifyBlobs(memObj);
+    upperBlob = classified.upperBlob;
+    lowerBlob = classified.lowerBlob;
+    if (upperBlob == nullptr && lowerBlob == nullptr) {
         MMC_LOG_DEBUG("Key is exist but do not have readable blob key:" << key);
         return MMC_UNMATCHED_KEY;
     }
+    return MMC_OK;
+}
+
+Result MmcMetaManager::ExistKey(const std::string &key)
+{
+    MmcMemObjMetaPtr memObj;
+    MmcMemBlobPtr upperBlob;
+    MmcMemBlobPtr lowerBlob;
+    auto ret = ExistKeyCore(key, memObj, upperBlob, lowerBlob);
+    if (ret != MMC_OK) {
+        return ret;
+    }
 
     // 预取：如果 key 仅存在于低层介质，无上层 READABLE blob 则触发预取
-    if (extConfig_.prefetchEnabled) {
-        auto classified = ClassifyBlobs(memObj);
-        if (classified.upperBlob == nullptr && classified.lowerBlob != nullptr) {
-            MMC_LOG_DEBUG("ExistKey triggering prefetch for key " << key);
-            TriggerPrefetch(key, memObj, classified.lowerBlob);
+    if (extConfig_.prefetchEnabled && upperBlob == nullptr && lowerBlob != nullptr) {
+        MMC_LOG_DEBUG("ExistKey triggering prefetch for key " << key);
+        TriggerPrefetch(key, memObj, lowerBlob);
+    }
+
+    return MMC_OK;
+}
+
+Result MmcMetaManager::BatchExist(const std::vector<std::string> &keys, std::vector<Result> &results)
+{
+    results.assign(keys.size(), MMC_UNMATCHED_KEY);
+    std::vector<std::string> prefetchCandidates;
+    for (size_t i = 0; i < keys.size(); ++i) {
+        MmcMemObjMetaPtr memObj;
+        MmcMemBlobPtr upperBlob;
+        MmcMemBlobPtr lowerBlob;
+        Result ret = ExistKeyCore(keys[i], memObj, upperBlob, lowerBlob);
+        results[i] = ret;
+        if (ret == MMC_OK && extConfig_.prefetchEnabled && upperBlob == nullptr && lowerBlob != nullptr) {
+            prefetchCandidates.push_back(keys[i]);
         }
     }
 
+    // 聚合预取：命中的低层介质 key 后台按 rank 批量回温（纯异步，不加读租约）
+    if (!prefetchCandidates.empty()) {
+        threadPool_->Enqueue([this, candidates = std::move(prefetchCandidates)]() { PrefetchKeysAsync(candidates); });
+    }
     return MMC_OK;
 }
 
@@ -1329,6 +1366,37 @@ Result MmcMetaManager::PrefetchKeys(std::vector<std::string> keys, MediaType src
         MMC_LOG_ERROR("GetByRank failed ret:" << ret << " operatedId:" << operateId << " size:" << keys.size());
     }
     return ret;
+}
+
+Result MmcMetaManager::PrefetchKeysAsync(const std::vector<std::string> &keys)
+{
+    if (keys.empty()) {
+        MMC_LOG_INFO("PrefetchKeysAsync: keys is empty, silently passing the function");
+        return MMC_OK;
+    }
+    uint64_t operateId = GenerateOperateId(UINT32_MAX);
+    uint32_t opRankId = GetRankIdByOperateId(operateId);
+    uint32_t opSeq = GetSequenceByOperateId(operateId);
+    std::vector<MmcMemMetaDesc> objMetas(keys.size());
+
+    CheckAndEvict(MEDIA_DRAM, 0);
+    // 复用 BatchGet 的按 key 加锁+分类逻辑，仅保留需要回温的 SSD→DRAM 分组；
+    // selected/pending/deferred 分支不关注，后台异步回温即可。
+    std::map<uint32_t, std::vector<RewarmEntry>> rankGroups;
+    std::vector<PendingRewarmWait> pendingWaitList;
+    std::vector<DeferredLockEntry> deferredLockList;
+    ClassifyAndGroupKeys(keys, opRankId, opSeq, objMetas, rankGroups, pendingWaitList, deferredLockList);
+
+    // 按 rank 后台批量回温，不 f.get() 阻塞调用线程；预取的 DRAM blob 不加读租约（attachReadLease=false）。
+    auto sharedKeys = std::make_shared<std::vector<std::string>>(keys);
+    auto sharedObjMetas = std::make_shared<std::vector<MmcMemMetaDesc>>(std::move(objMetas));
+    for (auto &[rank, group] : rankGroups) {
+        rewarmThreadPool_->Enqueue(
+            [this, rank, group = std::move(group), sharedKeys, sharedObjMetas, opRankId, opSeq]() mutable {
+                RewarmRankGroup(rank, group, *sharedKeys, opRankId, opSeq, *sharedObjMetas, false);
+            });
+    }
+    return MMC_OK;
 }
 
 Result MmcMetaManager::EvictKeys(std::vector<std::string> keys, MediaType srcMedia, MediaType dstMedia, uint32_t flags)
