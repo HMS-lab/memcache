@@ -837,6 +837,12 @@ int MmcacheStore::CheckInput(const size_t batchSize, const std::vector<std::vect
             MMC_LOG_ERROR("Unmatched number of layers:" << layerNum << " and sizes:" << sizes[i].size());
             return MMC_INVALID_PARAM;
         }
+        for (const auto &size : sizes[i]) {
+            if (size <= 0) {
+                MMC_LOG_ERROR("Invalid param, size should > 0");
+                return MMC_INVALID_PARAM;
+            }
+        }
     }
     return MMC_OK;
 }

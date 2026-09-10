@@ -286,7 +286,9 @@ Result MmcClientDefault::Put(const std::string &key, const MmcBufferArray &bufAr
     for (uint8_t i = 0; i < response.numBlobs_; i++) {
         auto blob = response.blobs_[i];
         MMC_LOG_DEBUG("Attempting to put to blob " << static_cast<int>(i) << " key " << key);
+        TP_TRACE_BEGIN(TP_MMC_LOCAL_PUT);
         auto ret = bmProxy_->BatchPut(bufArr, blob);
+        TP_TRACE_END(TP_MMC_LOCAL_PUT, 0);
         if (ret != MMC_OK) {
             MMC_LOG_ERROR("client " << name_ << " put " << key << " blob rank: " << blob.rank_
                                     << ", media: " << blob.mediaType_ << " failed, ret: " << ret);
@@ -424,7 +426,9 @@ Result MmcClientDefault::Get(const std::string &key, const MmcBufferArray &bufAr
     }
     auto &blob = response.blobs_[0];
     uint64_t localLeaseDeadlineMs = ToLocalLeaseDeadlineMs(blob);
+    TP_TRACE_BEGIN(TP_MMC_LOCAL_GET);
     auto ret = bmProxy_->BatchGet(bufArr, blob);
+    TP_TRACE_END(TP_MMC_LOCAL_GET, 0);
     Result leaseCheckRet = CheckLeaseDeadline(localLeaseDeadlineMs);
 
     BatchUpdateRequest updateRequest{};
