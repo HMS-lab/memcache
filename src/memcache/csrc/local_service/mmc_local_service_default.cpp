@@ -173,20 +173,17 @@ Result MmcLocalServiceDefault::Start(const mmc_local_service_config_t &config)
         std::bind(&MmcLocalServiceDefault::BatchCopyBlob, this, std::placeholders::_1, std::placeholders::_2,
                   std::placeholders::_3));
 
-    metaNetClient_->RegisterDiscoverUrlFunc([this]() -> std::string {
-        // 非 etcd 模式（进程级）：MetaService 地址固定为 meta_service_url 配置值，
-        // 返回空让 MetaNetClient 使用默认（配置的 discoveryURL）。
-        if (!IsEtcdStoreUrl(options_.bmIpPort)) {
-            return "";
+    metaNetClient_->RegisterDiscoverUrlFunc([this]() -> std::string { return DiscoverMetaServiceUrl(); });
+
+    // HA(etcd) 模式：注册 leader 变更回调。
+    if (IsEtcdStoreUrl(options_.bmIpPort)) {
+        auto regRet =
+            ock::mmc::MFSmemApi::SmemBmRegisterLeaderChangeCallback(&MmcLocalServiceDefault::OnLeaderChanged, this);
+        if (regRet != MMC_OK) {
+            MMC_LOG_WARN("Register leader change callback failed, ret: "
+                         << regRet << ", leader switch relies on link-broken only");
         }
-        char metaIp[64] = {0};
-        uint16_t metaPort = 0;
-        if (ock::mmc::MFSmemApi::SmemBmGetMetaServiceInfo(metaIp, sizeof(metaIp), &metaPort) == 0 &&
-            metaIp[0] != '\0') {
-            return "tcp://" + std::string(metaIp) + ":" + std::to_string(metaPort);
-        }
-        return "";
-    });
+    }
     started_ = true;
     if (options_.dynamicConfigEnable && options_.configFilePath[0] != '\0') {
         StartConfigPolling();
@@ -194,6 +191,42 @@ Result MmcLocalServiceDefault::Start(const mmc_local_service_config_t &config)
     MMC_LOG_TRACE("Started LocalService (" << name_ << ") server " << options_.discoveryURL
                                            << ", rank: " << options_.rankId);
     return MMC_OK;
+}
+
+std::string MmcLocalServiceDefault::DiscoverMetaServiceUrl() const
+{
+    // 非 etcd 模式（进程级）：MetaService 地址固定为 meta_service_url 配置值，
+    // 返回空让 MetaNetClient 使用默认（配置的 discoveryURL）。
+    if (!IsEtcdStoreUrl(options_.bmIpPort)) {
+        return "";
+    }
+    char metaIp[64] = {0};
+    uint16_t metaPort = 0;
+    if (ock::mmc::MFSmemApi::SmemBmGetMetaServiceInfo(metaIp, sizeof(metaIp), &metaPort) == 0 && metaIp[0] != '\0') {
+        return "tcp://" + std::string(metaIp) + ":" + std::to_string(metaPort);
+    }
+    return "";
+}
+
+void MmcLocalServiceDefault::OnLeaderChanged(void *userData)
+{
+    auto *self = static_cast<MmcLocalServiceDefault *>(userData);
+    if (self == nullptr) {
+        return;
+    }
+    // 运行在 libsmem 派发的异步线程上：快照 metaNetClient_（避免与 Stop() 竞争），
+    // Stop() 之后快照为空则静默返回。本层只负责注册与下发；地址发现（discoverUrlFunc_）、
+    // 幂等比较、强制重连与 BM 重注册全部由 MetaNetClient::HandleServerChangedNotify 完成。
+    MetaNetClientPtr client;
+    {
+        std::lock_guard<std::mutex> guard(self->mutex_);
+        client = self->metaNetClient_;
+    }
+    if (client == nullptr) {
+        MMC_LOG_TRACE("Leader changed but local service stopped, skip");
+        return;
+    }
+    (void)client->HandleServerChangedNotify();
 }
 
 void MmcLocalServiceDefault::Stop()

@@ -46,6 +46,9 @@ using smemBmWaitFunc = int32_t (*)(smem_bm_t);
 using smemBmGvaToVaFunc = int32_t (*)(smem_bm_t, void *, smem_bm_mem_type_t, void **);
 using smemBmUpdateStoreUrlFunc = int32_t (*)(const char *);
 using smemBmGetMetaServiceInfoFunc = int32_t (*)(char *, size_t, uint16_t *);
+
+using smemLeaderChangeCallbackFunc = void (*)(void *userData);
+using smemBmRegisterLeaderChangeCallbackFunc = int32_t (*)(smemLeaderChangeCallbackFunc, void *);
 class MFSmemApi {
 public:
     static Result LoadLibrary();
@@ -168,6 +171,17 @@ public:
         return gSmemBmGetMetaServiceInfo(ip, ipLen, port);
     }
 
+    /**
+     * @brief Register leader change callback (HA leader switch).
+     */
+    static int32_t SmemBmRegisterLeaderChangeCallback(smemLeaderChangeCallbackFunc callback, void *userData)
+    {
+        if (gSmemBmRegisterLeaderChangeCallback == nullptr) {
+            return MMC_ERROR;
+        }
+        return gSmemBmRegisterLeaderChangeCallback(callback, userData);
+    }
+
 private:
     static Result LoadAllSymbols();
     static void ClearAllSymbols();
@@ -202,6 +216,7 @@ private:
     static smemBmGvaToVaFunc gSmemBmGvaToVa;
     static smemBmUpdateStoreUrlFunc gSmemBmUpdateStoreUrl;
     static smemBmGetMetaServiceInfoFunc gSmemBmGetMetaServiceInfo;
+    static smemBmRegisterLeaderChangeCallbackFunc gSmemBmRegisterLeaderChangeCallback;
 };
 } // namespace mmc
 } // namespace ock

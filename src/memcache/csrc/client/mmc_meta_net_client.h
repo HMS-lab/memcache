@@ -100,6 +100,42 @@ public:
     Result UpdateServerUrl(const std::string &url);
 
     /**
+     * @brief Handle the leader/server change notification (from HA leader-change callback).
+     *
+     * Self-contained reconnect flow driven by discoverUrlFunc_: on every attempt the
+     * leader address is re-discovered, compared with the current ip_/port_ and the peer
+     * link re-established when different, followed by retryHandler_ (re-register BM on
+     * the new leader). Retries up to retryCount_ times with a 2s sleep between attempts.
+     *
+     * Idempotent: if the discovered address equals the current one -- e.g.
+     * HandleLinkBroken already completed the switch, or the leader address did not
+     * actually change -- nothing happens and the healthy connection is left untouched.
+     * Does nothing when discoverUrlFunc_ is not registered (nowhere to learn the new
+     * address from, same policy as HandleLinkBroken).
+     *
+     * @return 0 if reconnected (and retryHandler_ succeeded), already on the target
+     *         server, or no discoverUrlFunc_; error otherwise
+     */
+    Result HandleServerChangedNotify();
+
+    /**
+     * @brief Discover the leader address via discoverUrlFunc_ and apply it to the
+     * client state when it differs from the current one.
+     *
+     * Single-attempt step of HandleServerChangedNotify's retry loop: discovers the
+     * url, resolves it, compares with the current ip_/port_ and updates
+     * serverUrl_/ip_/port_ when different. Does not touch the connection itself --
+     * reconnection stays the caller's job (ResolveAndConnect).
+     *
+     * @param switched    [out] true: state updated to a different address, caller
+     *                    should reconnect; false: discovered address equals the
+     *                    current one (idempotent, nothing modified)
+     * @return 0 if the address was applied or already current; error if not
+     *         discoverable yet (empty/unresolvable, caller may retry later)
+     */
+    Result ApplyDiscoveredServerUrl(bool &switched);
+
+    /**
      * @brief Do sync call to net server, returned if server response or timeout
      *
      * @tparam REQ         [in] request class type

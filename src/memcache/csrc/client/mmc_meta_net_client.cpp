@@ -195,6 +195,83 @@ Result MetaNetClient::UpdateServerUrl(const std::string &url)
     return MMC_OK;
 }
 
+Result MetaNetClient::ApplyDiscoveredServerUrl(bool &switched)
+{
+    std::string newUrl = discoverUrlFunc_();
+    std::string ip;
+    uint16_t port = 0;
+    if (newUrl.empty()) {
+        // 新 leader 尚未登记地址（如 KEY_META_SERVICE_ADDR 写入间隙），稍后重试
+        MMC_LOG_DEBUG("discover leader url empty, retry later");
+        return MMC_ERROR;
+    }
+    if (resolver_ == nullptr || !resolver_(newUrl, ip, port)) {
+        MMC_LOG_ERROR("Failed to resolve discovered url: " << newUrl);
+        return MMC_ERROR;
+    }
+
+    std::lock_guard<std::mutex> guard(mutex_);
+    if (ip_ == ip && port_ == port) {
+        // 幂等：地址与当前一致（断链重连已完成切换，或 leader 地址未变化）
+        MMC_LOG_TRACE("already on " << ip << ":" << port << ", skip");
+        switched = false;
+        return MMC_OK;
+    }
+    MMC_LOG_INFO("switching server from " << ip_ << ":" << port_ << " to " << ip << ":" << port);
+    serverUrl_ = newUrl;
+    ip_ = ip;
+    port_ = port;
+    switched = true;
+    return MMC_OK;
+}
+
+Result MetaNetClient::HandleServerChangedNotify()
+{
+    MMC_LOG_INFO(name_ << " server changed notify");
+    MMC_ASSERT_LOG_AND_RETURN(engine_ != nullptr, "engine_ is nullptr", MMC_NOT_INITIALIZED);
+    // 与断链重连一致：无发现函数则无从得知新 leader 地址，不做任何处理
+    if (discoverUrlFunc_ == nullptr) {
+        MMC_LOG_DEBUG(name_ << " no discover url func, ignore server changed notify");
+        return MMC_OK;
+    }
+    for (uint32_t count = 0; count < retryCount_; count++) {
+        {
+            std::lock_guard<std::mutex> guard(mutex_);
+            if (stopping_) {
+                MMC_LOG_TRACE(name_ << " stopping, abort reconnect");
+                return MMC_OK;
+            }
+            if (!started_) {
+                MMC_LOG_WARN("client not started, abort server changed notify");
+                return MMC_OK;
+            }
+        }
+
+        bool switched = false;
+        if (ApplyDiscoveredServerUrl(switched) != MMC_OK) {
+            sleep(2ULL);
+            continue;
+        }
+        if (!switched) {
+            // 幂等命中：已在新 leader 上（断链重连已切过，或地址未变化），无需重连
+            return MMC_OK;
+        }
+        Result ret = ResolveAndConnect(true);
+        if (ret == MMC_OK) {
+            // 对齐断链重连语义：切到新 leader 后重新注册 BM，
+            // 新 leader 的 MetaService 没有本 client 的注册信息。
+            if (retryHandler_ != nullptr) {
+                MMC_LOG_TRACE("call retry handler when reconnect to " << ip_ << ", port " << port_);
+                return retryHandler_();
+            }
+            return MMC_OK;
+        }
+        MMC_LOG_ERROR("MetaNetClient server changed reconnect attempt " << count << " failed, ret: " << ret);
+        sleep(2ULL);
+    }
+    return MMC_ERROR;
+}
+
 Result MetaNetClient::HandleMetaReplicate(const NetContextPtr &context)
 {
     auto handleReplicate = [this](const NetContextPtr &ctx) {

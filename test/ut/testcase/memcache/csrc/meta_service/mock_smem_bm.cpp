@@ -176,4 +176,9 @@ int32_t smem_bm_get_meta_service_info(char *ip, size_t ipLen, uint16_t *port)
 {
     return 0;
 }
+
+int32_t smem_bm_register_leader_change_callback(void (*callback)(void *), void *userData)
+{
+    return 0;
+}
 }

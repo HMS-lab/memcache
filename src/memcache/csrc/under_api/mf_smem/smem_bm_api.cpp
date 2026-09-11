@@ -47,6 +47,7 @@ smemBmWaitFunc MFSmemApi::gSmemBmWait = nullptr;
 smemBmGvaToVaFunc MFSmemApi::gSmemBmGvaToVa = nullptr;
 smemBmUpdateStoreUrlFunc MFSmemApi::gSmemBmUpdateStoreUrl = nullptr;
 smemBmGetMetaServiceInfoFunc MFSmemApi::gSmemBmGetMetaServiceInfo = nullptr;
+smemBmRegisterLeaderChangeCallbackFunc MFSmemApi::gSmemBmRegisterLeaderChangeCallback = nullptr;
 
 Result MFSmemApi::LoadAllSymbols()
 {
@@ -75,6 +76,8 @@ Result MFSmemApi::LoadAllSymbols()
     DL_LOAD_SYM(gSmemBmGvaToVa, smemBmGvaToVaFunc, gSmemHandle, "smem_bm_gva_to_va");
     DL_LOAD_SYM(gSmemBmUpdateStoreUrl, smemBmUpdateStoreUrlFunc, gSmemHandle, "smem_bm_update_store_url");
     DL_LOAD_SYM(gSmemBmGetMetaServiceInfo, smemBmGetMetaServiceInfoFunc, gSmemHandle, "smem_bm_get_meta_service_info");
+    DL_LOAD_SYM(gSmemBmRegisterLeaderChangeCallback, smemBmRegisterLeaderChangeCallbackFunc, gSmemHandle,
+                "smem_bm_register_leader_change_callback");
     return MMC_OK;
 }
 
@@ -136,6 +139,7 @@ void MFSmemApi::ClearAllSymbols()
     gSmemBmGvaToVa = nullptr;
     gSmemBmUpdateStoreUrl = nullptr;
     gSmemBmGetMetaServiceInfo = nullptr;
+    gSmemBmRegisterLeaderChangeCallback = nullptr;
 }
 
 void MFSmemApi::CleanupLibrary()

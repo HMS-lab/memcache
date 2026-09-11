@@ -127,6 +127,17 @@ private:
     static constexpr const char *configPollTaskName = "DynamicConfigPolling";
     time_t lastConfigMtime_{0};
 
+    // HA leader 变更通知（libsmem 重选举线程回调，纯通知不带数据）。经 C 边界
+    // （函数指针 + userData）传入；本层只负责注册与下发，地址发现（discoverUrlFunc_）、
+    // 幂等比较与重连切换由 MetaNetClient::HandleServerChangedNotify 完成（假死场景
+    // 下无 TCP 断链事件时的唯一主动切换路径）。
+    static void OnLeaderChanged(void *userData);
+
+    // 经 C API 从 config store 读取当前 leader 登记的 MetaService 地址（"tcp://ip:port"）。
+    // 非 etcd 模式或地址不可用时返回空串。供 discoverUrlFunc 注册使用（重连路径经
+    // discoverUrlFunc_ 间接复用本逻辑）。
+    std::string DiscoverMetaServiceUrl() const;
+
     void StartConfigPolling();
     void StopConfigPolling();
     Result UpdateConfig();
