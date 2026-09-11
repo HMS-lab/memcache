@@ -13,17 +13,18 @@
 #define MEM_FABRIC_MMC_MEM_BLOB_H
 
 #include <condition_variable>
+#include <functional>
 
 #include <vector>
 
 #include "nlohmann/json.hpp"
 
+#include "mmc_blob_common.h"
 #include "mmc_blob_state.h"
 #include "mmc_common_includes.h"
 #include "mmc_meta_lease_manager.h"
 #include "mmc_montotonic.h"
 #include "mmc_def.h"
-#include "mmc_meta_backup_mgr_factory.h"
 
 namespace ock {
 namespace mmc {
@@ -174,6 +175,9 @@ public:
     // Non-zero means eviction must wait for lease timeout (LeaseWait) before freeing.
     inline uint32_t UseCount() const;
 
+    // The caller must hold the owning MmcMemObjMeta mutex while checking a lease.
+    inline bool HasLease(uint32_t rankId, uint32_t requestId) const;
+
     friend std::ostream &operator<<(std::ostream &os, const MmcMemBlob &blob)
     {
         os << "Blob{rank=" << blob.rank_ << ",gva=" << blob.gva_ << ",size=" << blob.size_
@@ -302,6 +306,11 @@ inline uint64_t MmcMemBlob::LeaseTimeoutTtlMs() const
 inline uint32_t MmcMemBlob::UseCount() const
 {
     return metaLeaseManager_.UseCount();
+}
+
+inline bool MmcMemBlob::HasLease(uint32_t rankId, uint32_t requestId) const
+{
+    return metaLeaseManager_.HasLease(rankId, requestId);
 }
 
 inline void MmcMemBlob::SetDefaultLeaseTtlMs(uint64_t defaultTtlMs)

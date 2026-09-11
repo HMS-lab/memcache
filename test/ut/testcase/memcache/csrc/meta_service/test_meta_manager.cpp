@@ -1294,5 +1294,171 @@ TEST_F(TestMmcMetaManager, EvictKey_SingleKey_ReturnsOk)
     metaMng->Stop();
 }
 
+TEST_F(TestMmcMetaManager, BackupReadLeaseReleasesOriginalObjectAfterKeyRemovalOrRecreation)
+{
+    constexpr uint64_t leaseTtlMs = 10000;
+    constexpr uint16_t evictHigh = 70;
+    constexpr uint16_t evictLow = 60;
+    constexpr uint64_t gva = 4096;
+    constexpr uint64_t size = 4096;
+    constexpr uint32_t clientRank = 1;
+    constexpr uint32_t clientRequest = 1;
+    constexpr uint32_t oneReader = 1;
+    constexpr uint32_t twoReaders = 2;
+    const std::string key = "backup_source";
+    auto manager = MmcMakeRef<MmcMetaManager>(leaseTtlMs, evictHigh, evictLow);
+    ASSERT_EQ(manager->Start(), MMC_OK);
+    auto object = MmcMakeRef<MmcMemObjMeta>();
+    auto blob = MmcMakeRef<MmcMemBlob>(0, gva, size, MEDIA_DRAM, READABLE);
+    ASSERT_EQ(object->AddBlob(blob), MMC_OK);
+    ASSERT_EQ(MetaContainer(manager)->Insert(key, object), MMC_OK);
+    auto desc = blob->GetDesc();
+    auto stale = desc;
+    stale.gva_ += size;
+    BackupReadLease invalidLease;
+    EXPECT_NE(manager->AcquireBackupReadLease(key, stale, invalidLease), MMC_OK);
+    EXPECT_NE(manager->AcquireBackupReadLease("missing", desc, invalidLease), MMC_OK);
+    BackupReadLease firstLease;
+    BackupReadLease secondLease;
+    ASSERT_EQ(manager->AcquireBackupReadLease(key, desc, firstLease), MMC_OK);
+    ASSERT_EQ(manager->AcquireBackupReadLease(key, desc, secondLease), MMC_OK);
+    EXPECT_EQ(blob->UseCount(), twoReaders);
+
+    ASSERT_EQ(MetaContainer(manager)->Erase(key), MMC_OK);
+    manager->ReleaseBackupReadLease(firstLease);
+    EXPECT_EQ(blob->UseCount(), oneReader);
+    auto replacementObject = MmcMakeRef<MmcMemObjMeta>();
+    auto replacement = MmcMakeRef<MmcMemBlob>(0, gva, size, MEDIA_DRAM, READABLE);
+    ASSERT_EQ(replacementObject->AddBlob(replacement), MMC_OK);
+    ASSERT_EQ(MetaContainer(manager)->Insert(key, replacementObject), MMC_OK);
+    ASSERT_EQ(replacement->UpdateState(key, clientRank, clientRequest, MMC_READ_START), MMC_OK);
+    manager->ReleaseBackupReadLease(secondLease);
+    EXPECT_EQ(blob->UseCount(), 0U);
+    EXPECT_EQ(replacement->UseCount(), oneReader);
+    EXPECT_EQ(replacement->UpdateState(key, clientRank, clientRequest, MMC_READ_FINISH), MMC_OK);
+    manager->Stop();
+}
+
+TEST_F(TestMmcMetaManager, BackupReadLeaseReleaseFindsMatchingLeaseAmongBlobs)
+{
+    constexpr uint64_t leaseTtlMs = 10000;
+    constexpr uint16_t evictHigh = 70;
+    constexpr uint16_t evictLow = 60;
+    constexpr uint64_t gva = 4096;
+    constexpr uint64_t size = 4096;
+    constexpr uint32_t otherRank = 1;
+    constexpr uint32_t oneReader = 1;
+    const std::string key = "backup_multiple_blobs";
+    auto manager = MmcMakeRef<MmcMetaManager>(leaseTtlMs, evictHigh, evictLow);
+    ASSERT_EQ(manager->Start(), MMC_OK);
+    auto object = MmcMakeRef<MmcMemObjMeta>();
+    auto firstBlob = MmcMakeRef<MmcMemBlob>(0, gva, size, MEDIA_DRAM, READABLE);
+    auto secondBlob = MmcMakeRef<MmcMemBlob>(otherRank, gva, size, MEDIA_DRAM, READABLE);
+    ASSERT_EQ(object->AddBlob(firstBlob), MMC_OK);
+    ASSERT_EQ(object->AddBlob(secondBlob), MMC_OK);
+    ASSERT_EQ(MetaContainer(manager)->Insert(key, object), MMC_OK);
+    BackupReadLease firstLease;
+    BackupReadLease secondLease;
+    ASSERT_EQ(manager->AcquireBackupReadLease(key, firstBlob->GetDesc(), firstLease), MMC_OK);
+    ASSERT_EQ(manager->AcquireBackupReadLease(key, secondBlob->GetDesc(), secondLease), MMC_OK);
+
+    manager->ReleaseBackupReadLease(secondLease);
+    EXPECT_EQ(firstBlob->UseCount(), oneReader);
+    EXPECT_EQ(secondBlob->UseCount(), 0U);
+    manager->ReleaseBackupReadLease(secondLease);
+    EXPECT_EQ(firstBlob->UseCount(), oneReader);
+    manager->ReleaseBackupReadLease(firstLease);
+    EXPECT_EQ(firstBlob->UseCount(), 0U);
+    manager->Stop();
+}
+
+TEST_F(TestMmcMetaManager, BackupReadLeaseReleaseSkipsReusedBlobInOriginalObject)
+{
+    constexpr uint64_t leaseTtlMs = 50;
+    constexpr uint16_t evictHigh = 70;
+    constexpr uint16_t evictLow = 60;
+    constexpr uint64_t gva = 4096;
+    constexpr uint64_t size = 4096;
+    constexpr uint32_t oneBlob = 1;
+    const std::string key = "backup_reused_blob";
+    auto manager = MmcMakeRef<MmcMetaManager>(leaseTtlMs, evictHigh, evictLow);
+    ASSERT_EQ(manager->Start(), MMC_OK);
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> mounted;
+    ASSERT_EQ(manager->Mount({0, MEDIA_DRAM}, {gva, size}, mounted, false), MMC_OK);
+    AllocOptions options{size, oneBlob, MEDIA_DRAM, {0}, 0};
+    std::vector<MmcMemBlobPtr> allocated;
+    ASSERT_EQ(GlobalAllocator(manager)->Alloc(options, allocated), MMC_OK);
+    auto original = allocated.front();
+    original->SetDefaultLeaseTtlMs(leaseTtlMs);
+    ASSERT_EQ(original->UpdateState(MMC_WRITE_OK), MMC_OK);
+    auto object = MmcMakeRef<MmcMemObjMeta>();
+    ASSERT_EQ(object->AddBlob(original), MMC_OK);
+    ASSERT_EQ(MetaContainer(manager)->Insert(key, object), MMC_OK);
+    BackupReadLease oldLease;
+    ASSERT_EQ(manager->AcquireBackupReadLease(key, original->GetDesc(), oldLease), MMC_OK);
+    {
+        std::lock_guard<std::mutex> guard(object->Mutex());
+        EXPECT_EQ(object->FreeBlobs(key, GlobalAllocator(manager), nullptr, false).size(), oneBlob);
+    }
+
+    allocated.clear();
+    ASSERT_EQ(GlobalAllocator(manager)->Alloc(options, allocated), MMC_OK);
+    auto replacement = allocated.front();
+    ASSERT_EQ(replacement->Gva(), original->Gva());
+    ASSERT_EQ(replacement->UpdateState(MMC_WRITE_OK), MMC_OK);
+    {
+        std::lock_guard<std::mutex> guard(object->Mutex());
+        ASSERT_EQ(object->AddBlob(replacement), MMC_OK);
+    }
+    BackupReadLease newLease;
+    ASSERT_EQ(manager->AcquireBackupReadLease(key, replacement->GetDesc(), newLease), MMC_OK);
+    ASSERT_NE(newLease.sequence, oldLease.sequence);
+
+    manager->ReleaseBackupReadLease(oldLease);
+    EXPECT_EQ(replacement->UseCount(), oneBlob);
+    manager->ReleaseBackupReadLease(newLease);
+    EXPECT_EQ(replacement->UseCount(), 0U);
+    manager->Stop();
+}
+
+TEST_F(TestMmcMetaManager, BackupReadLeaseReleaseHandlesConcurrentRemoval)
+{
+    constexpr uint64_t leaseTtlMs = 50;
+    constexpr uint16_t evictHigh = 70;
+    constexpr uint16_t evictLow = 60;
+    constexpr uint64_t gva = 4096;
+    constexpr uint64_t size = 4096;
+    constexpr uint32_t oneBlob = 1;
+    const std::string key = "backup_removing";
+    auto manager = MmcMakeRef<MmcMetaManager>(leaseTtlMs, evictHigh, evictLow);
+    ASSERT_EQ(manager->Start(), MMC_OK);
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> mounted;
+    ASSERT_EQ(manager->Mount({0, MEDIA_DRAM}, {gva, size}, mounted, false), MMC_OK);
+    std::vector<MmcMemBlobPtr> allocated;
+    ASSERT_EQ(GlobalAllocator(manager)->Alloc({size, oneBlob, MEDIA_DRAM, {0}, 0}, allocated), MMC_OK);
+    auto blob = allocated.front();
+    blob->SetDefaultLeaseTtlMs(leaseTtlMs);
+    ASSERT_EQ(blob->UpdateState(MMC_WRITE_OK), MMC_OK);
+    auto object = MmcMakeRef<MmcMemObjMeta>();
+    ASSERT_EQ(object->AddBlob(blob), MMC_OK);
+    ASSERT_EQ(MetaContainer(manager)->Insert(key, object), MMC_OK);
+    BackupReadLease lease;
+    ASSERT_EQ(manager->AcquireBackupReadLease(key, blob->GetDesc(), lease), MMC_OK);
+    std::promise<void> removalLocked;
+    auto removal = std::async(std::launch::async, [object, &removalLocked, &key, &manager] {
+        std::lock_guard<std::mutex> guard(object->Mutex());
+        removalLocked.set_value();
+        return object->FreeBlobs(key, GlobalAllocator(manager), nullptr, false).size();
+    });
+    removalLocked.get_future().wait();
+    manager->ReleaseBackupReadLease(lease);
+    EXPECT_EQ(removal.get(), oneBlob);
+    EXPECT_EQ(blob->State(), REMOVING);
+    EXPECT_EQ(GlobalAllocator(manager)->GetFreeSpace(MEDIA_DRAM), size);
+    BackupReadLease removedLease;
+    EXPECT_NE(manager->AcquireBackupReadLease(key, blob->GetDesc(), removedLease), MMC_OK);
+    manager->Stop();
+}
+
 } // namespace mmc
 } // namespace ock

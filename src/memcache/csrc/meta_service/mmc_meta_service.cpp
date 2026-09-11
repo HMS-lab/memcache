@@ -19,6 +19,7 @@
 #include "mmc_ref.h"
 #include "mmc_client_metric_store.h"
 #include "mmc_meta_mgr_proxy.h"
+#include "mmc_meta_backup_mgr_factory.h"
 #include "mmc_meta_metric_manager.h"
 #include "mmc_meta_net_server.h"
 #include "mmc_config_const.h"
@@ -96,6 +97,13 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
     auto backupConf = MmcMakeRef<MMCMetaBackUpConfDefault>(metaNetServer_);
     MMC_ASSERT_LOG_AND_RETURN(backupConf.Get() != nullptr, "backupConf.Get() is nullptr", MMC_MALLOC_FAILED);
     MMC_ASSERT_LOG_AND_RETURN(metaBackUpMgrPtr_ != nullptr, "metaBackUpMgrPtr_ is nullptr", MMC_MALLOC_FAILED);
+    backupConf->acquireReadLease = [this](const std::string &key, const MmcMemBlobDesc &source,
+                                          BackupReadLease &lease) {
+        return metaMgrProxy_->GetMetaManager()->AcquireBackupReadLease(key, source, lease);
+    };
+    backupConf->releaseReadLease = [this](const BackupReadLease &lease) {
+        metaMgrProxy_->GetMetaManager()->ReleaseBackupReadLease(lease);
+    };
     // backup 通道默认启动，服务于异步刷盘和 Rewarm
     MMC_LOG_TRACE("Meta backup channel starting, ha=" << options_.haEnable
                                                       << ", async_flush_interval=" << options_.asyncFlushIntervalMs);

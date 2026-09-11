@@ -13,6 +13,7 @@
 #include "mmc_meta_backup_mgr_default.h"
 
 #include "mmc_meta_backup_mgr_factory.h"
+#include "mmc_mem_obj_meta.h"
 #include "mmc_msg_client_meta.h"
 #include "mmc_ptracer.h"
 
@@ -98,24 +99,41 @@ void MMCMetaBackUpMgrDefault::SendBackup2Local()
 void MMCMetaBackUpMgrDefault::SendBackupForRank(uint32_t rank, std::vector<MetaBackUpOperate> &entries)
 {
     MetaReplicateRequest request;
+    std::vector<BackupReadLease> leases;
+    leases.reserve(entries.size());
     request.ops_.reserve(entries.size());
     request.keys_.reserve(entries.size());
     request.blobs_.reserve(entries.size());
     for (auto &e : entries) {
+        if (e.op_ == META_BACKUP_ADD && e.desc_.mediaType_ == MEDIA_DRAM) {
+            BackupReadLease lease;
+            if (!acquireReadLease_ || !releaseReadLease_ || acquireReadLease_(e.key_, e.desc_, lease) != MMC_OK) {
+                MMC_LOG_DEBUG("Skip backup without a DRAM read lease, key=" << e.key_ << ", blob=" << e.desc_);
+                continue;
+            }
+            leases.push_back(std::move(lease));
+        }
         request.ops_.push_back(e.op_);
         request.keys_.push_back(std::move(e.key_));
         request.blobs_.push_back(e.desc_);
     }
 
+    if (request.ops_.empty()) {
+        return;
+    }
     MMC_LOG_DEBUG("Backup flush rank=" << rank << " keys=" << request.keys_.size());
 
     Response response;
     TP_TRACE_BEGIN(TP_MMC_META_ASYNC_FLUSH_RPC);
     Result ret = metaNetServer_->SyncCall(rank, request, response, 60);
     TP_TRACE_END(TP_MMC_META_ASYNC_FLUSH_RPC, ret);
+    for (const auto &lease : leases) {
+        releaseReadLease_(lease);
+    }
 
     if (ret != MMC_OK) {
-        MMC_LOG_ERROR("mmc meta back up failed, bm rank " << rank << ", keys: " << request.KeysString());
+        MMC_LOG_ERROR("mmc meta back up failed, bm rank " << rank << ", ret=" << ret
+                                                          << ", keys: " << request.KeysString());
         return;
     }
 

@@ -29,6 +29,7 @@ constexpr int TIMEOUT_SECOND = 60;
 namespace {
 constexpr size_t kSingleBlobCount = 1U;
 constexpr size_t kSsdRewarmBlobCount = 2U;
+constexpr uint32_t K_BACKUP_LEASE_RANK_ID = UINT32_MAX;
 
 bool IsGvaReadableMedia(MediaType mediaType)
 {
@@ -1045,6 +1046,54 @@ Result MmcMetaManager::RemoveSsdBlob(const std::string &key, uint32_t rank)
         MMC_LOG_DEBUG("RemoveSsdBlob: key=" << key << " fully removed (no remaining blobs)");
     }
     return MMC_OK;
+}
+
+Result MmcMetaManager::AcquireBackupReadLease(const std::string &key, const MmcMemBlobDesc &source,
+                                              BackupReadLease &lease)
+{
+    if (source.mediaType_ != MEDIA_DRAM) {
+        return MMC_INVALID_PARAM;
+    }
+    MmcMemObjMetaPtr objMeta;
+    if (metaContainer_->Get(key, objMeta) != MMC_OK || objMeta == nullptr) {
+        return MMC_UNMATCHED_KEY;
+    }
+    std::lock_guard<std::mutex> guard(objMeta->Mutex());
+    for (const auto &blob : objMeta->GetBlobs()) {
+        if (blob->GetDesc() != source || blob->State() != READABLE) {
+            continue;
+        }
+        // Use an internal rank and the existing sequence generator to avoid sharing client lease IDs.
+        const uint32_t sequence = GetSequenceByOperateId(GenerateOperateId(K_BACKUP_LEASE_RANK_ID));
+        BackupReadLease acquiredLease{key, objMeta, sequence};
+        Result ret = blob->UpdateState(key, K_BACKUP_LEASE_RANK_ID, sequence, MMC_READ_START);
+        if (ret == MMC_OK) {
+            lease = std::move(acquiredLease);
+        }
+        return ret;
+    }
+    return MMC_UNMATCHED_STATE;
+}
+
+void MmcMetaManager::ReleaseBackupReadLease(const BackupReadLease &lease)
+{
+    if (lease.object == nullptr) {
+        return;
+    }
+    // Release through the original object even if the key was removed or recreated.
+    std::lock_guard<std::mutex> guard(lease.object->Mutex());
+    for (const auto &blob : lease.object->GetBlobs()) {
+        // Only release this operation's lease from a readable blob still owned by the object.
+        if (blob->Type() != MEDIA_DRAM || blob->State() != READABLE ||
+            !blob->HasLease(K_BACKUP_LEASE_RANK_ID, lease.sequence)) {
+            continue;
+        }
+        Result ret = blob->UpdateState(lease.key, K_BACKUP_LEASE_RANK_ID, lease.sequence, MMC_READ_FINISH);
+        if (ret != MMC_OK) {
+            MMC_LOG_WARN("Release backup read lease failed, key=" << lease.key << ", ret=" << ret);
+        }
+        return;
+    }
 }
 
 Result MmcMetaManager::AddSsdBlob(const std::string &key, const MmcMemBlobDesc &desc)

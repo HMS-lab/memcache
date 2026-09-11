@@ -78,5 +78,69 @@ TEST_F(MmcMetaBackupMgrTest, BackupPoolUsesDedicatedThreadName)
     EXPECT_EQ(observation.threadNameResult, 0);
     EXPECT_EQ(observation.threadName.rfind(backupPoolNamePrefix, 0), 0U);
 }
+
+struct BackupSendMember {
+    using Type = void (MMCMetaBackUpMgrDefault::*)(uint32_t, std::vector<MetaBackUpOperate> &);
+    friend Type GetMember(BackupSendMember);
+};
+template struct PrivateMemberAccessor<BackupSendMember, &MMCMetaBackUpMgrDefault::SendBackupForRank>;
+
+TEST_F(MmcMetaBackupMgrTest, BackupSkipsRejectedDramSources)
+{
+    constexpr uint32_t rank = 1;
+    constexpr uint64_t gva = 4096;
+    constexpr uint64_t size = 4096;
+    constexpr uint32_t oneAttempt = 1;
+    uint32_t acquireCount = 0;
+    uint32_t releaseCount = 0;
+    // No server is configured: rejected sources must never reach the RPC path.
+    auto defaultConf = MmcMakeRef<MMCMetaBackUpConfDefault>(MetaNetServerPtr{});
+    defaultConf->acquireReadLease = [&acquireCount](const std::string &key, const MmcMemBlobDesc &, BackupReadLease &) {
+        EXPECT_EQ(key, "stale");
+        ++acquireCount;
+        return MMC_UNMATCHED_KEY;
+    };
+    defaultConf->releaseReadLease = [&releaseCount](const BackupReadLease &) { ++releaseCount; };
+    MMCMetaBackUpConfPtr conf = defaultConf.Get();
+    MMCMetaBackUpMgrDefault backupMgr;
+    ASSERT_EQ(backupMgr.Start(conf), MMC_OK);
+    MmcMemBlobDesc desc{rank, gva, size, MEDIA_DRAM};
+    std::vector<MetaBackUpOperate> entries{{META_BACKUP_ADD, "stale", desc}};
+    (backupMgr.*GetMember(BackupSendMember{}))(rank, entries);
+    EXPECT_EQ(acquireCount, oneAttempt);
+    EXPECT_EQ(releaseCount, 0U);
+    backupMgr.Stop();
+}
+
+TEST_F(MmcMetaBackupMgrTest, BackupSkipsDramSourcesWithoutLeaseHooks)
+{
+    constexpr uint32_t rank = 1;
+    constexpr uint64_t gva = 4096;
+    constexpr uint64_t size = 4096;
+    for (bool provideAcquire : {false, true}) {
+        uint32_t acquireCount = 0;
+        uint32_t releaseCount = 0;
+        auto defaultConf = MmcMakeRef<MMCMetaBackUpConfDefault>(MetaNetServerPtr{});
+        if (provideAcquire) {
+            defaultConf->acquireReadLease = [&acquireCount](const std::string &, const MmcMemBlobDesc &,
+                                                            BackupReadLease &) {
+                ++acquireCount;
+                return MMC_OK;
+            };
+        } else {
+            defaultConf->releaseReadLease = [&releaseCount](const BackupReadLease &) { ++releaseCount; };
+        }
+        MMCMetaBackUpConfPtr conf = defaultConf.Get();
+        MMCMetaBackUpMgrDefault backupMgr;
+        ASSERT_EQ(backupMgr.Start(conf), MMC_OK);
+        MmcMemBlobDesc desc{rank, gva, size, MEDIA_DRAM};
+        std::vector<MetaBackUpOperate> entries{{META_BACKUP_ADD, "missing_hook", desc}};
+        (backupMgr.*GetMember(BackupSendMember{}))(rank, entries);
+        EXPECT_EQ(acquireCount, 0U);
+        EXPECT_EQ(releaseCount, 0U);
+        backupMgr.Stop();
+    }
+}
+
 } // namespace mmc
 } // namespace ock

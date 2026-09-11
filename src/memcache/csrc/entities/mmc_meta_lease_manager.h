@@ -37,9 +37,10 @@ public:
     void Wait();
     inline uint64_t RemainingLeaseTtlMs() const;
     inline uint32_t UseCount() const;
+    inline bool HasLease(uint32_t rankId, uint32_t requestId) const;
     inline uint64_t DefaultTtlMs() const;
     inline void SetDefaultTtlMs(uint64_t defaultTtlMs);
-    inline uint64_t GenerateClientId(uint32_t rankId, uint32_t requestId);
+    inline uint64_t GenerateClientId(uint32_t rankId, uint32_t requestId) const;
     inline uint32_t RankId(uint64_t clientId);
     inline uint32_t RequestId(uint64_t clientId);
 
@@ -66,6 +67,11 @@ inline uint32_t MmcMetaLeaseManager::UseCount() const
     return useClient.size();
 }
 
+inline bool MmcMetaLeaseManager::HasLease(uint32_t rankId, uint32_t requestId) const
+{
+    return useClient.find(GenerateClientId(rankId, requestId)) != useClient.end();
+}
+
 inline uint64_t MmcMetaLeaseManager::RemainingLeaseTtlMs() const
 {
     const uint64_t nowMs = ock::dagger::Monotonic::TimeUs() / 1000ULL;
@@ -82,7 +88,7 @@ inline void MmcMetaLeaseManager::SetDefaultTtlMs(uint64_t defaultTtlMs)
     defaultTtlMs_ = defaultTtlMs == 0 ? MMC_DATA_TTL_MS : defaultTtlMs;
 }
 
-uint64_t MmcMetaLeaseManager::GenerateClientId(uint32_t rankId, uint32_t requestId)
+uint64_t MmcMetaLeaseManager::GenerateClientId(uint32_t rankId, uint32_t requestId) const
 {
     return (static_cast<uint64_t>(rankId) << RANK_ID_BIT_SHIFT) | requestId;
 }

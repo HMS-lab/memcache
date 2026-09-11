@@ -444,6 +444,10 @@ public:
     Result RemoveSsdBlob(const std::string &key, uint32_t rank);
     Result AddSsdBlob(const std::string &key, const MmcMemBlobDesc &desc);
 
+    // On success, record the original object and lease ID for ReleaseBackupReadLease.
+    Result AcquireBackupReadLease(const std::string &key, const MmcMemBlobDesc &source, BackupReadLease &lease);
+    void ReleaseBackupReadLease(const BackupReadLease &lease);
+
     bool IsSsdAvailable(uint32_t rank) const
     {
         std::lock_guard<std::mutex> guard(ssdMutex_);

@@ -10,6 +10,7 @@
  * See the Mulan PSL v2 for more details.
 */
 #include "mmc_mem_blob.h"
+#include "mmc_meta_backup_mgr_factory.h"
 namespace ock {
 namespace mmc {
 
