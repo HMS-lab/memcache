@@ -331,6 +331,8 @@ public:
      */
     Result BatchExist(const std::vector<std::string> &keys, std::vector<Result> &results);
 
+    Result PromoteKey(const std::string &key);
+
     /**
      * @brief Rewarm blob from SSD to DRAM (P5: SSD→DRAM回温)
      * @param key           [in] key of the meta object

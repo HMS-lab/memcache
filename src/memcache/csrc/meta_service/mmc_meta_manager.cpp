@@ -336,7 +336,7 @@ void MmcMetaManager::ClassifyAndGroupKeys(const std::vector<std::string> &keys, 
         MmcMemObjMetaPtr memObj;
         auto ret = metaContainer_->Get(keys[i], memObj);
         if (ret != MMC_OK) {
-            MMC_LOG_WARN("key: " << keys[i] << " not found in container, ret: " << ret);
+            MMC_LOG_DEBUG("key: " << keys[i] << " not found in container, ret: " << ret);
             continue;
         }
         metaContainer_->Promote(keys[i]);
@@ -502,7 +502,10 @@ void MmcMetaManager::RollbackEntry(const std::string &key, const RewarmEntry &en
     }
     std::unique_lock<std::mutex> guard(entry.memObj->Mutex());
     MmcBlobFilterPtr rbFilter = MmcMakeRef<MmcBlobFilter>(dstDesc.rank_, dstMedia, NONE);
-    entry.memObj->FreeBlobs(key, globalAllocator_, rbFilter, false);
+    auto blobs = entry.memObj->DetachBlobs(rbFilter);
+    guard.unlock();
+    entry.memObj->FinalizeBlobs(key, globalAllocator_, blobs, false);
+    guard.lock();
     if (entry.memObj->NumBlobs() == 0) {
         metaContainer_->Erase(key);
     }
@@ -541,7 +544,10 @@ Result MmcMetaManager::ApplyRewarm(const std::string &key, RewarmEntry &entry, M
     if (ret != MMC_OK) {
         MMC_LOG_WARN("WRITE_OK failed for key=" << key << ", ret=" << ret);
         MmcBlobFilterPtr rbFilter = MmcMakeRef<MmcBlobFilter>(dstBlob->GetDesc().rank_, ctx.dstMedia, NONE);
-        entry.memObj->FreeBlobs(key, globalAllocator_, rbFilter, false);
+        auto blobs = entry.memObj->DetachBlobs(rbFilter);
+        guard.unlock();
+        entry.memObj->FinalizeBlobs(key, globalAllocator_, blobs, false);
+        guard.lock();
         if (entry.memObj->NumBlobs() == 0) {
             metaContainer_->Erase(key);
         }
@@ -554,7 +560,10 @@ Result MmcMetaManager::ApplyRewarm(const std::string &key, RewarmEntry &entry, M
         if (ret != MMC_OK) {
             MMC_LOG_WARN("READ_START failed after WRITE_OK for key=" << key << ", ret=" << ret);
             MmcBlobFilterPtr rbFilter = MmcMakeRef<MmcBlobFilter>(dstBlob->GetDesc().rank_, ctx.dstMedia, NONE);
-            entry.memObj->FreeBlobs(key, globalAllocator_, rbFilter, false);
+            auto blobs = entry.memObj->DetachBlobs(rbFilter);
+            guard.unlock();
+            entry.memObj->FinalizeBlobs(key, globalAllocator_, blobs, false);
+            guard.lock();
             if (entry.memObj->NumBlobs() == 0) {
                 metaContainer_->Erase(key);
             }
@@ -763,6 +772,11 @@ Result MmcMetaManager::BatchExist(const std::vector<std::string> &keys, std::vec
         threadPool_->Enqueue([this, candidates = std::move(prefetchCandidates)]() { PrefetchKeysAsync(candidates); });
     }
     return MMC_OK;
+}
+
+Result MmcMetaManager::PromoteKey(const std::string &key)
+{
+    return metaContainer_->Promote(key);
 }
 
 void MmcMetaManager::CheckAndEvict(MediaType media, uint64_t wantAllocSize)
@@ -993,7 +1007,12 @@ void MmcMetaManager::DoRemoveBlobs(const std::string &key, const MmcMemObjMetaPt
                                    bool triggerSsdPreFree)
 {
     // 契约：调用方必须已持有 meta->Mutex()（异步 lambda 内自行加锁，同步兜底由调用方持锁）
-    auto blobs = meta->FreeBlobs(key, globalAllocator_, filter, true, triggerSsdPreFree);
+    auto blobs = meta->DetachBlobs(filter);
+    std::unique_lock<std::mutex> adoptGuard(meta->Mutex(), std::adopt_lock);
+    adoptGuard.unlock();
+    meta->FinalizeBlobs(key, globalAllocator_, blobs, true, triggerSsdPreFree);
+    adoptGuard.lock();
+    adoptGuard.release();
     {
         std::lock_guard<std::mutex> cbLock(changeCallbacks_.mutex);
         if (changeCallbacks_.removed) {
@@ -1038,7 +1057,10 @@ Result MmcMetaManager::RemoveSsdBlob(const std::string &key, uint32_t rank)
         MMC_LOG_ERROR("RemoveSsdBlob: create filter failed for key=" << key);
         return MMC_MALLOC_FAILED;
     }
-    objMeta->FreeBlobs(key, globalAllocator_, ssdFilter, false, false);
+    auto blobs = objMeta->DetachBlobs(ssdFilter);
+    guard.unlock();
+    objMeta->FinalizeBlobs(key, globalAllocator_, blobs, false);
+    guard.lock();
     MMC_LOG_DEBUG("RemoveSsdBlob: key=" << key << ", rank=" << rank);
     if (objMeta->NumBlobs() == 0) {
         guard.unlock();
@@ -1338,7 +1360,10 @@ Result MmcMetaManager::RemoveBlobs(uint32_t rank, MediaType mediaType)
             return false;
         }
         std::unique_lock<std::mutex> guard(objMeta->Mutex());
-        auto blobs = objMeta->FreeBlobs(key, globalAllocator_, filter, false, false);
+        auto blobs = objMeta->DetachBlobs(filter);
+        guard.unlock();
+        objMeta->FinalizeBlobs(key, globalAllocator_, blobs, false);
+        guard.lock();
         freedBlobs += blobs.size();
         const bool shouldErase = (objMeta->NumBlobs() == 0);
         if (shouldErase) {
@@ -1480,7 +1505,6 @@ Result MmcMetaManager::EvictKeys(std::vector<std::string> keys, MediaType srcMed
 Result MmcMetaManager::Query(const std::string &key, uint64_t operateId, uint32_t flags, MemObjQueryInfo &queryInfo)
 {
     (void)operateId;
-    (void)flags;
     MmcMemObjMetaPtr objMeta;
     if (metaContainer_->Get(key, objMeta) != MMC_OK || objMeta == nullptr) {
         MMC_LOG_DEBUG("Cannot find MmcMemObjMeta with key : " << key);
@@ -1504,14 +1528,22 @@ Result MmcMetaManager::Query(const std::string &key, uint64_t operateId, uint32_
     queryInfo.blobs_.reserve(reservedBlobCount);
     for (const auto &blob : blobs) {
         if (queryInfo.blobs_.size() >= MAX_BLOB_COPIES) {
+            MMC_LOG_WARN("Query blob count reached MAX_BLOB_COPIES cap: " << MAX_BLOB_COPIES << ", truncating");
             break;
+        }
+        if ((flags & GET_KEY_INFO_FOR_LAYER_WISE) != 0) {
+            if (blob.mediaType_ == MEDIA_NONE || blob.mediaType_ == MEDIA_SSD || blob.state_ != READABLE) {
+                MMC_LOG_DEBUG("Skip blob, key : " << key << ", blob type : " << blob.mediaType_
+                                                  << ", state : " << blob.state_);
+                continue;
+            }
         }
         queryInfo.blobs_.push_back(blob);
     }
     queryInfo.numBlobs_ = static_cast<uint8_t>(queryInfo.blobs_.size());
-    queryInfo.size_ = objMeta->Size();
+    queryInfo.size_ = queryInfo.blobs_.size() == 0 ? 0 : objMeta->Size();
     queryInfo.prot_ = objMeta->Prot();
-    queryInfo.valid_ = true;
+    queryInfo.valid_ = !queryInfo.blobs_.empty();
     return MMC_OK;
 }
 
@@ -1715,7 +1747,6 @@ Result MmcMetaManager::MoveBlob(const std::string &key, const MmcLocation &src, 
 
         if (ret != MMC_OK) {
             MMC_LOG_WARN("key: " << key << " copy blob failed, ret " << ret);
-            guard.unlock();
 
             TP_TRACE_END(TP_MMC_META_MOVEBLOB, ret);
             return ret;
@@ -1728,7 +1759,10 @@ Result MmcMetaManager::MoveBlob(const std::string &key, const MmcLocation &src, 
             return MMC_MALLOC_FAILED;
         }
 
-        auto blobs = objMeta->FreeBlobs(key, globalAllocator_, filter);
+        auto blobs = objMeta->DetachBlobs(filter);
+        guard.unlock();
+        objMeta->FinalizeBlobs(key, globalAllocator_, blobs);
+        guard.lock();
         MMC_LOG_TRACE("move " << key << " from " << src << " to " << dst << " " << srcDesc << ", " << objMeta);
         guard.unlock();
         {
@@ -1934,7 +1968,10 @@ Result MmcMetaManager::RewarmBlob(const std::string &key, const MmcMemObjMetaPtr
     auto rollback = [&, rollbackRank = dstDesc.rank_]() -> void {
         MMC_LOG_WARN("rolling back rewarm, key=" << key);
         MmcBlobFilterPtr rbFilter = MmcMakeRef<MmcBlobFilter>(rollbackRank, dstMediaType, NONE);
-        objMeta->FreeBlobs(key, globalAllocator_, rbFilter, false);
+        auto blobs = objMeta->DetachBlobs(rbFilter);
+        guard.unlock();
+        objMeta->FinalizeBlobs(key, globalAllocator_, blobs, false);
+        guard.lock();
     };
 
     if (metaNetServer_.Get() == nullptr) {
@@ -1958,7 +1995,10 @@ Result MmcMetaManager::RewarmBlob(const std::string &key, const MmcMemObjMetaPtr
     if (ret != MMC_OK) {
         MMC_LOG_WARN("Unable to UpdateState WRITE_OK for rewarm, key=" << key << ", ret=" << ret);
         MmcBlobFilterPtr rbFilter = MmcMakeRef<MmcBlobFilter>(newBlob->GetDesc().rank_, dstMediaType, NONE);
-        objMeta->FreeBlobs(key, globalAllocator_, rbFilter, false);
+        auto blobs = objMeta->DetachBlobs(rbFilter);
+        guard.unlock();
+        objMeta->FinalizeBlobs(key, globalAllocator_, blobs, false);
+        guard.lock();
         return MMC_ERROR;
     }
     dstBlob = newBlob;

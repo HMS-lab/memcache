@@ -749,7 +749,7 @@ TEST_F(TestMmcMetaManager, RemoveMixedMedia_FreesAllAllocators)
     };
     EXPECT_GT(getUsed("HBM"), 0u);
 
-    // Remove key (FreeBlobs 异步执行，需等待 threadPool)
+    // Remove key (DetachBlobs+FinalizeBlobs 异步执行，需等待 threadPool)
     ASSERT_EQ(metaMng->Remove(key), MMC_OK);
     usleep(100000U);
 
@@ -1397,8 +1397,11 @@ TEST_F(TestMmcMetaManager, BackupReadLeaseReleaseSkipsReusedBlobInOriginalObject
     BackupReadLease oldLease;
     ASSERT_EQ(manager->AcquireBackupReadLease(key, original->GetDesc(), oldLease), MMC_OK);
     {
-        std::lock_guard<std::mutex> guard(object->Mutex());
-        EXPECT_EQ(object->FreeBlobs(key, GlobalAllocator(manager), nullptr, false).size(), oneBlob);
+        std::unique_lock<std::mutex> guard(object->Mutex());
+        auto blobs = object->DetachBlobs(nullptr);
+        guard.unlock();
+        object->FinalizeBlobs(key, GlobalAllocator(manager), blobs, false);
+        EXPECT_EQ(blobs.size(), oneBlob);
     }
 
     allocated.clear();
@@ -1446,9 +1449,12 @@ TEST_F(TestMmcMetaManager, BackupReadLeaseReleaseHandlesConcurrentRemoval)
     ASSERT_EQ(manager->AcquireBackupReadLease(key, blob->GetDesc(), lease), MMC_OK);
     std::promise<void> removalLocked;
     auto removal = std::async(std::launch::async, [object, &removalLocked, &key, &manager] {
-        std::lock_guard<std::mutex> guard(object->Mutex());
+        std::unique_lock<std::mutex> guard(object->Mutex());
+        auto blobs = object->DetachBlobs(nullptr);
         removalLocked.set_value();
-        return object->FreeBlobs(key, GlobalAllocator(manager), nullptr, false).size();
+        guard.unlock();
+        object->FinalizeBlobs(key, GlobalAllocator(manager), blobs, false);
+        return blobs.size();
     });
     removalLocked.get_future().wait();
     manager->ReleaseBackupReadLease(lease);
@@ -1458,6 +1464,184 @@ TEST_F(TestMmcMetaManager, BackupReadLeaseReleaseHandlesConcurrentRemoval)
     BackupReadLease removedLease;
     EXPECT_NE(manager->AcquireBackupReadLease(key, blob->GetDesc(), removedLease), MMC_OK);
     manager->Stop();
+}
+
+// PromoteKey on non-existent key returns MMC_UNMATCHED_KEY
+TEST_F(TestMmcMetaManager, PromoteKey_NonExistentKey_ReturnsUnmatchedKey)
+{
+    constexpr uint64_t defaultTtl = 2000U;
+    constexpr uint16_t evictHigh = 70U;
+    constexpr uint16_t evictLow = 60U;
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, evictHigh, evictLow);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+
+    EXPECT_EQ(metaMng->PromoteKey("non_existent_key"), MMC_UNMATCHED_KEY);
+
+    metaMng->Stop();
+}
+
+// PromoteKey on existing key returns MMC_OK
+TEST_F(TestMmcMetaManager, PromoteKey_ExistingKey_ReturnsOk)
+{
+    constexpr uint64_t defaultTtl = 2000U;
+    constexpr uint16_t evictHigh = 70U;
+    constexpr uint16_t evictLow = 60U;
+    constexpr uint64_t dramCapacity = 128 * 1024;
+    constexpr uint64_t testOperateId = 1;
+    MmcLocation dramLoc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo dramInfo{0, dramCapacity};
+
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, evictHigh, evictLow);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+
+    std::string key = "promote_test_key";
+    AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+    MmcMemMetaDesc objMeta;
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, testOperateId, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->UpdateState(key, dramLoc, MMC_WRITE_OK, testOperateId), MMC_OK);
+
+    EXPECT_EQ(metaMng->PromoteKey(key), MMC_OK);
+
+    metaMng->Stop();
+}
+
+// Query with layer-wise flag skips non-READABLE blobs (ALLOCATED state)
+TEST_F(TestMmcMetaManager, Query_WithLayerWiseFlag_SkipsNonReadableBlobs)
+{
+    constexpr uint64_t defaultTtl = 2000U;
+    constexpr uint16_t evictHigh = 70U;
+    constexpr uint16_t evictLow = 60U;
+    constexpr uint64_t dramCapacity = 128 * 1024;
+    constexpr uint64_t testOperateId = 1;
+    MmcLocation dramLoc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo dramInfo{0, dramCapacity};
+
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, evictHigh, evictLow);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+
+    std::string key = "layer_wise_non_readable";
+    AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+    MmcMemMetaDesc objMeta;
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, testOperateId, 0, objMeta), MMC_OK);
+
+    MemObjQueryInfo queryInfo;
+    EXPECT_EQ(metaMng->Query(key, testOperateId, GET_KEY_INFO_FOR_LAYER_WISE, queryInfo), MMC_OK);
+    EXPECT_TRUE(queryInfo.blobs_.empty());
+    EXPECT_FALSE(queryInfo.valid_);
+    EXPECT_EQ(queryInfo.size_, 0U);
+
+    metaMng->Stop();
+}
+
+// Query with layer-wise flag returns READABLE DRAM blobs
+TEST_F(TestMmcMetaManager, Query_WithLayerWiseFlag_ReturnsReadableDramBlobs)
+{
+    constexpr uint64_t defaultTtl = 2000U;
+    constexpr uint16_t evictHigh = 70U;
+    constexpr uint16_t evictLow = 60U;
+    constexpr uint64_t dramCapacity = 128 * 1024;
+    constexpr uint64_t testOperateId = 1;
+    MmcLocation dramLoc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo dramInfo{0, dramCapacity};
+
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, evictHigh, evictLow);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+
+    std::string key = "layer_wise_readable";
+    AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+    MmcMemMetaDesc objMeta;
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, testOperateId, 0, objMeta), MMC_OK);
+
+    MemObjQueryInfo queryInfoBefore;
+    EXPECT_EQ(metaMng->Query(key, testOperateId, GET_KEY_INFO_FOR_LAYER_WISE, queryInfoBefore), MMC_OK);
+    EXPECT_TRUE(queryInfoBefore.blobs_.empty());
+    EXPECT_FALSE(queryInfoBefore.valid_);
+
+    ASSERT_EQ(metaMng->UpdateState(key, dramLoc, MMC_WRITE_OK, testOperateId), MMC_OK);
+
+    MemObjQueryInfo queryInfoAfter;
+    EXPECT_EQ(metaMng->Query(key, testOperateId, GET_KEY_INFO_FOR_LAYER_WISE, queryInfoAfter), MMC_OK);
+    EXPECT_EQ(queryInfoAfter.blobs_.size(), 1U);
+    EXPECT_TRUE(queryInfoAfter.valid_);
+    EXPECT_EQ(queryInfoAfter.size_, SIZE_32K);
+
+    metaMng->Stop();
+}
+
+// Query without layer-wise flag returns all blobs regardless of state
+TEST_F(TestMmcMetaManager, Query_WithoutLayerWiseFlag_ReturnsAllBlobs)
+{
+    constexpr uint64_t defaultTtl = 2000U;
+    constexpr uint16_t evictHigh = 70U;
+    constexpr uint16_t evictLow = 60U;
+    constexpr uint64_t dramCapacity = 128 * 1024;
+    constexpr uint64_t testOperateId = 1;
+    MmcLocation dramLoc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo dramInfo{0, dramCapacity};
+
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, evictHigh, evictLow);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+
+    std::string key = "no_flag_alloc_only";
+    AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+    MmcMemMetaDesc objMeta;
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, testOperateId, 0, objMeta), MMC_OK);
+
+    MemObjQueryInfo queryInfo;
+    EXPECT_EQ(metaMng->Query(key, testOperateId, 0, queryInfo), MMC_OK);
+    EXPECT_EQ(queryInfo.blobs_.size(), 1U);
+    EXPECT_TRUE(queryInfo.valid_);
+    EXPECT_EQ(queryInfo.size_, SIZE_32K);
+
+    metaMng->Stop();
+}
+
+// Query with layer-wise flag skips SSD blobs even when READABLE
+TEST_F(TestMmcMetaManager, Query_WithLayerWiseFlag_SkipsSsdBlobs)
+{
+    constexpr uint64_t defaultTtl = 2000U;
+    constexpr uint16_t evictHigh = 70U;
+    constexpr uint16_t evictLow = 60U;
+    constexpr uint64_t ssdCapacity = 128 * 1024;
+    constexpr uint64_t testOperateId = 1;
+    MmcLocation ssdLoc{0, MEDIA_SSD};
+    MmcLocalMemlInitInfo ssdInfo{0, ssdCapacity};
+
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, evictHigh, evictLow);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    metaMng->Mount(ssdLoc, ssdInfo, blobMap, false);
+
+    std::string key = "layer_wise_ssd";
+    AllocOptions allocReq{SIZE_32K, 1, MEDIA_SSD, {0}, 0};
+    MmcMemMetaDesc objMeta;
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, testOperateId, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->UpdateState(key, ssdLoc, MMC_WRITE_OK, testOperateId), MMC_OK);
+
+    MemObjQueryInfo queryFiltered;
+    EXPECT_EQ(metaMng->Query(key, testOperateId, GET_KEY_INFO_FOR_LAYER_WISE, queryFiltered), MMC_OK);
+    EXPECT_TRUE(queryFiltered.blobs_.empty());
+    EXPECT_FALSE(queryFiltered.valid_);
+
+    MemObjQueryInfo queryAll;
+    EXPECT_EQ(metaMng->Query(key, testOperateId, 0, queryAll), MMC_OK);
+    EXPECT_EQ(queryAll.blobs_.size(), 1U);
+    EXPECT_TRUE(queryAll.valid_);
+
+    metaMng->Stop();
 }
 
 } // namespace mmc

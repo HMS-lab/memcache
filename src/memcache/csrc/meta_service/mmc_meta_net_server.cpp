@@ -94,6 +94,8 @@ Result ock::mmc::MetaNetServer::Start(NetEngineOptions &options)
                                       std::bind(&MetaNetServer::HandlePrefetch, this, std::placeholders::_1));
     server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::ML_EVICT_REQ,
                                       std::bind(&MetaNetServer::HandleEvict, this, std::placeholders::_1));
+    server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::ML_BATCH_PROMOTE_REQ,
+                                      std::bind(&MetaNetServer::HandleBatchPromote, this, std::placeholders::_1));
     server->RegNewLinkHandler(std::bind(&MetaNetServer::HandleNewLink, this, std::placeholders::_1));
     server->RegLinkBrokenHandler(std::bind(&MetaNetServer::HandleLinkBroken, this, std::placeholders::_1));
 
@@ -479,6 +481,22 @@ Result MetaNetServer::HandleEvict(const NetContextPtr &context)
                                          static_cast<MediaType>(req.dstMedia_), req.flags_);
     MMC_LOG_DEBUG("HandleEvict keys (size " << req.keys_.size() << ") finish, ret: " << ret);
     EvictResponse resp(ret);
+    return context->Reply(req.msgId, resp);
+}
+
+Result MetaNetServer::HandleBatchPromote(const NetContextPtr &context)
+{
+    BatchPromoteRequest req;
+    BatchPromoteResponse resp;
+    context->GetRequest<BatchPromoteRequest>(req);
+
+    auto &metaMgrProxy = metaService_->GetMetaMgrProxy();
+    TP_TRACE_BEGIN(TP_MMC_META_BATCH_PROMOTE);
+    auto ret = metaMgrProxy->BatchPromote(req, resp);
+    TP_TRACE_END(TP_MMC_META_BATCH_PROMOTE, ret);
+    (void)ret;
+    MMC_LOG_DEBUG("HandleBatchPromote keys (size " << req.keys_.size() << ") finish: " << Join(req.keys_));
+
     return context->Reply(req.msgId, resp);
 }
 

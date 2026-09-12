@@ -201,6 +201,8 @@ private:
     void AsyncUpdateState(BatchUpdateRequest &updateRequest, const std::string &opName);
     void SyncUpdateLease(BatchUpdateLeaseRequest &request);
     void AsyncUpdateLease(BatchUpdateLeaseRequest &request);
+    void SyncPromote(BatchPromoteRequest &request, const std::string &opName);
+    void AsyncPromote(BatchPromoteRequest &request, const std::string &opName);
     std::future<int32_t> SubmitPutTask(BatchCopyDesc &copyDesc, MediaType mediaType, bool asyncExec);
     std::future<int32_t> SubmitGetTask(BatchCopyDesc &copyDesc, MediaType mediaType, bool asyncExec);
     Result BatchDataOperation(std::vector<void *> &gvas, std::vector<void *> &buffers, std::vector<size_t> &sizes,

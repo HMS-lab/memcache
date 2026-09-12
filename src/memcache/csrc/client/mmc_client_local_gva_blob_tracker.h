@@ -28,6 +28,7 @@ struct LocalGvaBlobInfo : public MmcReferable {
     MmcMemBlobDesc blob{};
     std::queue<uint64_t> operateQueue;
     uint64_t leaseDeadlineMs{0};
+    uint64_t lastPromoteMs{0};
 
     bool IsWritable() const;
     bool IsReadable() const;
@@ -51,6 +52,7 @@ public:
     void RemoveByKey(const std::string &key);
     void RemoveExpired();
     void Clear();
+    void MarkPromoted(const std::vector<std::string> &keys);
 
 private:
     std::mutex mutex_{};

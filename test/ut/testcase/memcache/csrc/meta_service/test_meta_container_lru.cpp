@@ -236,3 +236,26 @@ TEST_F(TestMmcMetaContainerLRU, GetKeyCount)
     EXPECT_EQ(container->EraseAll([](const std::string &, const int &) {}), MMC_OK);
     EXPECT_EQ(container->GetKeyCount(), 0);
 }
+
+// Promote on non-existent key returns MMC_UNMATCHED_KEY
+TEST_F(TestMmcMetaContainerLRU, PromoteNonExistentKeyReturnsUnmatched)
+{
+    EXPECT_EQ(container->Promote("non_existent"), MMC_UNMATCHED_KEY);
+}
+
+// Promote on existing key returns MMC_OK
+TEST_F(TestMmcMetaContainerLRU, PromoteExistingKeyReturnsOk)
+{
+    constexpr int testValue = 100;
+    EXPECT_EQ(container->Insert("key1", testValue), MMC_OK);
+    EXPECT_EQ(container->Promote("key1"), MMC_OK);
+}
+
+// Promote on key with MEDIA_NONE type returns OK without moving LRU
+TEST_F(TestMmcMetaContainerLRU, PromoteNoneMediaTypeReturnsOk)
+{
+    constexpr int testValue = 100;
+    EXPECT_EQ(container->Insert("key1", testValue), MMC_OK);
+    EXPECT_EQ(container->InsertLru("key1", MEDIA_NONE), MMC_OK);
+    EXPECT_EQ(container->Promote("key1"), MMC_OK);
+}

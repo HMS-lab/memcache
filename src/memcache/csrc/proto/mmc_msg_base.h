@@ -58,6 +58,7 @@ enum LOCAL_META_OPCODE_REQ : int16_t {
     ML_STATS_REPORT_REQ = 25,       /* client→meta metric report */
     ML_PREFETCH_REQ = 26,           /* prefetch keys from SSD to DRAM */
     ML_EVICT_REQ = 27,              /* evict keys from DRAM to SSD */
+    ML_BATCH_PROMOTE_REQ = 28,      /* promote keys in LRU without blob access */
 };
 
 enum LOCAL_META_OPCODE_RESP : int16_t {
@@ -80,6 +81,7 @@ enum LOCAL_META_OPCODE_RESP : int16_t {
     ML_STATS_REPORT_RESP = 25,      /* stats report response */
     ML_PREFETCH_RESP = 26,          /* prefetch keys response */
     ML_EVICT_RESP = 27,             /* evict keys response */
+    ML_BATCH_PROMOTE_RESP = 28,     /* batch promote response */
 };
 } // namespace mmc
 } // namespace ock

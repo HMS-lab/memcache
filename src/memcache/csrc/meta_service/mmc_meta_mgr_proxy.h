@@ -173,6 +173,8 @@ public:
         return metaMangerPtr_->PrefetchKeys(std::move(keys), srcMedia, dstMedia, flags);
     }
 
+    Result BatchPromote(const BatchPromoteRequest &req, BatchPromoteResponse &resp);
+
     Result EvictKeys(std::vector<std::string> keys, MediaType srcMedia = MediaType::MEDIA_DRAM,
                      MediaType dstMedia = MediaType::MEDIA_SSD, uint32_t flags = 0)
     {

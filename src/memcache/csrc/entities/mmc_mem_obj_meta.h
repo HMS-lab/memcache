@@ -49,14 +49,18 @@ public:
     Result AddBlob(const MmcMemBlobPtr &blob);
 
     /**
-     * @brief Free blobs from the mem object by filter
-     *
-     * @param allocator allocator ptr
-     * @return 0 if removed
+     * @brief Detach blobs from blobs_ list by filter (caller must hold Mutex)
+     * @param filter blob filter, nullptr for all
+     * @return detached blobs
      */
-    std::vector<MmcMemBlobPtr> FreeBlobs(const std::string &key, MmcGlobalAllocatorPtr &allocator,
-                                         const MmcBlobFilterPtr &filter = nullptr, bool doBackupRemove = true,
-                                         bool triggerSsdPreFree = false);
+    std::vector<MmcMemBlobPtr> DetachBlobs(const MmcBlobFilterPtr &filter = nullptr);
+
+    /**
+     * @brief Finalize detached blobs: BackupRemove, UpdateState, Free (no lock held)
+     * @param blobs blobs to finalize
+     */
+    void FinalizeBlobs(const std::string &key, MmcGlobalAllocatorPtr &allocator, std::vector<MmcMemBlobPtr> &blobs,
+                       bool doBackupRemove = true, bool triggerSsdPreFree = false);
 
     /**
      * @brief Get the prot

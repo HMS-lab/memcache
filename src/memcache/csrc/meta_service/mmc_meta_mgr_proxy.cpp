@@ -379,6 +379,16 @@ Result MmcMetaMgrProxy::BatchExistKey(const BatchIsExistRequest &req, BatchIsExi
     return MMC_OK;
 }
 
+Result MmcMetaMgrProxy::BatchPromote(const BatchPromoteRequest &req, BatchPromoteResponse &resp)
+{
+    resp.results_.reserve(req.keys_.size());
+    for (size_t i = 0; i < req.keys_.size(); ++i) {
+        auto ret = metaMangerPtr_->PromoteKey(req.keys_[i]);
+        resp.results_.emplace_back(ret);
+    }
+    return MMC_OK;
+}
+
 Result MmcMetaMgrProxy::HandleUbsIoMetaDelete(const UbsIoMetaDeleteRequest &req)
 {
     MmcMetaMetricManager &metricManager = MmcMetaMetricManager::GetInstance();

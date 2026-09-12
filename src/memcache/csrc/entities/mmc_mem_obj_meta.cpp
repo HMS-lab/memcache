@@ -64,17 +64,20 @@ Result MmcMemObjMeta::RemoveBlobs(const MmcBlobFilterPtr &filter, bool revert)
     return numBlobs_ < oldNumBlobs ? MMC_OK : MMC_ERROR;
 }
 
-std::vector<MmcMemBlobPtr> MmcMemObjMeta::FreeBlobs(const std::string &key, MmcGlobalAllocatorPtr &allocator,
-                                                    const MmcBlobFilterPtr &filter, bool doBackupRemove,
-                                                    bool triggerSsdPreFree)
+std::vector<MmcMemBlobPtr> MmcMemObjMeta::DetachBlobs(const MmcBlobFilterPtr &filter)
 {
     if (NumBlobs() == 0) {
         return {};
     }
-    TP_TRACE_BEGIN(TP_MMC_META_FREE_BLOB);
     std::vector<MmcMemBlobPtr> blobs = GetBlobs(filter);
     RemoveBlobs(filter);
+    return blobs;
+}
 
+void MmcMemObjMeta::FinalizeBlobs(const std::string &key, MmcGlobalAllocatorPtr &allocator,
+                                  std::vector<MmcMemBlobPtr> &blobs, bool doBackupRemove, bool triggerSsdPreFree)
+{
+    TP_TRACE_BEGIN(TP_MMC_META_FREE_BLOB);
     Result ret = MMC_OK;
     for (size_t i = 0; i < blobs.size(); i++) {
         if (doBackupRemove) {
@@ -105,7 +108,6 @@ std::vector<MmcMemBlobPtr> MmcMemObjMeta::FreeBlobs(const std::string &key, MmcG
         }
     }
     TP_TRACE_END(TP_MMC_META_FREE_BLOB, MMC_OK);
-    return blobs;
 }
 
 std::vector<MmcMemBlobPtr> MmcMemObjMeta::GetBlobs(const MmcBlobFilterPtr &filter, bool revert)

@@ -76,6 +76,7 @@ constexpr int32_t MMC_ASYNC_TRANSPORT = 2U;
 constexpr uint32_t KEY_MAX_LENTH = 256U;
 constexpr uint32_t GVA_LEASE_CLEANUP_INTERVAL_SECONDS = 1U;
 constexpr uint32_t CLIENT_METRIC_REPORT_INTERVAL_SECONDS = 30U;
+constexpr uint64_t PROMOTE_INTERVAL_MS = 500;
 
 MmcClientDefault *MmcClientDefault::gClientHandler = nullptr;
 std::mutex MmcClientDefault::gClientHandlerMtx;
@@ -1020,6 +1021,38 @@ void MmcClientDefault::AsyncUpdateLease(BatchUpdateLeaseRequest &request)
     }
 }
 
+void MmcClientDefault::SyncPromote(BatchPromoteRequest &request, const std::string &opName)
+{
+    TP_TRACE_BEGIN(TP_MMC_LOCAL_BATCH_PROMOTE);
+    BatchPromoteResponse response;
+    auto ret = metaNetClient_->SyncCall(request, response, rpcRetryTimeOut_);
+    TP_TRACE_END(TP_MMC_LOCAL_BATCH_PROMOTE, ret);
+    if (ret != MMC_OK) {
+        MMC_LOG_ERROR("client " << name_ << " " << opName << " failed: " << ret);
+        return;
+    }
+    if (response.results_.size() != request.keys_.size()) {
+        MMC_LOG_ERROR("client " << name_ << " " << opName << " response size mismatch, key size:"
+                                << request.keys_.size() << ", ret size:" << response.results_.size());
+        return;
+    }
+    for (size_t i = 0; i < request.keys_.size() && i < response.results_.size(); ++i) {
+        if (response.results_[i] != MMC_OK && response.results_[i] != MMC_UNMATCHED_KEY) {
+            MMC_LOG_ERROR("client " << name_ << " " << opName << " key " << request.keys_[i]
+                                    << " failed: " << response.results_[i]);
+        }
+    }
+}
+
+void MmcClientDefault::AsyncPromote(BatchPromoteRequest &request, const std::string &opName)
+{
+    auto future =
+        threadPool_->Enqueue([this, opName](BatchPromoteRequest requestL) { SyncPromote(requestL, opName); }, request);
+    if (!future.valid()) {
+        SyncPromote(request, opName);
+    }
+}
+
 Result MmcClientDefault::InitMetricReporting()
 {
     if (!bmProxy_->IsReady()) {
@@ -1286,6 +1319,8 @@ Result MmcClientDefault::BatchCopyWritePath(std::vector<void *> &gvas, std::vect
     std::vector<void *> toGvas{};
     std::vector<void *> toBuffers{};
     std::vector<size_t> toSizes{};
+    std::vector<std::string> promoteKeys{};
+    const uint64_t nowMs = NowMs();
 
     for (size_t i = 0; i < gvas.size(); ++i) {
         LocalGvaBlobInfo info{};
@@ -1299,9 +1334,17 @@ Result MmcClientDefault::BatchCopyWritePath(std::vector<void *> &gvas, std::vect
                                     << ", ret:" << findRet);
             return findRet;
         }
+        if (nowMs - info.lastPromoteMs >= PROMOTE_INTERVAL_MS) {
+            promoteKeys.push_back(info.key);
+        }
         toGvas.push_back(gvas[i]);
         toBuffers.push_back(buffers[i]);
         toSizes.push_back(sizes[i]);
+    }
+    if (!promoteKeys.empty()) {
+        gvaBlobTracker_.MarkPromoted(promoteKeys);
+        BatchPromoteRequest promoteReq{promoteKeys};
+        AsyncPromote(promoteReq, "batch copy write promote");
     }
     if (toGvas.empty()) {
         return MMC_OK;
@@ -1316,6 +1359,9 @@ Result MmcClientDefault::BatchCopyReadPath(std::vector<void *> &gvas, std::vecto
 {
     std::vector<LocalGvaBlobInfo> readInfos;
     readInfos.reserve(gvas.size());
+    std::vector<std::string> promoteKeys;
+    promoteKeys.reserve(gvas.size());
+    uint64_t nowMs = NowMs();
     for (size_t i = 0; i < gvas.size(); ++i) {
         LocalGvaBlobInfo info{};
         Result findRet = gvaBlobTracker_.FindReadable(reinterpret_cast<uint64_t>(gvas[i]), sizes[i], info);
@@ -1325,7 +1371,16 @@ Result MmcClientDefault::BatchCopyReadPath(std::vector<void *> &gvas, std::vecto
                                     << ", ret:" << findRet);
             return findRet;
         }
+        if (nowMs - info.lastPromoteMs >= PROMOTE_INTERVAL_MS) {
+            promoteKeys.push_back(info.key);
+        }
         readInfos.push_back(info);
+    }
+
+    if (!promoteKeys.empty()) {
+        gvaBlobTracker_.MarkPromoted(promoteKeys);
+        BatchPromoteRequest promoteReq{promoteKeys};
+        AsyncPromote(promoteReq, "batch copy read promote");
     }
 
     Result readResult = BatchDataOperation(gvas, buffers, sizes, direct);
@@ -1333,7 +1388,7 @@ Result MmcClientDefault::BatchCopyReadPath(std::vector<void *> &gvas, std::vecto
         return readResult;
     }
 
-    const uint64_t nowMs = NowMs();
+    nowMs = NowMs();
     for (const auto &info : readInfos) {
         if (info.IsLeaseExpired(nowMs)) {
             MMC_LOG_ERROR("client " << name_ << " batch copy read lease expired.");

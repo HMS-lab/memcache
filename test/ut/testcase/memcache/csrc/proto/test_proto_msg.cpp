@@ -303,12 +303,65 @@ TEST_F(TestProtoMsg, PrefetchRequest_OversizedKeysVector)
     EXPECT_EQ(req.Deserialize(unpacker), MMC_ERROR);
 }
 
-// Prefetch/Evict opcode enumeration: 26/27, REQ/RESP 对共享同一 ID
-TEST_F(TestProtoMsg, PrefetchEvict_OpcodeEnumeration)
+// Prefetch/Evict/BatchPromote opcode enumeration: 26/27/28, REQ/RESP 对共享同一 ID
+TEST_F(TestProtoMsg, PrefetchEvictBatchPromote_OpcodeEnumeration)
 {
-    EXPECT_EQ(static_cast<int16_t>(ML_PREFETCH_REQ), 26);
-    EXPECT_EQ(static_cast<int16_t>(ML_EVICT_REQ), 27);
+    constexpr int16_t expectedPrefetchOpcode = 26;
+    constexpr int16_t expectedEvictOpcode = 27;
+    constexpr int16_t expectedBatchPromoteOpcode = 28;
+    EXPECT_EQ(static_cast<int16_t>(ML_PREFETCH_REQ), expectedPrefetchOpcode);
+    EXPECT_EQ(static_cast<int16_t>(ML_EVICT_REQ), expectedEvictOpcode);
+    EXPECT_EQ(static_cast<int16_t>(ML_BATCH_PROMOTE_REQ), expectedBatchPromoteOpcode);
     EXPECT_EQ(static_cast<int16_t>(ML_PREFETCH_REQ), static_cast<int16_t>(ML_PREFETCH_RESP));
     EXPECT_EQ(static_cast<int16_t>(ML_EVICT_REQ), static_cast<int16_t>(ML_EVICT_RESP));
+    EXPECT_EQ(static_cast<int16_t>(ML_BATCH_PROMOTE_REQ), static_cast<int16_t>(ML_BATCH_PROMOTE_RESP));
     EXPECT_NE(static_cast<int16_t>(ML_PREFETCH_REQ), static_cast<int16_t>(ML_EVICT_REQ));
+    EXPECT_NE(static_cast<int16_t>(ML_EVICT_REQ), static_cast<int16_t>(ML_BATCH_PROMOTE_REQ));
+}
+
+// BatchPromoteRequest serialization/deserialization — keys roundtrip, opcode 28
+TEST_F(TestProtoMsg, BatchPromoteRequest_SerializeDeserialize)
+{
+    BatchPromoteRequest req{{"key1", "key2", "key3"}};
+    EXPECT_EQ(req.msgId, ML_BATCH_PROMOTE_REQ);
+
+    NetMsgPacker packer;
+    ASSERT_EQ(req.Serialize(packer), MMC_OK);
+    auto serialized = packer.String();
+
+    BatchPromoteRequest req2;
+    NetMsgUnpacker unpacker(serialized);
+    ASSERT_EQ(req2.Deserialize(unpacker), MMC_OK);
+    EXPECT_EQ(req2.keys_, req.keys_);
+    EXPECT_EQ(req2.msgId, ML_BATCH_PROMOTE_REQ);
+}
+
+// BatchPromoteRequest serialization/deserialization — empty keys
+TEST_F(TestProtoMsg, BatchPromoteRequest_EmptyKeys)
+{
+    BatchPromoteRequest req;
+    NetMsgPacker packer;
+    ASSERT_EQ(req.Serialize(packer), MMC_OK);
+
+    BatchPromoteRequest req2;
+    NetMsgUnpacker unpacker(packer.String());
+    ASSERT_EQ(req2.Deserialize(unpacker), MMC_OK);
+    EXPECT_TRUE(req2.keys_.empty());
+}
+
+// BatchPromoteResponse serialization/deserialization — results roundtrip
+TEST_F(TestProtoMsg, BatchPromoteResponse_SerializeDeserialize)
+{
+    BatchPromoteResponse resp;
+    resp.results_ = {MMC_OK, MMC_UNMATCHED_KEY, MMC_ERROR};
+    EXPECT_EQ(resp.msgId, ML_BATCH_PROMOTE_RESP);
+
+    NetMsgPacker packer;
+    ASSERT_EQ(resp.Serialize(packer), MMC_OK);
+
+    BatchPromoteResponse resp2;
+    NetMsgUnpacker unpacker(packer.String());
+    ASSERT_EQ(resp2.Deserialize(unpacker), MMC_OK);
+    EXPECT_EQ(resp2.results_, resp.results_);
+    EXPECT_EQ(resp2.msgId, ML_BATCH_PROMOTE_RESP);
 }
