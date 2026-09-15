@@ -1,0 +1,162 @@
+name: PR-pipeline_memcache
+
+concurrency:
+  max: 5
+  exceed-action: QUEUE
+  enable: true
+  preemption:
+    enable: true
+    events: [mr_id]
+
+on:
+  pull_request_target:
+    types:
+      - open
+      - update
+      - reopen
+    branches:
+      - master
+      - develop
+      - release/1.2
+
+  pr_comment:
+    types: [ created ]
+    keyword: '^(?:\/)?compile*'
+
+  pull_request_comment:
+    types: [ created ]
+    branches: [ '*' ]
+    comments: [ '^(?:\/)?compile*' ]
+
+permissions:
+  repository: read
+  id-token: write
+
+env:
+  py_version: "cp311-cp311"
+  IS_MANYLINUX: TRUE
+  pr_id: ${{ atomgit.event.pull_request.number }}
+
+stages :
+  stage_1:
+    name: Codecheck
+    jobs:
+      pre_commit:
+        name: precommit
+        runs-on: [ self-hosted, x86, cpu=16 ]
+        container:
+          image: swr.cn-north-4.myhuaweicloud.com/memfabric-hybrid/memfabric-hybrid_x86:multi_python_v2
+        steps:
+          - name: Checkout repository
+            uses: checkout
+            with:
+              ref: refs/merge-requests/${{ env.pr_id }}/merge
+
+          - name: setup-python
+            run: |
+              echo "PYTHON_HOME=/opt/python/${py_version}" >> $ATOMGIT_ENV
+              echo "PATH=/opt/python/${py_version}/bin:${PATH}" >> $ATOMGIT_ENV
+
+          - name: Python version
+            run: |
+              which python3
+              which pip3.11
+              PY3_PATH=$(which python3)
+              ln -sf $PY3_PATH /usr/bin/python
+              ln -sf $(which pip3.11) /usr/bin/pip
+              which pip3.11
+              python --version
+          - name: setup-go
+            uses: setup-go
+            with:
+              version: 1.26
+              cache: true
+
+          - name: Run pre-commit
+            uses: openlibing/pre-commit-action@v1.0.0
+            with:
+              extra_args: --all-files
+
+      SCA:
+        name: SCA
+        runs-on: [ self-hosted, x86, cpu=16 ]
+        steps:
+          - name: Checkout repository
+            uses: checkout
+            with:
+              ref: refs/merge-requests/${{ env.pr_id }}/merge
+
+          - name: Run sca-pr-action
+            uses: openlibing/sca-action/sca-pr-action@v1.0.0
+            with:
+              project-name: BeiMing
+
+      Antipoison:
+        name: Antipoison
+        runs-on: [ self-hosted, x86, cpu=16 ]
+        steps:
+          - name: Checkout repository
+            uses: checkout
+            with:
+              ref: refs/merge-requests/${{ env.pr_id }}/merge
+
+          - name: Run malicious-code-pr-action
+            uses: openlibing/malicious-code-scan-action/malicious-code-pr-scan-action@v1.0.0
+            with:
+              project-name: BeiMing
+
+  stage_2:
+    name: Build and UT
+    jobs:
+      Build_memcache:
+        name: Build_memcache
+        runs-on: [ self-hosted, arm, cpu=32 ]
+        container:
+          image: swr.cn-north-4.myhuaweicloud.com/memfabric-hybrid/memfabric-hybrid_arm:multi_python_v2
+        steps:
+          - name: Checkout repository
+            uses: checkout
+            with:
+              ref: refs/merge-requests/${{ env.pr_id }}/merge
+              submodules: recursive
+
+          - name: build
+            run: |
+              mv /usr/bin/patchelf /usr/bin/patchelf.bak
+              export PYTHON_HOME=/opt/python/${py_version}
+              export PATH=/opt/python/${py_version}/bin:/usr/bin:$PATH
+
+              pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+              pip3 config set global.trusted-host pypi.tuna.tsinghua.edu.cn
+              pip3 install --upgrade setuptools wheel
+              pip3 install pybind11==3.0.1
+              bash script/build_and_pack_run.sh --build_test ON
+
+      UT_memcache:
+        name: UT_memcache
+        runs-on: [ self-hosted, arm, cpu=32 ]
+        container:
+          image: swr.cn-north-4.myhuaweicloud.com/memfabric-hybrid/memfabric-hybrid_arm:multi_python_v2
+        steps:
+          - name: Checkout repository
+            uses: checkout
+            with:
+              ref: refs/merge-requests/${{ env.pr_id }}/merge
+              submodules: recursive
+
+          - name: ut
+            run: |
+              mv /usr/bin/patchelf /usr/bin/patchelf.bak
+              export PYTHON_HOME=/opt/python/${py_version}
+              export PATH=/opt/python/${py_version}/bin:/usr/bin:$PATH
+              export CMAKE_PREFIX_PATH=$PYTHON_HOME
+              export PYTHON3_EXECUTABLE=$(which python3)
+
+              pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+              pip3 config set global.trusted-host pypi.tuna.tsinghua.edu.cn
+              pip3 install --upgrade pip
+              pip3 install --upgrade setuptools wheel
+              pip3 install pybind11==3.0.1
+              bash script/run_ut.sh
+              cd output
+              cp ./bin/gcover_report/test_detail.xml ./coverage/result/
