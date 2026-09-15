@@ -34,11 +34,13 @@ public:
 private:
     struct ValueLruItem {
         Value value_;
+        // 访问时需持有 metaLock_ 写锁，或同时持有 metaLock_ 读锁和 lruLock_。
         MediaType mediaType_;
         typename std::list<Key>::iterator lruIter_;
     };
     std::unordered_map<Key, ValueLruItem> metaMap_;
     std::list<Key> lruLists_[MEDIA_NONE];
+    // 保护链表和 LRU 状态；同时加锁时必须先获取 metaLock_，再获取 lruLock_。
     MmcReadWriteLock lruLock_;
     MmcReadWriteLock metaLock_;
     std::function<MediaType(const Value &)> getTypeFunc_;
@@ -182,10 +184,6 @@ public:
             MMC_LOG_ERROR("Promote: Key " << key << " not found in MmcMetaContainer. ErrCode: " << MMC_UNMATCHED_KEY);
             return MMC_UNMATCHED_KEY;
         }
-        if (iter->second.mediaType_ == MEDIA_NONE) {
-            MMC_LOG_DEBUG("Skipped promotion for key=" << key << ", mediaType is NONE (key in transition)");
-            return MMC_OK;
-        }
         UpdateLRU(iter->first, iter->second);
         return MMC_OK;
     }
@@ -197,6 +195,7 @@ public:
         if (iter == metaMap_.end()) {
             return MEDIA_NONE;
         }
+        MmcReadGuard lruLockGuard(lruLock_);
         return iter->second.mediaType_;
     }
 
@@ -230,8 +229,8 @@ public:
             MMC_LOG_WARN("RemoveFromLru: Key " << key << " not found.");
             return MMC_UNMATCHED_KEY;
         }
-        if (iter->second.mediaType_ == type) {
-            MmcWriteGuard lockGuard(lruLock_);
+        MmcWriteGuard lruLockGuard(lruLock_);
+        if (iter->second.mediaType_ != MEDIA_NONE && iter->second.mediaType_ == type) {
             lruLists_[type].erase(iter->second.lruIter_);
             iter->second.mediaType_ = MEDIA_NONE;
             MMC_LOG_DEBUG("Removed LRU entry, key=" << key << ", type=" << type);
@@ -328,13 +327,14 @@ public:
 private:
     void UpdateLRU(const Key &key, ValueLruItem &lruItem)
     {
-        // 只支持在同层级内部更新
-        if (lruItem.mediaType_ != MEDIA_NONE) {
-            MmcWriteGuard lockGuard(lruLock_);
-            lruLists_[lruItem.mediaType_].erase(lruItem.lruIter_);
-            lruLists_[lruItem.mediaType_].push_front(key);
-            lruItem.lruIter_ = lruLists_[lruItem.mediaType_].begin();
+        MmcWriteGuard lockGuard(lruLock_);
+        if (lruItem.mediaType_ == MEDIA_NONE) {
+            MMC_LOG_DEBUG("Skipped promotion for key=" << key << ", mediaType is NONE (key in transition)");
+            return;
         }
+        // 只支持在同层级内部更新
+        auto &lruList = lruLists_[lruItem.mediaType_];
+        lruList.splice(lruList.begin(), lruList, lruItem.lruIter_);
     }
 
     MediaType GetBlobType(const Value &value)

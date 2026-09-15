@@ -62,6 +62,81 @@ TEST_F(TestMmcMetaContainerLRU, Erase)
     EXPECT_EQ(value, 200);
 }
 
+TEST_F(TestMmcMetaContainerLRU, RepeatedPromotionPreservesEvictionOrder)
+{
+    ASSERT_EQ(container->Insert("old", 0), MMC_OK);
+    ASSERT_EQ(container->Insert("new", 0), MMC_OK);
+    ASSERT_EQ(container->Promote("old"), MMC_OK);
+    ASSERT_EQ(container->Promote("old"), MMC_OK);
+
+    std::vector<std::string> evictedKeys;
+    auto remove = [&evictedKeys](const std::string &key, const int &, MediaType type) {
+        EXPECT_EQ(type, MEDIA_DRAM);
+        evictedKeys.push_back(key);
+        return EvictResult::REMOVE;
+    };
+    ASSERT_TRUE(container->EvictOneLeastRecentlyUsed(remove, MEDIA_DRAM));
+    ASSERT_TRUE(container->EvictOneLeastRecentlyUsed(remove, MEDIA_DRAM));
+    EXPECT_EQ(evictedKeys, (std::vector<std::string>{"new", "old"}));
+    EXPECT_EQ(container->GetKeyCount(), 0);
+}
+
+TEST_F(TestMmcMetaContainerLRU, ConcurrentLruTransitionsPreserveMembership)
+{
+    ASSERT_EQ(container->Insert("key", 0), MMC_OK);
+    constexpr size_t iterations = 1000;
+    std::atomic<bool> start{false};
+    auto run = [&start](auto operation) {
+        while (!start.load()) {
+            std::this_thread::yield();
+        }
+        for (size_t i = 0; i < iterations; ++i) {
+            operation();
+        }
+    };
+    std::thread insertThread([&]() {
+        run([&]() {
+            EXPECT_EQ(container->InsertLru("key", MEDIA_HBM), MMC_OK);
+            EXPECT_EQ(container->InsertLru("key", MEDIA_DRAM), MMC_OK);
+        });
+    });
+    std::thread removeThread([&]() {
+        run([&]() {
+            EXPECT_EQ(container->RemoveFromLru("key", MEDIA_DRAM), MMC_OK);
+            EXPECT_EQ(container->RemoveFromLru("key", MEDIA_HBM), MMC_OK);
+        });
+    });
+    std::thread promoteThread([&]() { run([&]() { EXPECT_EQ(container->Promote("key"), MMC_OK); }); });
+    std::thread readThread([&]() {
+        run([&]() {
+            auto type = container->GetMediaType("key");
+            EXPECT_TRUE(type == MEDIA_NONE || type == MEDIA_HBM || type == MEDIA_DRAM);
+        });
+    });
+    start.store(true);
+    insertThread.join();
+    removeThread.join();
+    promoteThread.join();
+    readThread.join();
+
+    ASSERT_EQ(container->InsertLru("key", MEDIA_DRAM), MMC_OK);
+    EXPECT_EQ(container->GetMediaType("key"), MEDIA_DRAM);
+    ASSERT_EQ(container->RemoveFromLru("key", MEDIA_DRAM), MMC_OK);
+    EXPECT_EQ(container->GetMediaType("key"), MEDIA_NONE);
+    EXPECT_EQ(container->RemoveFromLru("key", MEDIA_NONE), MMC_OK);
+    EXPECT_EQ(container->Promote("key"), MMC_OK);
+    ASSERT_EQ(container->InsertLru("key", MEDIA_HBM), MMC_OK);
+    auto remove = [](const std::string &key, const int &, MediaType type) {
+        EXPECT_EQ(key, "key");
+        EXPECT_EQ(type, MEDIA_HBM);
+        return EvictResult::REMOVE;
+    };
+    ASSERT_TRUE(container->EvictOneLeastRecentlyUsed(remove, MEDIA_HBM));
+    EXPECT_FALSE(container->EvictOneLeastRecentlyUsed(remove, MEDIA_HBM));
+    EXPECT_FALSE(container->EvictOneLeastRecentlyUsed(remove, MEDIA_DRAM));
+    EXPECT_EQ(container->GetKeyCount(), 0);
+}
+
 class TestEvictYield : public TestMmcMetaContainerLRU {
 protected:
     void SetUp() override
