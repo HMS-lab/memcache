@@ -150,6 +150,9 @@ inline int ValidatePathNotSymlink(const char *path)
 
 inline void SafeCopy(const std::string &src, char *dst, const size_t dstSize)
 {
+    if (dst == nullptr || dstSize == 0) {
+        return;
+    }
     const size_t count = std::min(src.length(), dstSize - 1);
     std::copy_n(src.c_str(), count, dst);
     dst[count] = '\0';

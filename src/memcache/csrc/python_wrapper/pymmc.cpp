@@ -968,6 +968,12 @@ PYBIND11_MODULE(_pymmc, m)
                 std::vector<void *> bufVec{};
                 std::vector<size_t> sizeVec{};
                 for (size_t i = 0; i < gva_ptrs.size(); i++) {
+                    if (buffer_ptrs[i].size() != sizes[i].size()) {
+                        MMC_LOG_ERROR("batch_copy_layers input size mismatch at index "
+                                      << i << ", buffer count: " << buffer_ptrs[i].size()
+                                      << ", size count: " << sizes[i].size());
+                        return -1;
+                    }
                     uintptr_t gva = gva_ptrs[i];
                     for (size_t j = 0; j < buffer_ptrs[i].size(); j++) {
                         auto &buffer = buffer_ptrs[i][j];

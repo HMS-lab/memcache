@@ -988,6 +988,8 @@ result = store.batch_copy_layers(gva_ptrs, buffer_ptrs, sizes, direct=SMEMB_COPY
 - `sizes`：二维大小列表，每层大小会从对应起始 GVA 开始按顺序累加。
 - `direct`：数据拷贝方向，含义与 `batch_copy` 一致。
 
+`gva_ptrs`、`buffer_ptrs` 和 `sizes` 的外层长度必须相等，且每个对象的 `buffer_ptrs[i]` 与 `sizes[i]` 长度必须相等；不匹配时返回失败，不执行数据拷贝。
+
 **返回值**
 
 - `0`：成功

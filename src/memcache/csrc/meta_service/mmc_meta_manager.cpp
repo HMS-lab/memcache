@@ -1312,6 +1312,10 @@ Result MmcMetaManager::RebuildMeta(std::vector<std::pair<std::string, MmcMemBlob
         MmcMemBlobPtr blobPtr =
             MmcMakeRef<MmcMemBlob>(desc.rank_, desc.gva_, desc.size_, static_cast<MediaType>(desc.mediaType_), state,
                                    defaultTtlMs_.load(std::memory_order_relaxed));
+        if (blobPtr == nullptr) {
+            MMC_LOG_ERROR("Failed to create blob while rebuilding meta, key: " << key);
+            return MMC_MALLOC_FAILED;
+        }
         MmcMemObjMetaPtr objMeta;
 
         if (metaContainer_->Get(key, objMeta) == MMC_OK) {
@@ -1324,7 +1328,12 @@ Result MmcMetaManager::RebuildMeta(std::vector<std::pair<std::string, MmcMemBlob
 
         objMeta = MmcMakeRef<MmcMemObjMeta>();
         if (objMeta != nullptr) {
-            objMeta->AddBlob(blobPtr);
+            ret = objMeta->AddBlob(blobPtr);
+            if (ret != MMC_OK) {
+                globalAllocator_->Free(blobPtr);
+                MMC_LOG_ERROR("Failed to add blob while rebuilding meta, key: " << key << ", ret: " << ret);
+                return ret;
+            }
             ret = metaContainer_->Insert(key, objMeta);
             if (ret == MMC_OK) {
                 continue;
