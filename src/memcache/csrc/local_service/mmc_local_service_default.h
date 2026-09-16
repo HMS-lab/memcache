@@ -93,6 +93,8 @@ private:
 
     void HandleUbsIoMetaEvents(int type, const std::vector<std::string> &keys);
 
+    size_t RemoveLocalSsdBackups(const std::vector<std::string> &keys);
+
     std::vector<size_t> ProcessBackupMetadata(const std::vector<uint32_t> &ops, const std::vector<std::string> &keys,
                                               const std::vector<MmcMemBlobDesc> &blobs, size_t length,
                                               std::vector<Result> &keyResults);
