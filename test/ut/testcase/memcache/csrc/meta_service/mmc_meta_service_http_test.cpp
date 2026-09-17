@@ -297,6 +297,11 @@ TEST_F(MmcMetaServiceHttpTest, RoutesContract)
     EXPECT_EQ(healthJson.at("ha_state"), "unknown");
     EXPECT_TRUE(healthJson.at("service_ready").get<bool>());
 
+    auto livezResponse = WaitForResponse(client, "/livez");
+    ASSERT_NE(livezResponse, nullptr);
+    ASSERT_EQ(livezResponse->status, kHttpStatusOk);
+    EXPECT_EQ(livezResponse->body, "ok");
+
     auto roleResponse = WaitForResponse(client, "/role");
     ASSERT_NE(roleResponse, nullptr);
     EXPECT_EQ(roleResponse->body, "unknown");

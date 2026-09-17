@@ -147,6 +147,11 @@ void MmcHttpServer::RegisterHealthCheckEndpoint()
     };
     server_->RegisterHttpHandler(acc::AccHttpMethod::GET, "/health", healthHandler);
 
+    auto livezHandler = [](acc::AccHttpRequestContext &ctx) -> int32_t {
+        return ctx.Reply(acc::AccHttpStatusCode::OK, kContentTypeTextUtf8, "ok");
+    };
+    server_->RegisterHttpHandler(acc::AccHttpMethod::GET, "/livez", livezHandler);
+
     auto roleHandler = [this](acc::AccHttpRequestContext &ctx) -> int32_t {
         if (restApiFacade_ == nullptr) {
             return ReplyJsonError200(ctx, kErrorInternalServer);

@@ -1825,3 +1825,39 @@ curl -X POST "http://127.0.0.1:8000/memory/prefetch" \
 | `success` | 请求是否成功；错误场景固定为 `false` | 全局统一错误返回规则 |
 | `error_message` | 实际错误原因；如 `Invalid JSON body`、`Missing 'chunk_hashes' in request body` 等 | 全局错误返回格式规则 |
 | `timestamp` | 错误返回格式中的时间戳字段 | 全局错误返回格式规则 |
+
+## 28 `GET /livez`
+
+### 作用
+
+轻量存活探针，专供 Kubernetes 探针（exec + curl）使用。仅判断进程存活且 HTTP server 能处理请求，不做 HA 状态查询、不加锁、不序列化 JSON。进程被 `SIGSTOP` 冻结时该 handler 无法执行，探针超时失败 → 触发容器重启。
+
+### curl
+
+```bash
+curl "http://127.0.0.1:8000/livez"
+```
+
+### 请求参数
+
+无
+
+### 成功示例
+
+`text/plain; charset=utf-8`：
+
+```text
+ok
+```
+
+**解释**
+
+| 内容 | 含义 | 来源 |
+|---|---|---|
+| `ok` | 进程存活且 HTTP server 正常处理请求时固定返回的 body | 接口成功返回约定 |
+| 成功 `Content-Type` | `text/plain; charset=utf-8` | 接口成功返回约定 |
+| HTTP 状态码 | 固定 `200` | 接口成功返回约定 |
+
+### 错误示例
+
+无 JSON 错误响应。进程异常（如被 `SIGSTOP`、死锁、崩溃）时无法返回响应，探针侧表现为超时或连接失败，不返回上述 body。
