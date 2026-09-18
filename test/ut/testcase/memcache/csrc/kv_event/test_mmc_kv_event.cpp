@@ -128,14 +128,14 @@ TEST(MmcKvEventParseTest, ParseSeqHashFromCompositeKey)
 
 TEST(MmcKvEventFieldTest, StoredFieldCount)
 {
-    EXPECT_EQ(CountEventMapFields(MakeStoredEvent()), 15u);
+    EXPECT_EQ(CountEventMapFields(MakeStoredEvent()), 16u);
 }
 
 TEST(MmcKvEventFieldTest, RemovedFieldCount)
 {
     KvEvent event = MakeStoredEvent();
     event.type = KvEventType::REMOVED;
-    EXPECT_EQ(CountEventMapFields(event), 13u);
+    EXPECT_EQ(CountEventMapFields(event), 14u);
 }
 
 TEST(MmcKvEventFieldTest, ClearedHasEnvelopeOnly)
@@ -162,10 +162,10 @@ TEST(MmcKvEventFieldTest, StoredKeyOrderMatchesRfc)
 {
     RecordingSink sink;
     EmitEventMapFields(MakeStoredEvent(), false, sink);
-    const std::vector<std::string> expected = {"event_id",       "timestamp",       "event_type", "model_name",
-                                               "block_size",     "additional_salt", "lora_name",  "tenant_id",
-                                               "medium",         "backend_id",      "dp_rank",    "seq_hashes",
-                                               "base_block_idx", "parent_hash",     "token_ids"};
+    const std::vector<std::string> expected = {"event_id",    "timestamp",       "event_type",  "model_name",
+                                               "block_size",  "additional_salt", "lora_name",   "tenant_id",
+                                               "medium",      "backend_id",      "dp_rank",     "seq_hashes",
+                                               "object_keys", "base_block_idx",  "parent_hash", "token_ids"};
     EXPECT_EQ(sink.Keys(), expected);
 }
 

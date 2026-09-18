@@ -430,10 +430,10 @@ TEST(MmcKvEventCodecTest, StoredRemovedRoundtripNoLegacy)
     ASSERT_EQ(events.via.array.size, 2u);
 
     auto storedMap = AsMap(events.via.array.ptr[0]);
-    EXPECT_EQ(storedMap.size(), 15u);
+    EXPECT_EQ(storedMap.size(), 16u);
     EXPECT_EQ(storedMap["event_type"].as<std::string>(), "stored");
     EXPECT_EQ(storedMap["seq_hashes"].via.array.ptr[0].as<std::string>(), "499602d2");
-    EXPECT_EQ(storedMap.count("object_keys"), 0u);
+    EXPECT_EQ(storedMap["object_keys"].via.array.ptr[0].as<std::string>(), "llama@tp_rank:0@group:0@499602d2");
     EXPECT_EQ(storedMap["backend_id"].as<std::string>(), "10.0.0.1");
     EXPECT_EQ(storedMap.count("local_service_rank"), 0u);
     EXPECT_EQ(storedMap["dp_rank"].as<uint32_t>(), 0u);
@@ -441,11 +441,11 @@ TEST(MmcKvEventCodecTest, StoredRemovedRoundtripNoLegacy)
     EXPECT_TRUE(storedMap["token_ids"].is_nil());
 
     auto removedMap = AsMap(events.via.array.ptr[1]);
-    EXPECT_EQ(removedMap.size(), 13u);
+    EXPECT_EQ(removedMap.size(), 14u);
     EXPECT_EQ(removedMap["event_type"].as<std::string>(), "removed");
     EXPECT_EQ(removedMap["medium"].as<std::string>(), "dram");
     EXPECT_EQ(removedMap["backend_id"].as<std::string>(), "10.0.0.1");
-    EXPECT_EQ(removedMap.count("object_keys"), 0u);
+    EXPECT_EQ(removedMap["object_keys"].via.array.ptr[0].as<std::string>(), "llama@tp_rank:0@group:0@499602d2");
     EXPECT_EQ(removedMap.count("local_service_rank"), 0u);
 }
 
@@ -458,9 +458,9 @@ TEST(MmcKvEventCodecTest, StoredRoundtrip)
     ASSERT_EQ(root.type, msgpack::type::MAP);
     ASSERT_EQ(root.via.map.size, 1u);
     auto map = AsMap(root.via.map.ptr[0].val.via.array.ptr[0]);
-    EXPECT_EQ(map.size(), 15u);
+    EXPECT_EQ(map.size(), 16u);
     EXPECT_EQ(map["backend_id"].as<std::string>(), "10.0.0.1");
-    EXPECT_EQ(map.count("object_keys"), 0u);
+    EXPECT_EQ(map["object_keys"].via.array.ptr[0].as<std::string>(), "llama@tp_rank:0@group:0@499602d2");
 }
 
 TEST(MmcKvEventCodecTest, HashAsIntEmitsUint64)
@@ -480,7 +480,8 @@ TEST(MmcKvEventCodecTest, HashMissingEmitsEmptySeqHashes)
     const std::string buf = SerializeEventBatch({event});
     msgpack::object_handle oh = msgpack::unpack(buf.data(), buf.size());
     auto map = AsMap(oh.get().via.map.ptr[0].val.via.array.ptr[0]);
-    EXPECT_EQ(map.count("object_keys"), 0u);
+    EXPECT_EQ(map["object_keys"].via.array.size, 1u);
+    EXPECT_EQ(map["object_keys"].via.array.ptr[0].as<std::string>(), "tenant@model@opaque-key");
     EXPECT_EQ(map.count("local_service_rank"), 0u);
     EXPECT_EQ(map["seq_hashes"].via.array.size, 0u);
 }

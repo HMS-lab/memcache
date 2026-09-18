@@ -482,6 +482,32 @@ private:
     void DoRemoveBlobs(const std::string &key, const MmcMemObjMetaPtr &meta, const MmcBlobFilterPtr &filter,
                        bool triggerSsdPreFree);
 
+    // 发布 KV 事件。内部自行加 changeCallbacks_.mutex 并判空，调用方不得再持有该锁。
+    // 契约：不要在持有 meta->Mutex() 时调用（外部回调可能阻塞）。
+    void KvEventStored(const std::string &key, uint32_t rank, uint16_t mediaType)
+    {
+        std::lock_guard<std::mutex> lock(changeCallbacks_.mutex);
+        if (changeCallbacks_.stored) {
+            changeCallbacks_.stored(key, rank, mediaType);
+        }
+    }
+
+    void KvEventRemoved(const std::string &key, uint32_t rank, uint16_t mediaType)
+    {
+        std::lock_guard<std::mutex> lock(changeCallbacks_.mutex);
+        if (changeCallbacks_.removed) {
+            changeCallbacks_.removed(key, rank, mediaType);
+        }
+    }
+
+    void KvEventCleared(uint32_t rank, uint16_t mediaType)
+    {
+        std::lock_guard<std::mutex> lock(changeCallbacks_.mutex);
+        if (changeCallbacks_.cleared) {
+            changeCallbacks_.cleared(rank, mediaType);
+        }
+    }
+
     EvictResult EvictCallBackFunction(const std::string &key, const MmcMemObjMetaPtr &objMeta, MediaType srcMediaType);
 
     EvictResult EvictRemoveSrc(const std::string &key, const MmcMemObjMetaPtr &objMeta,

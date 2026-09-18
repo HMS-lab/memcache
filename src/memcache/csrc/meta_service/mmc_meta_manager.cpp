@@ -939,18 +939,13 @@ Result MmcMetaManager::UpdateState(const std::string &key, const MmcLocation &lo
                 blob->NotifyReadable();
             }
             if (actRet == MMC_WRITE_OK) {
-                std::lock_guard<std::mutex> cbLock(changeCallbacks_.mutex);
-                if (changeCallbacks_.stored) {
-                    storedBlobs.emplace_back(blob->Rank(), blob->Type());
-                }
+                storedBlobs.emplace_back(blob->Rank(), blob->Type());
             }
         }
     }
+    // 回调在 metaObj 锁外发布，避免持锁调用外部回调
     for (const auto &b : storedBlobs) {
-        std::lock_guard<std::mutex> cbLock(changeCallbacks_.mutex);
-        if (changeCallbacks_.stored) {
-            changeCallbacks_.stored(key, b.first, b.second);
-        }
+        KvEventStored(key, b.first, b.second);
     }
     MMC_LOG_DEBUG("UpdateState exit, key=" << key << ", loc=" << loc << ", action=" << static_cast<uint32_t>(actRet)
                                            << ", result=" << result);
@@ -1013,13 +1008,8 @@ void MmcMetaManager::DoRemoveBlobs(const std::string &key, const MmcMemObjMetaPt
     meta->FinalizeBlobs(key, globalAllocator_, blobs, true, triggerSsdPreFree);
     adoptGuard.lock();
     adoptGuard.release();
-    {
-        std::lock_guard<std::mutex> cbLock(changeCallbacks_.mutex);
-        if (changeCallbacks_.removed) {
-            for (const auto &blob : blobs) {
-                changeCallbacks_.removed(key, blob->Rank(), blob->Type());
-            }
-        }
+    for (const auto &blob : blobs) {
+        KvEventRemoved(key, blob->Rank(), blob->Type());
     }
     // 不在此处 Erase：容器层删除由各调用方负责（evict 外层/Remove/RemoveAll 已完成容器删除），
     // 异步重复 Erase 既有 ABA 风险（可能删掉并发重建的新对象），
@@ -1060,6 +1050,9 @@ Result MmcMetaManager::RemoveSsdBlob(const std::string &key, uint32_t rank)
     auto blobs = objMeta->DetachBlobs(ssdFilter);
     guard.unlock();
     objMeta->FinalizeBlobs(key, globalAllocator_, blobs, false);
+    for (const auto &blob : blobs) {
+        KvEventRemoved(key, blob->Rank(), blob->Type());
+    }
     guard.lock();
     MMC_LOG_DEBUG("RemoveSsdBlob: key=" << key << ", rank=" << rank);
     if (objMeta->NumBlobs() == 0) {
@@ -1136,6 +1129,8 @@ Result MmcMetaManager::AddSsdBlob(const std::string &key, const MmcMemBlobDesc &
         MMC_LOG_ERROR("Failed to add SSD blob to meta object, key=" << key << ", ret=" << ret);
         return ret;
     }
+    guard.unlock();
+    KvEventStored(key, desc.rank_, ssdBlob->Type());
     MMC_LOG_DEBUG("Added SSD blob, key=" << key << ", rank=" << desc.rank_ << ", size=" << desc.size_);
     return MMC_OK;
 }
@@ -1382,12 +1377,7 @@ Result MmcMetaManager::RemoveBlobs(uint32_t rank, MediaType mediaType)
     };
 
     metaContainer_->EraseIf(matchFunc);
-    {
-        std::lock_guard<std::mutex> cbLock(changeCallbacks_.mutex);
-        if (changeCallbacks_.cleared) {
-            changeCallbacks_.cleared(rank, mediaType);
-        }
-    }
+    KvEventCleared(rank, mediaType);
     MMC_LOG_TRACE("Remove blobs for rank=" << rank << ", media=" << static_cast<int>(mediaType)
                                            << " done, freedBlobs=" << freedBlobs << ", erasedKeys=" << erasedKeys);
     return MMC_OK;
@@ -1700,12 +1690,7 @@ Result MmcMetaManager::CopyBlob(const std::string &key, const MmcMemObjMetaPtr &
         return MMC_ERROR;
     }
 
-    {
-        std::lock_guard<std::mutex> cbLock(changeCallbacks_.mutex);
-        if (changeCallbacks_.stored) {
-            changeCallbacks_.stored(key, blobDesc.rank_, blobDesc.mediaType_);
-        }
-    }
+    KvEventStored(key, blobDesc.rank_, blobDesc.mediaType_);
     MMC_LOG_DEBUG("copy ok, key=" << key << ", dstRank=" << blobDesc.rank_ << ", size=" << blobDesc.size_);
     return MMC_OK;
 }
@@ -1774,14 +1759,9 @@ Result MmcMetaManager::MoveBlob(const std::string &key, const MmcLocation &src, 
         guard.lock();
         MMC_LOG_TRACE("move " << key << " from " << src << " to " << dst << " " << srcDesc << ", " << objMeta);
         guard.unlock();
-        {
-            std::lock_guard<std::mutex> cbLock(changeCallbacks_.mutex);
-            if (changeCallbacks_.removed) {
-                for (const auto &blob : blobs) {
-                    if (blob != nullptr) {
-                        changeCallbacks_.removed(key, blob->Rank(), blob->Type());
-                    }
-                }
+        for (const auto &blob : blobs) {
+            if (blob != nullptr) {
+                KvEventRemoved(key, blob->Rank(), blob->Type());
             }
         }
     }

@@ -99,6 +99,7 @@ void EmitEventMapFields(const KvEvent &event, bool emitHashAsInt, Sink &sink)
     } else {
         sink.PackArray("seq_hashes", event.blockHashes);
     }
+    sink.PackArray("object_keys", event.objectKeys);
 
     if (event.type == KvEventType::STORED) {
         sink.NilField("base_block_idx");
