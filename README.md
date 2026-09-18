@@ -59,6 +59,32 @@ MemCache包含LocalService和MetaService两大核心组件：
   - **客户端**：作为客户端，以whl/so形式作为共享库被应用进程加载调用API
   - **内存提供者**：负责提供一段连续的内存区域作为内存池空间的一部分，其内存可以被其他LocalService实例基于地址直接访问。
 
+### 📁项目结构导览
+
+MemCache 核心代码按模块化设计原则组织，核心实现位于 `src/memcache/csrc` 下。
+
+```text
+src/memcache/csrc/                        # C++ 核心实现
+  ├── meta_service/                       # MetaService：集群元数据管理、空间分配、淘汰
+  │    ├── mmc_meta_service.cpp           # MetaService 主服务逻辑
+  │    ├── mmc_meta_manager.cpp           # 元数据管理器（key→blob 全局映射）
+  │    ├── mmc_blob_allocator.cpp         # 内存池空间分配器
+  │    ├── mmc_meta_container_lru.cpp     # LRU 元数据容器（冷热追踪/淘汰）
+  │    └── mmc_meta_net_server.cpp        # RPC 网络服务端
+  ├── client/                             # 本地客户端：被推理进程以 whl/so 形式加载
+  │    ├── mmc_client_default.cpp         # 客户端核心实现（batch put/get/copy）
+  │    ├── mmc_meta_net_client.cpp        # RPC 网络客户端
+  ├── local_service/                      # LocalService：内存提供者
+  │    ├── mmc_local_service_default.cpp  # LocalService 主实现
+  │    └── mmc_bm_proxy.cpp               # MemFabric BM 语义代理
+  └── under_api/                          # 底座接入层（MemFabric / UBSIO）
+       ├── mf_smem/                       # MemFabric 动态库接入（HBM / DRAM 层）
+       │    └── smem_bm_api.cpp           # 批量内存拷贝 API
+       └── ubs_io/                        # UBSIO 动态库接入（SSD 层）
+            ├── mmc_ubs_io_proxy.cpp      # UBSIO 代理封装
+            └── dl_ubsio_api.cpp          # UBSIO 动态加载
+```
+
 ## 🔥性能表现
 
 MemCache核心能力是提供大容量内存池和高性能的H2D、D2H、**D2RH、RH2D**数据访问能力，由于MemCache以 [MemFabric](https://gitcode.com/Ascend/memfabric_hybrid) 作为池化底座，所以支持RH2D、D2RH等OneCopy跨机跨介质数据直接访问能力，下图为RH2D对比其他中转路径的对比示意图。
@@ -98,7 +124,7 @@ MemCache核心能力是提供大容量内存池和高性能的H2D、D2H、**D2RH
 
 ## 📦软件硬件配套说明
 
-- MemCache软件依赖 [MemFabric](https://gitcode.com/Ascend/memfabric_hybrid)，相关配套与MemFabric相同。
+- MemCache软件依赖 [MemFabric](https://gitcode.com/Ascend/memfabric_hybrid)，相关配套与MemFabric相同。 详见：[完整软件硬件配套文档](./docs/zh/compatibility.md)，涵盖支持的操作系统、Ascend/鲲鹏硬件型号、CANN版本、MemFabric底座版本、内存大页规格等完整配套信息。
 
 ## 📌FAQ
 
