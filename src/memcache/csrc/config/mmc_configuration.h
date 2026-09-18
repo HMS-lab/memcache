@@ -39,6 +39,7 @@
 namespace ock {
 namespace mmc {
 constexpr uint32_t CONF_MUST = 1;
+constexpr uint32_t CONF_SENSITIVE = (1U << 1);
 constexpr uint64_t DRAM_SIZE_ALIGNMENT = 2097152; // 2MB
 constexpr uint64_t HBM_SIZE_ALIGNMENT = 2097152;  // 2MB
 
@@ -137,6 +138,8 @@ public:
     }
     static std::string ResolveUrlField(const std::string &field, const std::string &fieldName = "");
 
+    bool IsSensitiveConf(const std::string &key) const;
+
 private:
     bool SetWithStrAutoConvert(const std::string &key, const std::string &value);
 
@@ -179,6 +182,7 @@ private:
 
     std::vector<std::pair<std::string, std::string>> mServiceList;
     std::vector<std::string> mMustKeys;
+    std::vector<std::string> mSensitiveConfs;
     std::vector<std::string> mLoadDefaultErrors;
 
     std::vector<std::string> mPathConfs;
@@ -286,7 +290,8 @@ public:
                     0);
         AddBoolConf(OCK_MMC_ZMQ_ENABLE_CURVE, VStrEnum::Create(OCK_MMC_ZMQ_ENABLE_CURVE.first, BOOL_ENUM_STR), 0);
         AddStrConf(OCK_MMC_ZMQ_PUBLIC_KEY, VStrLength::Create(OCK_MMC_ZMQ_PUBLIC_KEY.first, CURVE_KEY_Z85_LEN), 0);
-        AddStrConf(OCK_MMC_ZMQ_SECRET_KEY, VStrLength::Create(OCK_MMC_ZMQ_SECRET_KEY.first, CURVE_KEY_Z85_LEN), 0);
+        AddStrConf(OCK_MMC_ZMQ_SECRET_KEY, VStrLength::Create(OCK_MMC_ZMQ_SECRET_KEY.first, CURVE_KEY_Z85_LEN),
+                   CONF_SENSITIVE);
         AddBoolConf(OCK_MMC_METRICS_TLS_ENABLE, VStrEnum::Create(OCK_MMC_METRICS_TLS_ENABLE.first, BOOL_ENUM_STR), 0);
         AddStrConf(OCK_MMC_METRICS_TLS_CA_PATH, VStrLength::Create(OCK_MMC_METRICS_TLS_CA_PATH.first, TLS_PATH_MAX_LEN),
                    0);

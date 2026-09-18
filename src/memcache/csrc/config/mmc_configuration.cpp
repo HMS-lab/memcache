@@ -161,6 +161,9 @@ bool Configuration::LoadFromFile(const std::string &filePath)
         std::string key;
         std::string value;
         kvParser->GetI(i, key, value);
+        if (IsSensitiveConf(key)) {
+            value = "******";
+        }
         MMC_LOG_INFO("  " << key << " = " << value);
     }
 
@@ -363,6 +366,11 @@ bool Configuration::SetWithStrAutoConvert(const std::string &key, const std::str
     return true;
 }
 
+bool Configuration::IsSensitiveConf(const std::string &key) const
+{
+    return std::find(mSensitiveConfs.begin(), mSensitiveConfs.end(), key) != mSensitiveConfs.end();
+}
+
 void Configuration::SetValidator(const std::string &key, const ValidatorPtr &validator, uint32_t flag)
 {
     if (validator == nullptr) {
@@ -377,6 +385,9 @@ void Configuration::SetValidator(const std::string &key, const ValidatorPtr &val
     }
     if (flag & CONF_MUST) {
         mMustKeys.push_back(key);
+    }
+    if (flag & CONF_SENSITIVE) {
+        mSensitiveConfs.push_back(key);
     }
 }
 

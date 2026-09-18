@@ -137,6 +137,19 @@ TEST_F(TestMmcConfiguration, EvictYieldConfigDefaultsTest)
     EXPECT_EQ(config.GetInt(ConfConstant::OKC_MMC_EVICT_YIELD_DURATION_US), 100);
 }
 
+TEST_F(TestMmcConfiguration, SensitiveConfMaskingTest)
+{
+    MetaServiceConfig config;
+    config.LoadDefault();
+
+    // ZMQ private key 被标记为敏感配置，打印时需脱敏
+    ASSERT_TRUE(config.IsSensitiveConf(ConfConstant::OCK_MMC_ZMQ_SECRET_KEY.first));
+    // 其他常规配置不应被标记为敏感
+    ASSERT_FALSE(config.IsSensitiveConf(ConfConstant::OCK_MMC_ZMQ_PUBLIC_KEY.first));
+    ASSERT_FALSE(config.IsSensitiveConf(ConfConstant::OCK_MMC_LOG_LEVEL.first));
+    ASSERT_FALSE(config.IsSensitiveConf(ConfConstant::OCK_MMC_META_SERVICE_URL.first));
+}
+
 TEST_F(TestMmcConfiguration, EvictYieldConfigValidationTest)
 {
     MetaServiceConfig config;

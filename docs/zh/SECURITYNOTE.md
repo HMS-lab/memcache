@@ -2,12 +2,13 @@
 
 ## 通信矩阵
 
-| 原设备             | 源IP地址     | 源端口             | 目的设备            | 目的IP地址                   | 目的端口（侦听）                                                | 协议            | 端口说明                     | 侦听端口是否可更改 | 认证方式 |
-|-----------------|-----------|-----------------|-----------------|--------------------------|---------------------------------------------------------|---------------|:-------------------------|-----------|------|
-| Local/Client客户端 | 客户端通信IP地址 | 随机端口（由操作系统自动分配） | meta service    | meta_service_url中的\<ip\> | meta_service_url中的\<port\>，默认值5000，可配范围[1025, 65535] | TCP           | 用于元数据对象管理                | 是         | TLS  |
-| memory fabric实例 | 客户端通信IP地址 | 随机端口（由操作系统自动分配） | memory fabric实例 | config_store_url中的\<ip\> | config_store_url中的\<port\>，默认值6000，可配范围[1025, 65535] | TCP           | 用于memory fabric中BM信息交换同步 | 是         | TLS  |
-| 参与hcom通信的实例     | 客户端通信IP地址 | 随机端口（由操作系统自动分配） | 参与hcom通信的实例     | hcom_url中的\<ip\>         | hcom_url中的\<port\>，默认值7000，可配范围[1025, 65535]         | TCP/RDMA/SDMA | 用于hcom通信                 | 是         | TLS  |
-| 管理/监控客户端        | 客户端通信IP地址 | 随机端口（由操作系统自动分配） | meta service    | metrics_url中的\<ip\>    | metrics_url中的\<port\>，默认值8000，可配范围[1025, 65535]      | HTTPS/HTTP    | 用于RESTful API管理与监控        | 是         | mTLS(可选，默认关闭)/无认证 |
+| 原设备             | 源IP地址     | 源端口                                  | 目的设备            | 目的IP地址                    | 目的端口（侦听）                                               | 协议                 | 端口说明                                                    | 侦听端口是否可更改 | 认证方式              |
+| --------------- | --------- | ------------------------------------ | --------------- | ------------------------- | ------------------------------------------------------ | ------------------ | :------------------------------------------------------ | --------- | ----------------- |
+| Local/Client客户端 | 客户端通信IP地址 | 随机端口（由操作系统自动分配）                      | meta service    | meta\_service\_url中的\<ip> | meta\_service\_url中的\<port>，默认值5000，可配范围\[1025, 65535] | TCP                | 用于元数据对象管理                                               | 是         | TLS               |
+| memory fabric实例 | 客户端通信IP地址 | 随机端口（由操作系统自动分配）                      | memory fabric实例 | config\_store\_url中的\<ip> | config\_store\_url中的\<port>，默认值6000，可配范围\[1025, 65535] | TCP                | 用于memory fabric中BM信息交换同步                                | 是         | TLS               |
+| 参与hcom通信的实例     | 客户端通信IP地址 | 随机端口（由操作系统自动分配）                      | 参与hcom通信的实例     | hcom\_url中的\<ip>          | hcom\_url中的\<port>，默认值7000，可配范围\[1025, 65535]          | TCP/RDMA/SDMA      | 用于hcom通信                                                | 是         | TLS               |
+| 管理/监控客户端        | 客户端通信IP地址 | 随机端口（由操作系统自动分配）                      | meta service    | metrics\_url中的\<ip>       | metrics\_url中的\<port>，默认值8000，可配范围\[1025, 65535]       | HTTPS/HTTP         | 用于RESTful API管理与监控                                      | 是         | mTLS(可选，默认关闭)/无认证 |
+| ZMQ通道发布端        | 客户端通信IP地址 | kv\_events.endpoint中的\<port>，默认值5557 | ZMQ订阅端          | 单向广播，不涉及                  | 单向广播，不涉及                                               | ZMTP（ZeroMQ，基于TCP） | 通过ZMQ通道发送KV事件（kvevent）；解耦架构下该ZMQ通道当前用于承载KV事件推送，生产与订阅方解耦 | 是         | CURVE（可选，默认关闭）    |
 
 - 支持通过配置文件配置TLS私钥、证书、口令等，进行TLS安全连接。
 - 支持对 metrics HTTP 服务独立配置 mTLS（双向认证），通过 `ock.mmc.metrics.tls.*` 配置项开启。
@@ -55,7 +56,7 @@
 ### TCP服务端模块
 
 | 接口功能描述       | 接口声明                                                                                                                                                   |
-|--------------|--------------------------------------------------------------------------------------------------------------------------------------------------------|
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 创建TCP服务端     | `static AccTcpServerPtr Create();`                                                                                                                     |
 | 启动服务端        | `int32_t Start(const AccTcpServerOptions &opt);`                                                                                                       |
 | TLS认证方式启动服务端 | `int32_t Start(const AccTcpServerOptions &opt, const AccTlsOption &tlsOption);`                                                                        |
@@ -73,12 +74,17 @@
 
 ## 源码内公网地址
 
-| 类型         | 开源代码地址                                      | 文件名                    | 公网IP地址/公网URL地址/域名/邮箱地址                      | 用途说明        |
-|------------|---------------------------------------------|------------------------|---------------------------------------------|-------------|
-| 依赖三方库      | https://github.com/google/googletest.git    | .gitmodules            | https://github.com/google/googletest.git    | 单元测试框架依赖    |
-| 依赖三方库      | https://github.com/sinojelly/mockcpp.git    | .gitmodules            | https://github.com/sinojelly/mockcpp.git    | 单元测试框架依赖    |
-| 依赖三方库      | https://github.com/gabime/spdlog.git        | .gitmodules            | https://github.com/gabime/spdlog.git        | 日志框架依赖      |
-| license 地址 | 不涉及                                         | LICENSE                | http://www.apache.org/licenses/             | license文件   |
-| license 地址 | 不涉及                                         | LICENSE                | http://www.apache.org/licenses/LICENSE-2.0  | license文件   |
-| 代码仓地址      | https://gitcode.com/Ascend/memcache         | setup.py               | https://gitcode.com/Ascend/memcache         | whl 包仓库地址信息 |
-| 代码仓地址      | https://gitcode.com/Ascend/memfabric_hybrid | performance_compare.sh | https://gitcode.com/Ascend/memfabric_hybrid | 工具脚本        |
+| 类型         | 开源代码地址                                        | 文件名                     | 公网IP地址/公网URL地址/域名/邮箱地址                        | 用途说明          |
+| ---------- | --------------------------------------------- | ----------------------- | --------------------------------------------- | ------------- |
+| 依赖三方库      | <https://gitcode.com/GitHub_Trending/go/googletest.git> | .gitmodules             | <https://gitcode.com/GitHub_Trending/go/googletest.git> | 单元测试框架依赖      |
+| 依赖三方库      | <https://github.com/sinojelly/mockcpp.git>    | .gitmodules             | <https://github.com/sinojelly/mockcpp.git>    | 单元测试对象Mock框架  |
+| 依赖三方库      | <https://gitcode.com/GitHub_Trending/sp/spdlog.git> | .gitmodules             | <https://gitcode.com/GitHub_Trending/sp/spdlog.git> | 日志框架依赖        |
+| 依赖三方库      | <https://gitcode.com/GitHub_Trending/js/json.git> | .gitmodules             | <https://gitcode.com/GitHub_Trending/js/json.git> | JSON解析与序列化依赖   |
+| 依赖三方库      | <https://github.com/biaks/prometheus-cpp-lite.git> | .gitmodules             | <https://github.com/biaks/prometheus-cpp-lite.git> | Prometheus监控指标依赖 |
+| 依赖三方库      | <https://gitcode.com/gh_mirrors/ms/msgpack-c.git> | .gitmodules             | <https://gitcode.com/gh_mirrors/ms/msgpack-c.git> | KV事件消息序列化依赖    |
+| 依赖三方库      | <https://gitcode.com/gh_mirrors/li/libzmq.git> | .gitmodules             | <https://gitcode.com/gh_mirrors/li/libzmq.git> | ZMQ通信库（KV事件ZMQ通道传输） |
+| 依赖三方库      | <https://gitcode.com/gh_mirrors/li/libsodium.git> | .gitmodules             | <https://gitcode.com/gh_mirrors/li/libsodium.git> | ZMQ CURVE加密底层依赖 |
+| license 地址 | 不涉及                                           | LICENSE                 | <http://www.apache.org/licenses/>             | license文件       |
+| license 地址 | 不涉及                                           | LICENSE                 | <http://www.apache.org/licenses/LICENSE-2.0>  | license文件       |
+| 代码仓地址      | <https://gitcode.com/Ascend/memcache>         | setup.py                | <https://gitcode.com/Ascend/memcache>         | whl 包仓库地址信息     |
+| 代码仓地址      | <https://gitcode.com/Ascend/memfabric_hybrid> | performance\_compare.sh | <https://gitcode.com/Ascend/memfabric_hybrid> | 工具脚本          |
