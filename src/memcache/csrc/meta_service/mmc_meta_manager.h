@@ -279,7 +279,7 @@ public:
      * @param dstMedia      [in] destination media type, default MEDIA_DRAM (reserved)
      * @param flags         [in] reserved, not used yet
      */
-    Result PrefetchKeys(std::vector<std::string> keys, MediaType srcMedia = MediaType::MEDIA_SSD,
+    Result PrefetchKeys(const std::vector<std::string> &keys, MediaType srcMedia = MediaType::MEDIA_SSD,
                         MediaType dstMedia = MediaType::MEDIA_DRAM, uint32_t flags = 0);
 
     /**
@@ -456,6 +456,12 @@ public:
     {
         std::lock_guard<std::mutex> guard(ssdMutex_);
         return ssdEnabledRanks_.count(rank) > 0;
+    }
+
+    bool IsAnySsdEnabled() const
+    {
+        std::lock_guard<std::mutex> guard(ssdMutex_);
+        return !ssdEnabledRanks_.empty();
     }
 
 private:

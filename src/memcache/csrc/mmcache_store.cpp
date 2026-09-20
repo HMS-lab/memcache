@@ -1095,7 +1095,7 @@ std::vector<uintptr_t> MmcacheStore::BatchMalloc(const std::vector<std::string> 
 }
 
 int MmcacheStore::BatchCopy(std::vector<void *> &gvas, std::vector<void *> &buffers, std::vector<size_t> &sizes,
-                            const int32_t direct)
+                            const int32_t direct, uint32_t flag)
 {
     if (gvas.size() != buffers.size() || gvas.size() != sizes.size()) {
         MMC_LOG_ERROR("Input vector sizes mismatch: gvas=" << gvas.size() << ", buffers=" << buffers.size()
@@ -1107,7 +1107,7 @@ int MmcacheStore::BatchCopy(std::vector<void *> &gvas, std::vector<void *> &buff
         gvaValues[i] = reinterpret_cast<uint64_t>(gvas[i]);
     }
     TP_TRACE_BEGIN(TP_MMC_PY_BATCH_COPY);
-    Result ret = mmcc_batch_copy(gvaValues.data(), buffers.data(), sizes.data(), sizes.size(), direct);
+    Result ret = mmcc_batch_copy(gvaValues.data(), buffers.data(), sizes.data(), sizes.size(), direct, flag);
     TP_TRACE_END(TP_MMC_PY_BATCH_COPY, ret);
     return ret;
 }

@@ -942,7 +942,7 @@ gvas = store.batch_alloc(keys, sizes, media=1, leaseTtlMs=0)
 #### batch_copy
 
 ```python
-result = store.batch_copy(gva_ptrs, buffer_ptrs, sizes, direct=SMEMB_COPY_G2L)
+result = store.batch_copy(gva_ptrs, buffer_ptrs, sizes, direct=SMEMB_COPY_G2L, flag=0)
 ```
 
 **功能**
@@ -962,6 +962,7 @@ result = store.batch_copy(gva_ptrs, buffer_ptrs, sizes, direct=SMEMB_COPY_G2L)
     - `SMEMB_COPY_G2L`（`1`）：全局内存 -> 本地 HBM。
     - `SMEMB_COPY_G2H`（`2`）：全局内存 -> 本地 Host DRAM。
     - `SMEMB_COPY_H2G`（`3`）：本地 Host DRAM -> 全局内存。
+- `flag`：拷贝标志位，默认 0。读方向设置 `GET_DATA_FOR_LAYER_WISE` 可跳过 GVA tracker 合法性校验，直接执行 DMA 拷贝。
 
 **返回值**
 
@@ -971,7 +972,7 @@ result = store.batch_copy(gva_ptrs, buffer_ptrs, sizes, direct=SMEMB_COPY_G2L)
 #### batch_copy_layers
 
 ```python
-result = store.batch_copy_layers(gva_ptrs, buffer_ptrs, sizes, direct=SMEMB_COPY_G2L)
+result = store.batch_copy_layers(gva_ptrs, buffer_ptrs, sizes, direct=SMEMB_COPY_G2L, flag=0)
 ```
 
 **功能**
@@ -987,6 +988,7 @@ result = store.batch_copy_layers(gva_ptrs, buffer_ptrs, sizes, direct=SMEMB_COPY
 - `buffer_ptrs`：二维缓冲区指针列表，外层对应对象，内层对应该对象的各层缓冲区。
 - `sizes`：二维大小列表，每层大小会从对应起始 GVA 开始按顺序累加。
 - `direct`：数据拷贝方向，含义与 `batch_copy` 一致。
+- `flag`：拷贝标志位，含义与 `batch_copy` 一致。
 
 `gva_ptrs`、`buffer_ptrs` 和 `sizes` 的外层长度必须相等，且每个对象的 `buffer_ptrs[i]` 与 `sizes[i]` 长度必须相等；不匹配时返回失败，不执行数据拷贝。
 

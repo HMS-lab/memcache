@@ -160,6 +160,7 @@ enum affinity_policy : int {
 #define MAX_BLOB_COPIES 8
 
 constexpr uint32_t GET_KEY_INFO_FOR_LAYER_WISE = 1;
+constexpr uint32_t GET_DATA_FOR_LAYER_WISE = 1;
 
 typedef struct {
     uint16_t mediaType;

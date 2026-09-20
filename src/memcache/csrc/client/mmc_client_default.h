@@ -107,7 +107,7 @@ public:
                        const mmc_put_options &options, uint64_t leaseTtlMs, std::vector<uintptr_t> &gvas);
 
     Result BatchCopy(std::vector<void *> &gvas, std::vector<void *> &buffers, std::vector<size_t> &sizes,
-                     const int32_t direct);
+                     const int32_t direct, uint32_t flag);
 
     Result BatchWriteFinish(const std::vector<std::string> &keys, const std::vector<int32_t> &writeResults,
                             std::vector<int32_t> &outResults);
@@ -210,7 +210,7 @@ private:
     Result BatchCopyWritePath(std::vector<void *> &gvas, std::vector<void *> &buffers, std::vector<size_t> &sizes,
                               int32_t direct);
     Result BatchCopyReadPath(std::vector<void *> &gvas, std::vector<void *> &buffers, std::vector<size_t> &sizes,
-                             int32_t direct);
+                             int32_t direct, uint32_t flag = 0);
     Result InitMetricReporting();
     void ReportMetrics();
     void ProcessExpiredReadLeases();

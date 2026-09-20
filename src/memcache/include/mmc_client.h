@@ -144,9 +144,11 @@ int32_t mmcc_batch_malloc(const char **keys, uint32_t keys_count, const size_t *
  * @param sizes            [in] Copy size of each GVA range
  * @param count            [in] Count of GVA ranges
  * @param direct           [in] Copy direction
+ * @param flag             [in] Copy flag, e.g. GET_DATA_FOR_LAYER_WISE to skip GVA tracker validation
  * @return 0 if successfully
  */
-int32_t mmcc_batch_copy(const uint64_t *gvas, void **buffers, const size_t *sizes, uint32_t count, int32_t direct);
+int32_t mmcc_batch_copy(const uint64_t *gvas, void **buffers, const size_t *sizes, uint32_t count, int32_t direct,
+                        uint32_t flag);
 
 /**
  * @brief Notify meta service that the writes for the given keys are finished

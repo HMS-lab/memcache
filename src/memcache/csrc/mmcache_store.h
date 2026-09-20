@@ -144,7 +144,7 @@ public:
                                        uint16_t media, uint64_t leaseTtlMs = 0) override;
 
     int BatchCopy(std::vector<void *> &gvas, std::vector<void *> &buffers, std::vector<size_t> &sizes,
-                  const int32_t direct = 3) override;
+                  const int32_t direct = 3, uint32_t flag = 0) override;
 
     std::vector<int> BatchWriteFinish(const std::vector<std::string> &keys,
                                       const std::vector<int32_t> &writeResults) override;

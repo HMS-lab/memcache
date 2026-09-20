@@ -939,7 +939,7 @@ PYBIND11_MODULE(_pymmc, m)
         .def(
             "batch_copy",
             [](MmcacheStore &self, const std::vector<uintptr_t> &gva_ptrs, const std::vector<uintptr_t> &buffer_ptrs,
-               std::vector<size_t> &sizes, const int32_t &direct) {
+               std::vector<size_t> &sizes, const int32_t &direct, const uint32_t &flag) {
                 if (gva_ptrs.size() != buffer_ptrs.size() || gva_ptrs.size() != sizes.size()) {
                     return -1;
                 }
@@ -951,15 +951,15 @@ PYBIND11_MODULE(_pymmc, m)
                 }
 
                 py::gil_scoped_release release;
-                return self.BatchCopy(gvaVec, bufVec, sizes, direct);
+                return self.BatchCopy(gvaVec, bufVec, sizes, direct, flag);
             },
             py::arg("gva_ptrs"), py::arg("buffer_ptrs"), py::arg("sizes"),
-            py::arg("direct") = static_cast<int32_t>(SMEMB_COPY_G2L))
+            py::arg("direct") = static_cast<int32_t>(SMEMB_COPY_G2L), py::arg("flag") = 0U)
         .def(
             "batch_copy_layers",
             [](MmcacheStore &self, const std::vector<uintptr_t> &gva_ptrs,
                const std::vector<std::vector<uintptr_t>> &buffer_ptrs, const std::vector<std::vector<size_t>> &sizes,
-               const int32_t &direct) {
+               const int32_t &direct, const uint32_t &flag) {
                 if (gva_ptrs.size() != buffer_ptrs.size() || gva_ptrs.size() != sizes.size()) {
                     return -1;
                 }
@@ -986,10 +986,10 @@ PYBIND11_MODULE(_pymmc, m)
                 }
 
                 py::gil_scoped_release release;
-                return self.BatchCopy(gvaVec, bufVec, sizeVec, direct);
+                return self.BatchCopy(gvaVec, bufVec, sizeVec, direct, flag);
             },
             py::arg("gva_ptrs"), py::arg("buffer_ptrs"), py::arg("sizes"),
-            py::arg("direct") = static_cast<int32_t>(SMEMB_COPY_G2L))
+            py::arg("direct") = static_cast<int32_t>(SMEMB_COPY_G2L), py::arg("flag") = 0U)
         .def(
             "batch_write_finish",
             [](MmcacheStore &self, const std::vector<std::string> &keys, const std::vector<int32_t> &writeResults) {

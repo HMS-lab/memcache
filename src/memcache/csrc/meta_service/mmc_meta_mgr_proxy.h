@@ -23,6 +23,7 @@
 #include "mmc_meta_metric_manager.h"
 #include "mmc_msg_client_meta.h"
 #include "mmc_meta_net_server.h"
+#include "mmc_ptracer.h"
 
 namespace ock {
 namespace mmc {
@@ -168,10 +169,10 @@ public:
 
     Result BatchExistKey(const BatchIsExistRequest &req, BatchIsExistResponse &resp);
 
-    Result PrefetchKeys(std::vector<std::string> keys, MediaType srcMedia = MediaType::MEDIA_SSD,
+    Result PrefetchKeys(const std::vector<std::string> &keys, MediaType srcMedia = MediaType::MEDIA_SSD,
                         MediaType dstMedia = MediaType::MEDIA_DRAM, uint32_t flags = 0)
     {
-        return metaMangerPtr_->PrefetchKeys(std::move(keys), srcMedia, dstMedia, flags);
+        return metaMangerPtr_->PrefetchKeys(keys, srcMedia, dstMedia, flags);
     }
 
     Result BatchPromote(const BatchPromoteRequest &req, BatchPromoteResponse &resp);
@@ -199,17 +200,22 @@ public:
         MmcMetaMetricManager &metricManager = MmcMetaMetricManager::GetInstance();
         metricManager.IncrementRequestCounter(RestMetricType::BATCH_QUERY, UINT32_MAX);
         if ((req.flag_ & GET_KEY_INFO_FOR_LAYER_WISE) != 0) {
+            TP_TRACE_BEGIN(TP_MMC_META_BATCH_QUERY_PREFETCH);
             metaMangerPtr_->PrefetchKeys(req.keys_);
+            TP_TRACE_END(TP_MMC_META_BATCH_QUERY_PREFETCH, MMC_OK);
         }
         std::vector<Result> results;
-        results.reserve(req.keys_.size());
+        results.resize(req.keys_.size());
+        resp.batchQueryInfos_.resize(req.keys_.size());
+        size_t idx = 0;
         for (const std::string &key : req.keys_) {
             MemObjQueryInfo queryInfo;
             metricManager.IncrementRequestCounter(RestMetricType::QUERY, UINT32_MAX);
             Result metaRet = metaMangerPtr_->Query(key, req.operateId_, req.flag_, queryInfo);
-            results.push_back(metaRet);
-            resp.batchQueryInfos_.push_back(queryInfo);
+            results[idx] = metaRet;
+            resp.batchQueryInfos_[idx] = std::move(queryInfo);
             IncrementResultCounter(metricManager, RestMetricType::QUERY, metaRet, UINT32_MAX);
+            ++idx;
         }
         IncrementBatchResultCounter(metricManager, RestMetricType::BATCH_QUERY, results, UINT32_MAX);
         return MMC_OK;

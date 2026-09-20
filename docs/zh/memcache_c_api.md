@@ -412,7 +412,7 @@ int32_t mmcc_batch_malloc(const char **keys, uint32_t keys_count, const size_t *
 
 ```c
 int32_t mmcc_batch_copy(const uint64_t *gvas, void **buffers, const size_t *sizes,
-                        uint32_t count, int32_t direct);
+                        uint32_t count, int32_t direct, uint32_t flag = 0);
 ```
 
 **功能**
@@ -429,6 +429,7 @@ int32_t mmcc_batch_copy(const uint64_t *gvas, void **buffers, const size_t *size
 - `sizes`：每段 GVA 地址要拷贝的数据大小。
 - `count`：GVA 地址段数量。
 - `direct`：数据拷贝方向。
+- `flag`：拷贝标志位，默认 0。读方向设置 `GET_DATA_FOR_LAYER_WISE` 可跳过 GVA tracker 合法性校验，直接执行 DMA 拷贝。
 
 **返回值**
 

@@ -1355,8 +1355,11 @@ Result MmcClientDefault::BatchCopyWritePath(std::vector<void *> &gvas, std::vect
 }
 
 Result MmcClientDefault::BatchCopyReadPath(std::vector<void *> &gvas, std::vector<void *> &buffers,
-                                           std::vector<size_t> &sizes, int32_t direct)
+                                           std::vector<size_t> &sizes, int32_t direct, uint32_t flag)
 {
+    if ((flag & GET_DATA_FOR_LAYER_WISE) != 0 && direct == SMEMB_COPY_G2L) {
+        return BatchDataOperation(gvas, buffers, sizes, direct);
+    }
     std::vector<LocalGvaBlobInfo> readInfos;
     readInfos.reserve(gvas.size());
     std::vector<std::string> promoteKeys;
@@ -1399,7 +1402,7 @@ Result MmcClientDefault::BatchCopyReadPath(std::vector<void *> &gvas, std::vecto
 }
 
 Result MmcClientDefault::BatchCopy(std::vector<void *> &gvas, std::vector<void *> &buffers, std::vector<size_t> &sizes,
-                                   const int32_t direct)
+                                   const int32_t direct, uint32_t flag)
 {
     MMC_VALIDATE_RETURN(bmProxy_ != nullptr, "BmProxy is null", MMC_CLIENT_NOT_INIT);
     MMC_VALIDATE_RETURN(metaNetClient_ != nullptr, "MetaNetClient is null", MMC_CLIENT_NOT_INIT);
@@ -1414,7 +1417,7 @@ Result MmcClientDefault::BatchCopy(std::vector<void *> &gvas, std::vector<void *
     }
     if (direct == SMEMB_COPY_G2L || direct == SMEMB_COPY_G2H) {
         // Read 方向
-        return BatchCopyReadPath(gvas, buffers, sizes, direct);
+        return BatchCopyReadPath(gvas, buffers, sizes, direct, flag);
     }
 
     MMC_LOG_ERROR("Invalid direct " << direct << " for batch copy, count:" << sizes.size());

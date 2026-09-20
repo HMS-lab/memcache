@@ -259,7 +259,7 @@ MMC_API int32_t mmcc_batch_malloc(const char **keys, uint32_t keys_count, const 
 }
 
 MMC_API int32_t mmcc_batch_copy(const uint64_t *gvas, void **buffers, const size_t *sizes, uint32_t count,
-                                int32_t direct)
+                                int32_t direct, uint32_t flag)
 {
     MMC_VALIDATE_RETURN(MmcClientDefault::GetInstance() != nullptr, "client is not initialize", MMC_CLIENT_NOT_INIT);
     if (count == 0) {
@@ -284,7 +284,7 @@ MMC_API int32_t mmcc_batch_copy(const uint64_t *gvas, void **buffers, const size
         bufferVector.emplace_back(buffers[i]);
         sizeVector.emplace_back(sizes[i]);
     }
-    return MmcClientDefault::GetInstance()->BatchCopy(gvaVector, bufferVector, sizeVector, direct);
+    return MmcClientDefault::GetInstance()->BatchCopy(gvaVector, bufferVector, sizeVector, direct, flag);
 }
 
 MMC_API int32_t mmcc_batch_write_finish(const char **keys, uint32_t keys_count, const int32_t *writeResults,

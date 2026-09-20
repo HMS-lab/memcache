@@ -383,10 +383,11 @@ public:
      * @param buffers Vector of local buffer addresses
      * @param sizes Vector of copy sizes, must have the same length as gvas and buffers
      * @param direct Copy direction, such as SMEMB_COPY_L2G, SMEMB_COPY_H2G, SMEMB_COPY_G2L or SMEMB_COPY_G2H
+     * @param flag Copy flag, e.g. GET_DATA_FOR_LAYER_WISE to skip GVA tracker validation on read path
      * @return 0 if success, negative value on error
      */
     virtual int BatchCopy(std::vector<void *> &gvas, std::vector<void *> &buffers, std::vector<size_t> &sizes,
-                          const int32_t direct = 3) = 0;
+                          const int32_t direct = 3, uint32_t flag = 0) = 0;
 
     /**
      * @brief Notify meta service that the writes for the given keys are finished

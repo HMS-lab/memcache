@@ -518,7 +518,7 @@ virtual std::vector<uintptr_t> BatchMalloc(const std::vector<std::string> &keys,
 
 ```c++
 virtual int BatchCopy(std::vector<void *> &gvas, std::vector<void *> &buffers, std::vector<size_t> &sizes,
-                          const int32_t direct = 3) = 0;
+                          const int32_t direct = 3, uint32_t flag = 0) = 0;
 ```
 
 **功能**
@@ -534,6 +534,7 @@ virtual int BatchCopy(std::vector<void *> &gvas, std::vector<void *> &buffers, s
 - `buffers`：本地缓冲区列表，必须与 `gvas` 一一对应。
 - `sizes`：每次拷贝的大小列表，长度必须与 `gvas` 一致。
 - `direct`：数据拷贝方向，取值参见 `smem_bm_copy_type`，常用值包括 `SMEMB_COPY_L2G`、`SMEMB_COPY_G2L`、`SMEMB_COPY_G2H`、`SMEMB_COPY_H2G`。
+- `flag`：拷贝标志位，默认 0。读方向设置 `GET_DATA_FOR_LAYER_WISE` 可跳过 GVA tracker 合法性校验，直接执行 DMA 拷贝。
 
 **返回值**
 

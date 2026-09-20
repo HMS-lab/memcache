@@ -1420,7 +1420,7 @@ nlohmann::json MmcMetaManager::GetAllSegmentInfo() const
     return globalAllocator_->GetAllSegmentInfo();
 }
 
-Result MmcMetaManager::PrefetchKeys(std::vector<std::string> keys, MediaType srcMedia, MediaType dstMedia,
+Result MmcMetaManager::PrefetchKeys(const std::vector<std::string> &keys, MediaType srcMedia, MediaType dstMedia,
                                     uint32_t flags)
 {
     (void)flags;
@@ -1433,6 +1433,10 @@ Result MmcMetaManager::PrefetchKeys(std::vector<std::string> keys, MediaType src
         MMC_LOG_ERROR("PrefetchKeys: only SSD->DRAM is supported currently, srcMedia: " << srcMedia
                                                                                         << ", dstMedia: " << dstMedia);
         return MMC_INVALID_PARAM;
+    }
+    if (!IsAnySsdEnabled()) {
+        MMC_LOG_DEBUG("PrefetchKeys: no SSD enabled, skipping prefetch");
+        return MMC_OK;
     }
     uint64_t operateId = GenerateOperateId(UINT32_MAX);
     std::vector<MmcMemMetaDesc> objMetas(keys.size());
@@ -1448,6 +1452,10 @@ Result MmcMetaManager::PrefetchKeysAsync(const std::vector<std::string> &keys)
 {
     if (keys.empty()) {
         MMC_LOG_INFO("PrefetchKeysAsync: keys is empty, silently passing the function");
+        return MMC_OK;
+    }
+    if (!IsAnySsdEnabled()) {
+        MMC_LOG_DEBUG("PrefetchKeysAsync: no SSD enabled, skipping prefetch");
         return MMC_OK;
     }
     uint64_t operateId = GenerateOperateId(UINT32_MAX);
@@ -1515,7 +1523,7 @@ Result MmcMetaManager::Query(const std::string &key, uint64_t operateId, uint32_
 
     TP_TRACE_BEGIN(TP_MMC_META_QUERY_PROMOTE_LRU);
     auto ret = metaContainer_->Promote(key);
-    TP_TRACE_END(TP_MMC_META_QUERY_PROMOTE_LRU, ret)
+    TP_TRACE_END(TP_MMC_META_QUERY_PROMOTE_LRU, ret);
     if (ret != MMC_OK) {
         MMC_LOG_ERROR("Query key: " << key << " Promote failed. ErrCode: " << ret);
         return ret;
