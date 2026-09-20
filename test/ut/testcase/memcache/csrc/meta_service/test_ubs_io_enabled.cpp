@@ -114,6 +114,7 @@ TEST_F(TestUbsIoEnabled, PutAndGetWithUbsIoFallback)
     metaServiceConfig.evictThresholdHigh = 80U;
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = false;
+    metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
     UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);
     mmc_meta_service_t meta_service = mmcs_meta_service_start(&metaServiceConfig);
@@ -196,6 +197,7 @@ TEST_F(TestUbsIoEnabled, BatchGetWithUbsIoFallback)
     metaServiceConfig.evictThresholdHigh = 80U;
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = false;
+    metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
     UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);
     mmc_meta_service_t meta_service = mmcs_meta_service_start(&metaServiceConfig);
@@ -295,6 +297,7 @@ TEST_F(TestUbsIoEnabled, ExistOperationsWithUbsIo)
     metaServiceConfig.evictThresholdHigh = 80U;
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = false;
+    metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     // localSsdSize removed from mmc_meta_service_config_t
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
     UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);
@@ -376,6 +379,7 @@ TEST_F(TestUbsIoEnabled, QueryOperationsWithUbsIo)
     metaServiceConfig.evictThresholdHigh = 80U;
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = false;
+    metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     // localSsdSize removed from mmc_meta_service_config_t
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
     UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);
@@ -460,6 +464,7 @@ TEST_F(TestUbsIoEnabled, UbsIoFallbackWhenMemcacheFull)
     metaServiceConfig.evictThresholdHigh = 80U;
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = false;
+    metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     // localSsdSize removed from mmc_meta_service_config_t
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
     UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);
@@ -547,6 +552,7 @@ TEST_F(TestUbsIoEnabled, UbsIoDisabledCompare)
     metaServiceConfig.evictThresholdHigh = 80U;
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = false;
+    metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     // localSsdSize removed from mmc_meta_service_config_t
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
     UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);

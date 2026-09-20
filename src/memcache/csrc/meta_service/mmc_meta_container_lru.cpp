@@ -13,6 +13,7 @@
 #ifndef MF_HYBRID_MMC_META_CONTAINER_LRU_H
 #define MF_HYBRID_MMC_META_CONTAINER_LRU_H
 
+#include <atomic>
 #include <chrono>
 #include <list>
 #include <memory>
@@ -31,12 +32,19 @@ class MmcMetaContainerLRU : public MmcMetaContainer<Key, Value> {
 public:
     explicit MmcMetaContainerLRU(std::function<MediaType(const Value &)> getTypeFunc) : getTypeFunc_(getTypeFunc) {}
 
+    struct EvictionCandidate {
+        Key key;
+        uint64_t accessSequence;
+    };
+
 private:
     struct ValueLruItem {
         Value value_;
         // 访问时需持有 metaLock_ 写锁，或同时持有 metaLock_ 读锁和 lruLock_。
         MediaType mediaType_;
         typename std::list<Key>::iterator lruIter_;
+        // 最后一次被访问 的全局顺序号
+        uint64_t accessSequence_;
     };
     std::unordered_map<Key, ValueLruItem> metaMap_;
     std::list<Key> lruLists_[MEDIA_NONE];
@@ -44,6 +52,8 @@ private:
     MmcReadWriteLock lruLock_;
     MmcReadWriteLock metaLock_;
     std::function<MediaType(const Value &)> getTypeFunc_;
+    // 所有 ShardedLRU 模板实例共用一个全局、单调递增的访问序号
+    inline static std::atomic<uint64_t> nextAccessSequence_{0};
 
 public:
     Result Insert(const Key &key, const Value &value) override
@@ -65,7 +75,8 @@ public:
             lruLists_[blobType].push_front(key);
         }
         ValueLruItem lruItem{value, blobType != MEDIA_SSD ? blobType : MEDIA_NONE,
-                             blobType != MEDIA_SSD ? lruLists_[blobType].begin() : lruLists_[MEDIA_NONE].end()};
+                             blobType != MEDIA_SSD ? lruLists_[blobType].begin() : lruLists_[MEDIA_NONE].end(),
+                             NextAccessSequence()};
 
         // insert into map
         auto ret = metaMap_.emplace(key, lruItem);
@@ -176,6 +187,31 @@ public:
         return metaMap_.size();
     }
 
+    size_t GetKeyCount(MediaType mediaType) override
+    {
+        if (mediaType >= MEDIA_NONE || mediaType == MEDIA_SSD) {
+            return 0;
+        }
+        MmcReadGuard lockGuard(lruLock_);
+        return lruLists_[mediaType].size();
+    }
+
+    std::vector<Key> GetEvictCandidateKeys(MediaType mediaType, size_t count) override
+    {
+        std::vector<Key> keys;
+        if (mediaType >= MEDIA_NONE || mediaType == MEDIA_SSD || count == 0) {
+            return keys;
+        }
+
+        MmcReadGuard lockGuard(lruLock_);
+        keys.reserve(std::min(count, lruLists_[mediaType].size()));
+        for (auto iter = lruLists_[mediaType].rbegin(); iter != lruLists_[mediaType].rend() && keys.size() < count;
+             ++iter) {
+            keys.push_back(*iter);
+        }
+        return keys;
+    }
+
     Result Promote(const Key &key)
     {
         MmcReadGuard lockGuard(metaLock_);
@@ -213,6 +249,7 @@ public:
                 lruLists_[type].push_front(key);
                 iter->second.mediaType_ = type;
                 iter->second.lruIter_ = lruLists_[type].begin();
+                iter->second.accessSequence_ = NextAccessSequence();
             }
             MMC_LOG_DEBUG("Inserted LRU entry, key=" << key << ", type=" << type);
             return MMC_OK;
@@ -281,6 +318,101 @@ public:
         return false;
     }
 
+    void CollectEvictionCandidates(const MediaType mediaType, const uint64_t cutoff, const bool olderOrEqual,
+                                   std::vector<EvictionCandidate> &candidates)
+    {
+        if (mediaType == MEDIA_NONE || mediaType == MEDIA_SSD) {
+            return;
+        }
+        MmcReadGuard metaGuard(metaLock_);
+        MmcReadGuard lruGuard(lruLock_);
+        for (auto keyIter = lruLists_[mediaType].rbegin(); keyIter != lruLists_[mediaType].rend(); ++keyIter) {
+            const auto &key = *keyIter;
+            auto iter = metaMap_.find(key);
+            if (iter == metaMap_.end() || iter->second.mediaType_ != mediaType) {
+                continue;
+            }
+            const bool selected =
+                olderOrEqual ? iter->second.accessSequence_ <= cutoff : iter->second.accessSequence_ > cutoff;
+            if (selected) {
+                candidates.push_back({key, iter->second.accessSequence_});
+            } else if (olderOrEqual) {
+                // 访问序列号从链表尾部到头部是递增的，因此后面的条目
+                // 不可能再满足这个 cutoff 条件。
+                break;
+            }
+        }
+    }
+
+    size_t GetEvictionCandidateCount(const MediaType mediaType)
+    {
+        if (mediaType == MEDIA_NONE || mediaType == MEDIA_SSD) {
+            return 0;
+        }
+        MmcReadGuard lruGuard(lruLock_);
+        return lruLists_[mediaType].size();
+    }
+
+    void CollectColdestEvictionSequences(const MediaType mediaType, const size_t limit,
+                                         std::vector<uint64_t> &sequences)
+    {
+        if (mediaType == MEDIA_NONE || mediaType == MEDIA_SSD || limit == 0) {
+            return;
+        }
+        MmcReadGuard metaGuard(metaLock_);
+        MmcReadGuard lruGuard(lruLock_);
+        sequences.reserve(sequences.size() + std::min(limit, lruLists_[mediaType].size()));
+        for (auto keyIter = lruLists_[mediaType].rbegin();
+             keyIter != lruLists_[mediaType].rend() && sequences.size() < limit; ++keyIter) {
+            const auto &key = *keyIter;
+            auto iter = metaMap_.find(key);
+            if (iter != metaMap_.end() && iter->second.mediaType_ == mediaType) {
+                sequences.push_back(iter->second.accessSequence_);
+            }
+        }
+    }
+
+    EvictResult EvictCandidate(const EvictionCandidate &candidate,
+                               std::function<EvictResult(const Key &, const Value &, MediaType)> moveFunc,
+                               const MediaType mediaType)
+    {
+        Value value;
+        {
+            MmcWriteGuard metaGuard(metaLock_);
+            MmcWriteGuard lruGuard(lruLock_);
+            auto mapIter = metaMap_.find(candidate.key);
+            if (mapIter == metaMap_.end() || mapIter->second.mediaType_ != mediaType ||
+                mapIter->second.accessSequence_ != candidate.accessSequence) {
+                return EvictResult::FAIL;
+            }
+            value = mapIter->second.value_;
+            lruLists_[mediaType].erase(mapIter->second.lruIter_);
+            mapIter->second.mediaType_ = MEDIA_NONE;
+        }
+
+        EvictResult result = moveFunc(candidate.key, value, mediaType);
+        if (result == EvictResult::FAIL) {
+            MmcWriteGuard metaGuard(metaLock_);
+            MmcWriteGuard lruGuard(lruLock_);
+            auto mapIter = metaMap_.find(candidate.key);
+            if (mapIter != metaMap_.end() && mapIter->second.mediaType_ == MEDIA_NONE &&
+                mapIter->second.accessSequence_ == candidate.accessSequence) {
+                lruLists_[mediaType].push_back(candidate.key);
+                mapIter->second.lruIter_ = std::prev(lruLists_[mediaType].end());
+                mapIter->second.mediaType_ = mediaType;
+            }
+        } else if (result == EvictResult::REMOVE) {
+            MmcWriteGuard metaGuard(metaLock_);
+            MmcWriteGuard lruGuard(lruLock_);
+            auto mapIter = metaMap_.find(candidate.key);
+            if (mapIter != metaMap_.end() && mapIter->second.mediaType_ == MEDIA_NONE &&
+                mapIter->second.accessSequence_ == candidate.accessSequence) {
+                metaMap_.erase(mapIter);
+            }
+        }
+        return result;
+    }
+
     void MultiLevelElimination(const std::vector<std::pair<uint16_t, uint16_t>> &evictWatermarks,
                                const std::vector<MediaType> &needEvictList,
                                const std::vector<uint16_t> &nowMemoryThresholds,
@@ -335,6 +467,12 @@ private:
         // 只支持在同层级内部更新
         auto &lruList = lruLists_[lruItem.mediaType_];
         lruList.splice(lruList.begin(), lruList, lruItem.lruIter_);
+        lruItem.accessSequence_ = NextAccessSequence();
+    }
+
+    static uint64_t NextAccessSequence()
+    {
+        return nextAccessSequence_.fetch_add(1, std::memory_order_relaxed);
     }
 
     MediaType GetBlobType(const Value &value)
@@ -345,17 +483,6 @@ private:
         return MEDIA_NONE;
     }
 };
-
-// 显式实例化常用类型
-template class MmcMetaContainer<std::string, MmcMemObjMetaPtr>;
-
-// 工厂函数实现
-template<typename Key, typename Value>
-MmcRef<MmcMetaContainer<Key, Value>>
-MmcMetaContainer<Key, Value>::Create(std::function<MediaType(const Value &)> GetTypeFunc)
-{
-    return MmcMakeRef<MmcMetaContainerLRU<Key, Value>>(GetTypeFunc).Get();
-}
 
 } // namespace mmc
 } // namespace ock

@@ -165,6 +165,20 @@ TEST_F(TestMmcConfiguration, EvictYieldConfigValidationTest)
     EXPECT_EQ(metaConfig.evictYieldDurationUs, 200U);
 }
 
+TEST_F(TestMmcConfiguration, MetaLruTypeConfigDefaultsAndConverts)
+{
+    MetaServiceConfig config;
+    config.LoadDefault();
+
+    mmc_meta_service_config_t metaConfig{};
+    config.GetMetaServiceConfig(metaConfig);
+    EXPECT_EQ(metaConfig.lruType, MMC_META_LRU_TYPE_SHARDED_LRU);
+
+    config.Set(ConfConstant::OCK_MMC_META_LRU_TYPE.first, std::string("lru"));
+    config.GetMetaServiceConfig(metaConfig);
+    EXPECT_EQ(metaConfig.lruType, MMC_META_LRU_TYPE_LRU);
+}
+
 TEST_F(TestMmcConfiguration, EvictYieldConfigRangeValidationTest)
 {
     MetaServiceConfig config;

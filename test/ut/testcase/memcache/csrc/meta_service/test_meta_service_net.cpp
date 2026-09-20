@@ -64,6 +64,7 @@ TEST_F(TestMmcMetaService, Init)
     metaServiceConfig.evictThresholdHigh = 70;
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = true;
+    metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
     metaServiceConfig.asyncFlushIntervalMs = 1000UL;
     metaServiceConfig.asyncFlushBatchLimit = 8UL;
@@ -115,6 +116,7 @@ TEST_F(TestMmcMetaService, ExistRequest)
     metaServiceConfig.evictThresholdHigh = 70;
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = true;
+    metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
     metaServiceConfig.asyncFlushIntervalMs = 1000UL;
     metaServiceConfig.asyncFlushBatchLimit = 8UL;
@@ -172,6 +174,7 @@ TEST_F(TestMmcMetaService, BatchExistRequest)
     metaServiceConfig.evictThresholdHigh = 70;
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = true;
+    metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
     metaServiceConfig.asyncFlushIntervalMs = 1000UL;
     metaServiceConfig.asyncFlushBatchLimit = 8UL;
@@ -249,6 +252,7 @@ TEST_F(TestMmcMetaService, QueryRequest)
     metaServiceConfig.evictThresholdHigh = 70;
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = true;
+    metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
     metaServiceConfig.asyncFlushIntervalMs = 1000UL;
     metaServiceConfig.asyncFlushBatchLimit = 8UL;
@@ -310,6 +314,7 @@ TEST_F(TestMmcMetaService, BatchQueryRequest)
     metaServiceConfig.evictThresholdHigh = 70;
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = true;
+    metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
     metaServiceConfig.asyncFlushIntervalMs = 1000UL;
     metaServiceConfig.asyncFlushBatchLimit = 8UL;

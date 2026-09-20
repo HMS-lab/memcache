@@ -45,6 +45,7 @@ constexpr uint64_t HBM_SIZE_ALIGNMENT = 2097152;  // 2MB
 
 const std::string BOOL_ENUM_STR = "false||true";
 const std::string LOG_LEVEL_ENUM_STR = "debug||info||warn||error";
+const std::string META_LRU_TYPE_ENUM_STR = "lru||sharded_lru";
 const std::string LOG_OUTPUT_TARGET_ENUM_STR = "screen||file||both";
 constexpr int32_t LOG_OUTPUT_TARGET_SCREEN = 0;
 constexpr int32_t LOG_OUTPUT_TARGET_FILE = 1;
@@ -241,6 +242,11 @@ public:
         AddIntConf(OCK_MMC_META_LEASE_TTL_MS,
                    VIntRange::Create(OCK_MMC_META_LEASE_TTL_MS.first, MIN_LEASE_TTL_MS, MAX_LEASE_TTL_MS), 0);
         AddIntConf(
+            OCK_MMC_META_LRU_SHARD_COUNT,
+            VIntRange::Create(OCK_MMC_META_LRU_SHARD_COUNT.first, MIN_META_LRU_SHARD_COUNT, MAX_META_LRU_SHARD_COUNT),
+            0);
+        AddStrConf(OCK_MMC_META_LRU_TYPE, VStrEnum::Create(OCK_MMC_META_LRU_TYPE.first, META_LRU_TYPE_ENUM_STR), 0);
+        AddIntConf(
             OKC_MMC_EVICT_YIELD_INTERVAL,
             VIntRange::Create(OKC_MMC_EVICT_YIELD_INTERVAL.first, MIN_EVICT_YIELD_INTERVAL, MAX_EVICT_YIELD_INTERVAL),
             0);
@@ -330,6 +336,9 @@ public:
         config.asyncFlushBatchLimit = static_cast<uint32_t>(GetInt(ConfConstant::OCK_MMC_ASYNC_FLUSH_BATCH_LIMIT));
         config.pendingWaitTimeoutMs = static_cast<uint64_t>(GetInt(ConfConstant::OCK_MMC_PENDING_WAIT_TIMEOUT_MS));
         config.leaseTtlMs = static_cast<uint64_t>(GetInt(ConfConstant::OCK_MMC_META_LEASE_TTL_MS));
+        config.lruShardCount = static_cast<uint32_t>(GetInt(ConfConstant::OCK_MMC_META_LRU_SHARD_COUNT));
+        config.lruType = GetString(ConfConstant::OCK_MMC_META_LRU_TYPE) == "sharded_lru" ? MMC_META_LRU_TYPE_SHARDED_LRU
+                                                                                         : MMC_META_LRU_TYPE_LRU;
         config.evictYieldInterval = static_cast<uint32_t>(GetInt(ConfConstant::OKC_MMC_EVICT_YIELD_INTERVAL));
         config.evictYieldDurationUs = static_cast<uint32_t>(GetInt(ConfConstant::OKC_MMC_EVICT_YIELD_DURATION_US));
         config.logRotationFileSize = GetInt(ConfConstant::OCK_MMC_LOG_ROTATION_FILE_SIZE) * MB_NUM;

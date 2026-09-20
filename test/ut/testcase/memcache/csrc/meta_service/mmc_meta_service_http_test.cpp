@@ -181,6 +181,7 @@ void MmcMetaServiceHttpTest::StartService()
         metaServiceConfig_.evictThresholdHigh = kHttpEvictThresholdHigh;
         metaServiceConfig_.evictThresholdLow = kHttpEvictThresholdLow;
         metaServiceConfig_.haEnable = false;
+        metaServiceConfig_.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
         metaServiceConfig_.accTlsConfig.tlsEnable = false;
         metaServiceConfig_.asyncFlushIntervalMs = 1000UL;
         metaServiceConfig_.asyncFlushBatchLimit = 8UL;

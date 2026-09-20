@@ -460,6 +460,13 @@ void DefineMmcStructModule(py::module_ &m)
                            R"pbdoc(
                     Periodic eviction check interval in seconds. Set to 0 to disable.
                 )pbdoc")
+            .def_readwrite("lru_shard_count", &mmc_meta_service_config_t::lruShardCount,
+                           R"pbdoc(
+                    Meta LRU shard count. Must be a power of two in the range [1, 1024].
+                    Takes effect only when lru_type is sharded_lru.
+                )pbdoc")
+            .def_readwrite("lru_type", &mmc_meta_service_config_t::lruType,
+                           "Meta LRU type: 0=lru, 1=sharded_lru (default).")
             .def_readwrite("lease_ttl_ms", &mmc_meta_service_config_t::leaseTtlMs,
                            R"pbdoc(
                     Default read lease TTL in milliseconds.

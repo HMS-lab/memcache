@@ -36,7 +36,8 @@ public:
 
     Result Start(uint64_t leaseTtl, uint16_t evictThresholdHigh, uint16_t evictThresholdLow,
                  const MmcMetaExtConfig &extConfig = {}, uint32_t evictYieldInterval = 0,
-                 uint32_t evictYieldDurationUs = 100)
+                 uint32_t evictYieldDurationUs = 100, uint32_t lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT,
+                 MetaLruType lruType = MetaLruType::LRU)
     {
         std::lock_guard<std::mutex> guard(mutex_);
         if (started_) {
@@ -44,7 +45,7 @@ public:
             return MMC_OK;
         }
         metaMangerPtr_ = MmcMakeRef<MmcMetaManager>(leaseTtl, evictThresholdHigh, evictThresholdLow, extConfig,
-                                                    evictYieldInterval, evictYieldDurationUs);
+                                                    evictYieldInterval, evictYieldDurationUs, lruShardCount, lruType);
         if (metaMangerPtr_ == nullptr) {
             MMC_LOG_ERROR("new object failed, probably out of memory");
             return MMC_NEW_OBJECT_FAILED;

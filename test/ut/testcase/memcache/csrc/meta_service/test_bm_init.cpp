@@ -71,6 +71,7 @@ TEST_F(TestBmInit, Init)
     metaServiceConfig.evictThresholdHigh = 70;
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = true;
+    metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     metaServiceConfig.accTlsConfig.tlsEnable = false;
     metaServiceConfig.asyncFlushIntervalMs = 1000UL;
     metaServiceConfig.asyncFlushBatchLimit = 8UL;

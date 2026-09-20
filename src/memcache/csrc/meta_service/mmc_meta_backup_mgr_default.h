@@ -21,6 +21,8 @@
 #include <condition_variable>
 #include <future>
 #include <map>
+#include <unordered_map>
+#include <unordered_set>
 #include "mmc_ref.h"
 #include "mmc_logger.h"
 #include "mmc_types.h"
@@ -125,13 +127,12 @@ public:
 
     Result Add(const std::string &key, MmcMemBlobDesc &blobDesc, uint32_t op) override
     {
-        if (!started_) {
-            return MMC_OK;
-        }
-
         size_t size = 0;
         {
             std::lock_guard<std::mutex> lk(backupThreadLock_);
+            if (!started_ || drainingRanks_.count(blobDesc.rank_) != 0) {
+                return MMC_OK;
+            }
             backupList_.push_back({op, key, blobDesc});
             size = backupList_.size();
             if (ShouldNotify(size)) {
@@ -143,12 +144,12 @@ public:
 
     Result Remove(const std::string &key, MmcMemBlobDesc &blobDesc) override
     {
-        if (!started_) {
-            return MMC_OK;
-        }
         size_t size = 0;
         {
             std::lock_guard<std::mutex> lk(backupThreadLock_);
+            if (!started_ || drainingRanks_.count(blobDesc.rank_) != 0) {
+                return MMC_OK;
+            }
             backupList_.push_back({META_BACKUP_REMOVE, key, blobDesc});
             size = backupList_.size();
             if (ShouldNotify(size)) {
@@ -157,6 +158,10 @@ public:
         }
         return MMC_OK;
     }
+
+    bool DrainRank(uint32_t rank) override;
+
+    void ActivateRank(uint32_t rank) override;
 
     Result Load(std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList) override
     {
@@ -171,6 +176,7 @@ public:
 private:
     void SendBackup2Local();
     void SendBackupForRank(uint32_t rank, std::vector<MetaBackUpOperate> &entries);
+    void FinishBackupForRank(uint32_t rank);
 
     MetaNetServerPtr metaNetServer_;
     std::mutex mutex_;
@@ -179,6 +185,8 @@ private:
     std::mutex backupThreadLock_;
     std::condition_variable backupThreadCv_;
     std::list<MetaBackUpOperate> backupList_;
+    std::unordered_set<uint32_t> drainingRanks_;
+    std::unordered_map<uint32_t, uint32_t> inFlightBackups_;
     uint32_t asyncFlushIntervalMs_ = 0;
     uint32_t asyncFlushBatchLimit_ = 8;
     MmcThreadPoolPtr backupPool_;

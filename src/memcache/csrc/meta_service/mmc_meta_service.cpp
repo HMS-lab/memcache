@@ -54,6 +54,15 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
         return MMC_OK;
     }
     options_ = options;
+    MMC_VALIDATE_RETURN(options.lruType == MMC_META_LRU_TYPE_LRU || options.lruType == MMC_META_LRU_TYPE_SHARDED_LRU,
+                        "invalid param, lruType must be lru or sharded_lru", MMC_INVALID_PARAM);
+    if (options.lruType == MMC_META_LRU_TYPE_SHARDED_LRU) {
+        MMC_VALIDATE_RETURN(options.lruShardCount >= 1 && options.lruShardCount <= MMC_MAX_META_LRU_SHARD_COUNT &&
+                                (options.lruShardCount & (options.lruShardCount - 1)) == 0,
+                            "invalid param, lruShardCount must be a power of two in range [1, " +
+                                std::to_string(MMC_MAX_META_LRU_SHARD_COUNT) + "]",
+                            MMC_INVALID_PARAM);
+    }
     MMC_VALIDATE_RETURN(options.evictThresholdHigh > options.evictThresholdLow,
                         "invalid param, evictThresholdHigh must large than evictThresholdLow", MMC_INVALID_PARAM);
     options_.leaseTtlMs = options.leaseTtlMs == 0 ? MMC_DATA_TTL_MS : options.leaseTtlMs;
@@ -90,7 +99,8 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
     extConfig.prefetchEnabled = options.prefetchEnabled;
     extConfig.pendingWaitTimeoutMs = options_.pendingWaitTimeoutMs;
     MMC_RETURN_ERROR(metaMgrProxy_->Start(options_.leaseTtlMs, options.evictThresholdHigh, options.evictThresholdLow,
-                                          extConfig, options.evictYieldInterval, options.evictYieldDurationUs),
+                                          extConfig, options.evictYieldInterval, options.evictYieldDurationUs,
+                                          options_.lruShardCount, static_cast<MetaLruType>(options_.lruType)),
                      "Failed to start meta mgr proxy of meta service " << name_);
 
     metaBackUpMgrPtr_ = MMCMetaBackUpMgrFactory::GetInstance("DefaultMetaBackup");
@@ -226,6 +236,7 @@ Result MmcMetaService::BmRegister(uint32_t rank, std::vector<uint16_t> mediaType
     MMC_RETURN_ERROR(metaBackUpMgrPtr_->Load(blobList), "Mount loc { " << rank << " } load backup failed");
     MMC_RETURN_ERROR(metaMgrProxy_->Mount(locs, infos, blobList, storageEnabled, enableMaxValueMode),
                      "Mount loc { " << rank << " } failed");
+    metaBackUpMgrPtr_->ActivateRank(rank);
     MMC_LOG_TRACE("Mount loc {rank:" << rank << ", rebuild size:" << blobList.size() << ", mediaNum:" << typeNum
                                      << "} finish");
     if (blobList.size() == 0) {
@@ -249,6 +260,10 @@ Result MmcMetaService::BmRegister(uint32_t rank, std::vector<uint16_t> mediaType
 Result MmcMetaService::BmUnregister(uint32_t rank, uint16_t mediaType)
 {
     std::lock_guard<std::mutex> guard(mutex_);
+    if (!metaBackUpMgrPtr_->DrainRank(rank)) {
+        MMC_LOG_WARN("Drain rank timeout, rank=" << rank);
+        return MMC_TIMEOUT;
+    }
     return BmUnregisterWithoutLock(rank, mediaType);
 }
 
@@ -283,6 +298,10 @@ Result MmcMetaService::ClearResource(uint32_t rank)
     if (!started_) {
         MMC_LOG_ERROR("MetaService (" << name_ << ") is not started.");
         return MMC_NOT_STARTED;
+    }
+    if (!metaBackUpMgrPtr_->DrainRank(rank)) {
+        MMC_LOG_WARN("Drain rank timeout, rank=" << rank);
+        return MMC_TIMEOUT;
     }
     std::unordered_set<uint16_t> mediaTypes;
     auto it = rankMediaTypeMap_.find(rank);

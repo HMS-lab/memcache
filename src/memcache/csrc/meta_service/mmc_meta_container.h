@@ -14,10 +14,16 @@
 
 #include <memory>
 
+#include "mmc_def.h"
 #include "mmc_ref.h"
 
 namespace ock {
 namespace mmc {
+
+enum class MetaLruType : uint32_t {
+    LRU = MMC_META_LRU_TYPE_LRU,
+    SHARDED_LRU = MMC_META_LRU_TYPE_SHARDED_LRU,
+};
 
 template<typename Key, typename Value>
 class MmcMetaContainer : public MmcReferable {
@@ -33,6 +39,8 @@ public:
                            std::map<Key, Value> &matchedValues) = 0;
     virtual void GetAllKeys(std::vector<Key> &keys) = 0;
     virtual size_t GetKeyCount() = 0;
+    virtual size_t GetKeyCount(MediaType mediaType) = 0;
+    virtual std::vector<Key> GetEvictCandidateKeys(MediaType mediaType, size_t count) = 0;
     virtual Result Promote(const Key &key) = 0;
     virtual MediaType GetMediaType(const Key &key) = 0;
     virtual Result InsertLru(const Key &key, MediaType type) = 0;
@@ -44,8 +52,13 @@ public:
                                        uint32_t yieldInterval = 0, uint32_t yieldDurationUs = 0) = 0;
     // yieldInterval: evict this many objects then sleep yieldDurationUs microseconds to release
     //                the write lock, allowing blocked requests to acquire the lock. 0 disables yield.
+};
 
-    static MmcRef<MmcMetaContainer<Key, Value>> Create(std::function<MediaType(const Value &)> GetTypeFunc);
+template<typename Key, typename Value>
+class MmcMetaContainerFactory {
+public:
+    static MmcRef<MmcMetaContainer<Key, Value>>
+    Create(MetaLruType lruType, std::function<MediaType(const Value &)> getTypeFunc, uint32_t lruShardCount);
 };
 } // namespace mmc
 } // namespace ock

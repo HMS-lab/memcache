@@ -130,10 +130,12 @@ class MmcMetaManager : public MmcReferable {
 public:
     explicit MmcMetaManager(uint64_t defaultTtl, uint16_t evictThresholdHigh, uint16_t evictThresholdLow,
                             const MmcMetaExtConfig &extConfig = {}, uint32_t evictYieldInterval = 0,
-                            uint32_t evictYieldDurationUs = 100)
+                            uint32_t evictYieldDurationUs = 100,
+                            uint32_t lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT,
+                            MetaLruType lruType = MetaLruType::LRU)
         : defaultTtlMs_(defaultTtl == 0 ? MMC_DATA_TTL_MS : defaultTtl), evictThresholdHigh_(evictThresholdHigh),
           evictThresholdLow_(evictThresholdLow), extConfig_(extConfig), evictYieldInterval_(evictYieldInterval),
-          evictYieldDurationUs_(evictYieldDurationUs)
+          evictYieldDurationUs_(evictYieldDurationUs), lruShardCount_(lruShardCount), lruType_(lruType)
     {}
     // evictYieldInterval: number of evicted objects between yields (0=disabled, default=0)
     // evictYieldDurationUs: sleep duration per yield in microseconds (default=100us)
@@ -158,7 +160,8 @@ public:
         globalAllocator_ = MmcMakeRef<MmcGlobalAllocator>();
         MMC_ASSERT_LOG_AND_RETURN(globalAllocator_ != nullptr, "globalAllocator_ is nullptr", MMC_MALLOC_FAILED);
         auto GetTypeFunc = [](const MmcMemObjMetaPtr &objMeta) -> MediaType { return objMeta->GetBlobType(); };
-        metaContainer_ = MmcMetaContainer<std::string, MmcMemObjMetaPtr>::Create(GetTypeFunc);
+        metaContainer_ =
+            MmcMetaContainerFactory<std::string, MmcMemObjMetaPtr>::Create(lruType_, GetTypeFunc, lruShardCount_);
         MMC_ASSERT_LOG_AND_RETURN(metaContainer_ != nullptr, "metaContainer_ is nullptr", MMC_MALLOC_FAILED);
         threadPool_ = MmcMakeRef<MmcThreadPool>("metamgr_pool", METAMGR_POOL_BASE);
         MMC_ASSERT_LOG_AND_RETURN(threadPool_ != nullptr, "threadPool_ is nullptr", MMC_MALLOC_FAILED);
@@ -615,6 +618,8 @@ private:
     MmcMetaExtConfig extConfig_;
     uint32_t evictYieldInterval_;   /* GC eviction yield interval (0=disabled) */
     uint32_t evictYieldDurationUs_; /* GC eviction yield sleep duration in microseconds */
+    uint32_t lruShardCount_;
+    MetaLruType lruType_;
     MetaNetServerPtr metaNetServer_;
     MmcThreadPoolPtr threadPool_;
 

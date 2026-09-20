@@ -103,6 +103,16 @@ ADD_UNIT_TEST(test_meta_container_lru
         BUILD_FLAGS -fpermissive --coverage
 )
 
+file(GLOB_RECURSE meta_container_sharded_lru_src
+        ${CMAKE_CURRENT_SOURCE_DIR}/meta_container_sharded_lru_test.cpp
+)
+ADD_UNIT_TEST(test_meta_container_sharded_lru
+        FILES ${meta_container_sharded_lru_src} ${TEST_SRC_PATHS}/ut_main.cpp
+        INCLUDE_PATHS ${TEST_INCLUDE_PATHS}
+        LINK_LIBRARIES ${TEST_DEPEND_LIBS}
+        BUILD_FLAGS -fpermissive --coverage
+)
+
 file(GLOB_RECURSE ubs_io_enabled_src
         ${CMAKE_CURRENT_SOURCE_DIR}/test_ubs_io_enabled.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/mock_smem.cpp

@@ -14,15 +14,19 @@
 
 #include <stdint.h>
 
-#define DISCOVERY_URL_SIZE   1024
-#define PATH_MAX_SIZE        1024
-#define PROTOCOL_SIZE        64
-#define KV_EVENT_FIELD_SIZE  256
-#define MAX_BATCH_OP_COUNT   16384
-#define TLS_PATH_SIZE        256
-#define MMC_TAG_SIZE         32
-#define MMC_TAG_OP_INFO_SIZE 256
-#define TLS_PATH_MAX_LEN     (TLS_PATH_SIZE - 1)
+#define DISCOVERY_URL_SIZE               1024
+#define PATH_MAX_SIZE                    1024
+#define PROTOCOL_SIZE                    64
+#define KV_EVENT_FIELD_SIZE              256
+#define MAX_BATCH_OP_COUNT               16384
+#define TLS_PATH_SIZE                    256
+#define MMC_TAG_SIZE                     32
+#define MMC_TAG_OP_INFO_SIZE             256
+#define TLS_PATH_MAX_LEN                 (TLS_PATH_SIZE - 1)
+#define MMC_DEFAULT_META_LRU_SHARD_COUNT 16U
+#define MMC_MAX_META_LRU_SHARD_COUNT     1024U
+#define MMC_META_LRU_TYPE_LRU            0U
+#define MMC_META_LRU_TYPE_SHARDED_LRU    1U
 
 /* Media type values, consistent with internal enum MediaType (see common/mmc_types.h) */
 #define MMC_MEDIA_HBM  0
@@ -97,6 +101,10 @@ typedef struct {
     mmc_zmq_config_t zmq;
     uint64_t pendingWaitTimeoutMs;
     uint32_t evictCheckIntervalSeconds;
+    /* Meta LRU implementation: MMC_META_LRU_TYPE_LRU or MMC_META_LRU_TYPE_SHARDED_LRU. */
+    uint32_t lruType;
+    /* Used only when lruType is MMC_META_LRU_TYPE_SHARDED_LRU. Must be a power of two in [1, 1024]. */
+    uint32_t lruShardCount;
 } mmc_meta_service_config_t;
 
 typedef struct {

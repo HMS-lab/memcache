@@ -20,6 +20,10 @@
 namespace ock {
 namespace mmc {
 
+namespace {
+constexpr std::chrono::seconds kDrainRankTimeout{30};
+}
+
 std::map<std::string, MmcRef<MMCMetaBackUpMgr>> MMCMetaBackUpMgrFactory::instances_;
 std::mutex MMCMetaBackUpMgrFactory::instanceMutex_;
 
@@ -49,24 +53,34 @@ void MMCMetaBackUpMgrDefault::SendBackup2Local()
 
     // 锁内 splice 移出全部（O(1)），锁外按 rank 分组
     std::map<uint32_t, std::vector<MetaBackUpOperate>> rankGroups;
-    std::list<MetaBackUpOperate> drained;
     {
         std::lock_guard<std::mutex> lg(backupThreadLock_);
+        std::list<MetaBackUpOperate> drained;
         drained.splice(drained.begin(), backupList_);
-    }
-    const size_t batchLimit = asyncFlushBatchLimit_;
-    for (auto it = drained.begin(); it != drained.end();) {
-        auto &group = rankGroups[it->desc_.rank_];
-        if (group.size() < batchLimit) {
-            group.push_back(std::move(*it));
-            it = drained.erase(it);
-        } else {
-            ++it;
+        const size_t batchLimit = asyncFlushBatchLimit_;
+        for (auto it = drained.begin(); it != drained.end();) {
+            const uint32_t rank = it->desc_.rank_;
+            if (drainingRanks_.count(rank) != 0) {
+                it = drained.erase(it);
+                continue;
+            }
+            auto &group = rankGroups[rank];
+            if (group.size() < batchLimit) {
+                group.push_back(std::move(*it));
+                it = drained.erase(it);
+            } else {
+                ++it;
+            }
         }
-    }
-    if (!drained.empty()) {
-        std::lock_guard<std::mutex> lg(backupThreadLock_);
-        backupList_.splice(backupList_.begin(), drained);
+        if (!drained.empty()) {
+            backupList_.splice(backupList_.begin(), drained);
+        }
+        for (const auto &[rank, entries] : rankGroups) {
+            if (!entries.empty()) {
+                // 表示该 rank 有一批备份正在执行
+                ++inFlightBackups_[rank];
+            }
+        }
     }
 
     if (rankGroups.empty()) {
@@ -98,6 +112,15 @@ void MMCMetaBackUpMgrDefault::SendBackup2Local()
 
 void MMCMetaBackUpMgrDefault::SendBackupForRank(uint32_t rank, std::vector<MetaBackUpOperate> &entries)
 {
+    struct BackupCompletion {
+        MMCMetaBackUpMgrDefault *manager;
+        uint32_t rank;
+        ~BackupCompletion()
+        {
+            manager->FinishBackupForRank(rank);
+        }
+    } completion{this, rank};
+
     MetaReplicateRequest request;
     std::vector<BackupReadLease> leases;
     leases.reserve(entries.size());
@@ -175,6 +198,36 @@ void MMCMetaBackUpMgrDefault::SendBackupForRank(uint32_t rank, std::vector<MetaB
     if (!flushedBlobs.empty()) {
         onAsyncFlushComplete_(rank, flushedBlobs);
     }
+}
+
+void MMCMetaBackUpMgrDefault::FinishBackupForRank(uint32_t rank)
+{
+    std::lock_guard<std::mutex> lock(backupThreadLock_);
+    auto it = inFlightBackups_.find(rank);
+    if (it == inFlightBackups_.end()) {
+        return;
+    }
+    if (--it->second == 0) {
+        inFlightBackups_.erase(it);
+        backupThreadCv_.notify_all();
+    }
+}
+
+bool MMCMetaBackUpMgrDefault::DrainRank(uint32_t rank)
+{
+    std::unique_lock<std::mutex> lock(backupThreadLock_);
+    drainingRanks_.insert(rank);
+    // 从待备份队列 backupList_ 中删除该 rank 的所有尚未发送任务。
+    backupList_.remove_if([rank](const MetaBackUpOperate &entry) { return entry.desc_.rank_ == rank; });
+    // 等待该 rank 已经发出的备份任务全部完成
+    return backupThreadCv_.wait_for(lock, kDrainRankTimeout,
+                                    [this, rank] { return inFlightBackups_.count(rank) == 0; });
+}
+
+void MMCMetaBackUpMgrDefault::ActivateRank(uint32_t rank)
+{
+    std::lock_guard<std::mutex> lock(backupThreadLock_);
+    drainingRanks_.erase(rank);
 }
 
 } // namespace mmc

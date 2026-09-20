@@ -15,6 +15,8 @@
 #include <utility>
 #include <cstdint>
 
+#include "mmc_def.h"
+
 constexpr uint32_t DEFAULT_DYNAMIC_CONFIG_INTERVAL = 5;
 
 namespace ock {
@@ -33,6 +35,9 @@ constexpr auto OKC_MMC_EVICT_THRESHOLD_HIGH = std::make_pair("ock.mmc.evict_thre
 constexpr auto OKC_MMC_EVICT_THRESHOLD_LOW = std::make_pair("ock.mmc.evict_threshold_low", 80);
 constexpr auto OCK_MMC_EVICT_CHECK_INTERVAL_SECONDS = std::make_pair("ock.mmc.evict_check_interval_seconds", 5);
 constexpr auto OCK_MMC_META_LEASE_TTL_MS = std::make_pair("ock.mmc.meta.lease_ttl_ms", 10000);
+constexpr auto OCK_MMC_META_LRU_SHARD_COUNT =
+    std::make_pair("ock.mmc.meta_service.lru_shard_count", MMC_DEFAULT_META_LRU_SHARD_COUNT);
+constexpr auto OCK_MMC_META_LRU_TYPE = std::make_pair("ock.mmc.meta_service.lru_type", "sharded_lru");
 constexpr auto OKC_MMC_LOCAL_SERVICE_BACKEND_ID = std::make_pair("ock.mmc.local_service.backend_id", "");
 // GC eviction yield: periodically sleep during eviction loop to release the write lock,
 // allowing blocked Put/Get/Exist requests to acquire the lock and execute.
@@ -151,6 +156,8 @@ constexpr int MIN_EVICT_THRESHOLD = 1;
 constexpr int MAX_EVICT_THRESHOLD = 99;
 constexpr int MIN_LEASE_TTL_MS = 1;
 constexpr int MAX_LEASE_TTL_MS = 2147483647;
+constexpr int MIN_META_LRU_SHARD_COUNT = 1;
+constexpr int MAX_META_LRU_SHARD_COUNT = MMC_MAX_META_LRU_SHARD_COUNT;
 
 // GC eviction yield parameter ranges
 constexpr int MIN_EVICT_YIELD_INTERVAL = 0;

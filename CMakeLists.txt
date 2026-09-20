@@ -227,6 +227,7 @@ add_subdirectory(src)
 
 if (BUILD_CPP_EXAMPLE)
     add_subdirectory(example/cpp)
+    add_subdirectory(example/meta_service_bench)
 endif ()
 
 if (BUILD_TESTS STREQUAL "ON")

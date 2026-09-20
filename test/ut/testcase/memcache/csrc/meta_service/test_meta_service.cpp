@@ -70,6 +70,7 @@ TEST_F(TestMmcMetaService, Start_ConfigWithoutSsdSize)
     cfg.evictThresholdHigh = 80U;
     cfg.evictThresholdLow = 60U;
     cfg.haEnable = false;
+    cfg.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     // cfg has no localSsdSize — this field has been removed from meta config struct
 
     Result r = svc->Start(cfg);
@@ -88,6 +89,7 @@ TEST_F(TestMmcMetaService, StartStop_LifecycleNoUbsIo)
     cfg.evictThresholdHigh = 80U;
     cfg.evictThresholdLow = 60U;
     cfg.haEnable = false;
+    cfg.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
 
     Result r = svc->Start(cfg);
     (void)r;

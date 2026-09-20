@@ -171,6 +171,7 @@ TEST_F(TestMmcacheStore, Init)
     metaServiceConfig.evictThresholdHigh = 80UL;
     metaServiceConfig.evictThresholdLow = 60UL;
     metaServiceConfig.haEnable = false;
+    metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     // mmc_meta_service_config_t 不再有 localSsdSize
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
     UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);
@@ -230,6 +231,7 @@ static mmc_meta_service_t StartMetaService()
     metaServiceConfig.evictThresholdHigh = 80UL;
     metaServiceConfig.evictThresholdLow = 60UL;
     metaServiceConfig.haEnable = false;
+    metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     // mmc_meta_service_config_t 不再有 localSsdSize
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
     UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);
@@ -350,6 +352,7 @@ TEST_F(TestMmcacheStore, BatchMalloc)
     metaServiceConfig.evictThresholdHigh = 80UL;
     metaServiceConfig.evictThresholdLow = 60UL;
     metaServiceConfig.haEnable = false;
+    metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     metaServiceConfig.leaseTtlMs = 100;
     // mmc_meta_service_config_t 不再有 localSsdSize
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
@@ -459,6 +462,7 @@ TEST_F(TestMmcacheStore, SsdConfig_InitsUbsIoWithSsdSize)
     metaServiceConfig.evictThresholdHigh = 80U;
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = false;
+    metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     // meta config 不再有 localSsdSize，SSD 由 LocalService 管理
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
     UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);
@@ -516,6 +520,7 @@ TEST_F(TestMmcacheStore, SsdEvictHandler_DramToSsdCopy)
     metaServiceConfig.evictThresholdHigh = 80U;
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = false;
+    metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     // mmc_meta_service_config_t 不再有 localSsdSize
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
     UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);
@@ -591,6 +596,7 @@ TEST_F(TestMmcacheStore, SsdExistQueryHandler)
     metaServiceConfig.evictThresholdHigh = 80U;
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = false;
+    metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     // mmc_meta_service_config_t 不再有 localSsdSize
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
     UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);
@@ -651,6 +657,7 @@ TEST_F(TestMmcacheStore, SsdRemoveHandler)
     metaServiceConfig.evictThresholdHigh = 80U;
     metaServiceConfig.evictThresholdLow = 60U;
     metaServiceConfig.haEnable = false;
+    metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     // mmc_meta_service_config_t 不再有 localSsdSize
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
     UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);
@@ -731,6 +738,7 @@ TEST_F(TestMmcacheStore, CopyBlob_SsdToDram)
     metaServiceConfig.evictThresholdHigh = 80UL;
     metaServiceConfig.evictThresholdLow = 60UL;
     metaServiceConfig.haEnable = false;
+    metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
     UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);
     mmc_meta_service_t meta_service = mmcs_meta_service_start(&metaServiceConfig);
@@ -801,6 +809,7 @@ TEST_F(TestMmcacheStore, RegisterBm_ReportsSsdMount)
     metaServiceConfig.evictThresholdHigh = 80UL;
     metaServiceConfig.evictThresholdLow = 60UL;
     metaServiceConfig.haEnable = false;
+    metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
     UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);
     mmc_meta_service_t meta_service = mmcs_meta_service_start(&metaServiceConfig);
@@ -847,6 +856,7 @@ TEST_F(TestMmcacheStore, BatchMallocLeaseCleanUp)
     metaServiceConfig.evictThresholdHigh = 80;
     metaServiceConfig.evictThresholdLow = 60;
     metaServiceConfig.haEnable = false;
+    metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     metaServiceConfig.leaseTtlMs = 100;
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
     UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);
@@ -914,6 +924,7 @@ TEST_F(TestMmcacheStore, BatchWriteFinishBasic)
     metaServiceConfig.evictThresholdHigh = 80UL;
     metaServiceConfig.evictThresholdLow = 60UL;
     metaServiceConfig.haEnable = false;
+    metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     metaServiceConfig.leaseTtlMs = 100;
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
     UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);
@@ -982,6 +993,7 @@ TEST_F(TestMmcacheStore, BatchWriteFinishFailRemovesBlob)
     metaServiceConfig.evictThresholdHigh = 80UL;
     metaServiceConfig.evictThresholdLow = 60UL;
     metaServiceConfig.haEnable = false;
+    metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     metaServiceConfig.leaseTtlMs = 100;
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
     UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);
@@ -1043,6 +1055,7 @@ TEST_F(TestMmcacheStore, BatchWriteFinishUnknownKey)
     metaServiceConfig.evictThresholdHigh = 80UL;
     metaServiceConfig.evictThresholdLow = 60UL;
     metaServiceConfig.haEnable = false;
+    metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     metaServiceConfig.leaseTtlMs = 100;
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
     UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);
@@ -1082,6 +1095,7 @@ TEST_F(TestMmcacheStore, BatchWriteFinishLeaseExpiryCleanup)
     metaServiceConfig.evictThresholdHigh = 80UL;
     metaServiceConfig.evictThresholdLow = 60UL;
     metaServiceConfig.haEnable = false;
+    metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     metaServiceConfig.leaseTtlMs = 50;
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
     UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);
@@ -1148,6 +1162,7 @@ TEST_F(TestMmcacheStore, BatchCopySkipsReadableBlob)
     metaServiceConfig.evictThresholdHigh = 80UL;
     metaServiceConfig.evictThresholdLow = 60UL;
     metaServiceConfig.haEnable = false;
+    metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     metaServiceConfig.leaseTtlMs = 100;
     UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
     UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);

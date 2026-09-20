@@ -57,6 +57,8 @@ TEST_F(TestMetaConfigUtils, CreateDefaultMetaConfigReturnsExpectedDefaults)
     EXPECT_EQ(config.leaseTtlMs, 10000U);
     EXPECT_EQ(config.evictYieldInterval, 0U);
     EXPECT_EQ(config.evictYieldDurationUs, 100U);
+    EXPECT_EQ(config.lruType, MMC_META_LRU_TYPE_SHARDED_LRU);
+    EXPECT_EQ(config.lruShardCount, MMC_DEFAULT_META_LRU_SHARD_COUNT);
 
     EXPECT_FALSE(config.kvEvents.enable);
     EXPECT_STREQ(config.kvEvents.endpoint, "");
@@ -99,6 +101,8 @@ TEST_F(TestMetaConfigUtils, MetaConfigToStringReturnsExpectedFormat)
     config.leaseTtlMs = 4321U;
     config.evictYieldInterval = 100U;
     config.evictYieldDurationUs = 200U;
+    config.lruType = MMC_META_LRU_TYPE_SHARDED_LRU;
+    config.lruShardCount = 32U;
 
     config.accTlsConfig.tlsEnable = true;
     SafeCopy("/tls/ca.pem", config.accTlsConfig.caPath, sizeof(config.accTlsConfig.caPath));
@@ -136,6 +140,8 @@ TEST_F(TestMetaConfigUtils, MetaConfigToStringReturnsExpectedFormat)
     ExpectConfigStringContains(actual, "evict_yield_interval: 100");
     ExpectConfigStringContains(actual, "evict_yield_duration_us: 200");
     ExpectConfigStringContains(actual, "evict_check_interval_seconds: 12");
+    ExpectConfigStringContains(actual, "lru_type: sharded_lru");
+    ExpectConfigStringContains(actual, "lru_shard_count: 32");
     ExpectConfigStringContains(actual, "tls_enable: true");
     // kv_events 字段：零初始化 config 对应 false / 空 / false
     ExpectConfigStringContains(actual, "kv_events_enable: false");

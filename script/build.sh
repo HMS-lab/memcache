@@ -16,6 +16,7 @@ export BUILD_PYTHON=${4:-ON}
 export ENABLE_PTRACER=${5:-ON}
 export INCREMENTAL=${6:-OFF}
 export BUILD_UBSIO=${7:-ON}
+export BUILD_CPP_EXAMPLE=${8:-OFF}
 
 readonly SCRIPT_FULL_PATH=$(dirname $(readlink -f "$0"))
 readonly PROJECT_FULL_PATH=$(dirname "$SCRIPT_FULL_PATH")
@@ -107,6 +108,7 @@ cmake \
     -DBUILD_PYTHON="${BUILD_PYTHON}" \
     -DENABLE_PTRACER="${ENABLE_PTRACER}" \
     -DBUILD_UBSIO="${BUILD_UBSIO}" \
+    -DBUILD_CPP_EXAMPLE="${BUILD_CPP_EXAMPLE}" \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -S . -B build/
 
