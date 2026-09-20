@@ -656,7 +656,7 @@ TEST_F(TestMmcConfiguration, DynamicConfigIntervalRangeBounds)
 }
 
 namespace {
-constexpr uint64_t HUGE_MEM_SIZE = 1ULL << 50; // 远超单机 DRAM/HBM 上限，用于触发 exceeds 校验
+constexpr uint64_t HUGE_MEM_SIZE = 17ULL << 40; // 超过 DRAM 16TB 上限，也超过 HBM 1TB 上限
 constexpr uint64_t ALIGNED_2MB = 2ULL * 1024 * 1024;
 constexpr uint64_t ALIGNED_4MB = 4ULL * 1024 * 1024;
 

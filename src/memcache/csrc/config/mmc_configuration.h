@@ -547,19 +547,13 @@ public:
         config.localMaxDRAMSize = align_up(config.localMaxDRAMSize, alignment);
         config.localHBMSize = align_up(config.localHBMSize, alignment);
         config.localMaxHBMSize = align_up(config.localMaxHBMSize, alignment);
-
-        if (config.localDRAMSize > MAX_DRAM_SIZE) {
-            MMC_LOG_ERROR("After alignment " << (alignment == GB_SIZE_ALIGNMENT ? "1GB" : "2MB")
-                                             << ", ock.mmc.local_service.dram.size(" << config.localDRAMSize
-                                             << ") exceeds (" << MAX_DRAM_SIZE << ")");
-            return MMC_INVALID_PARAM;
-        }
         if (config.localMaxDRAMSize > MAX_DRAM_SIZE) {
             MMC_LOG_ERROR("After alignment " << (alignment == GB_SIZE_ALIGNMENT ? "1GB" : "2MB")
                                              << ", ock.mmc.local_service.max.dram.size(" << config.localMaxDRAMSize
                                              << ") exceeds (" << MAX_DRAM_SIZE << ")");
             return MMC_INVALID_PARAM;
         }
+
         if (config.localMaxDRAMSize < config.localDRAMSize) {
             MMC_LOG_ERROR("ock.mmc.local_service.max.dram.size(" << config.localMaxDRAMSize
                                                                  << ") is smaller than ock.mmc.local_service.dram.size("
