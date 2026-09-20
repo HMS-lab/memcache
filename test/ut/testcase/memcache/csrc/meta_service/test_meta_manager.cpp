@@ -69,7 +69,7 @@ TEST_F(TestMmcMetaManager, Init)
     MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 60U);
     metaMng->Start();
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(loc, locInfo, blobMap, false);
+    metaMng->Mount(loc, locInfo, blobMap);
     ASSERT_TRUE(metaMng != nullptr);
     metaMng->Stop();
 }
@@ -140,6 +140,139 @@ TEST_F(TestMmcMetaManager, PendingGetDoesNotDependOnRewarmWorkerAvailability)
     metaMng->Stop();
 }
 
+TEST_F(TestMmcMetaManager, PendingPrefetchDoesNotAddDramReadLease)
+{
+    auto metaMng = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+
+    const std::string key = "pending_prefetch_without_read_lease";
+    auto memObj = MmcMakeRef<MmcMemObjMeta>();
+    auto pendingBlob = MmcMakeRef<MmcMemBlob>(0, 0x1000, SIZE_32K, MEDIA_DRAM, ALLOCATED, SIZE_32K);
+    ASSERT_EQ(memObj->AddBlob(pendingBlob), MMC_OK);
+    ASSERT_EQ(MetaContainer(metaMng)->Insert(key, memObj), MMC_OK);
+
+    std::thread completeRewarm([memObj, pendingBlob]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        std::lock_guard<std::mutex> guard(memObj->Mutex());
+        pendingBlob->UpdateState(MMC_WRITE_OK);
+        pendingBlob->NotifyReadable();
+    });
+
+    std::vector<MmcMemMetaDesc> objMetas;
+    const auto ret = metaMng->GetByRank({key}, GenerateOperateId(UINT32_MAX), objMetas, {}, false);
+    completeRewarm.join();
+    EXPECT_EQ(ret, MMC_OK);
+    ASSERT_EQ(objMetas.size(), 1U);
+    EXPECT_EQ(objMetas[0].numBlobs_, 1U);
+    EXPECT_EQ(pendingBlob->UseCount(), 0U);
+
+    metaMng->Stop();
+}
+
+TEST_F(TestMmcMetaManager, AsyncPrefetchDoesNotWaitForPendingBlob)
+{
+    MmcMetaExtConfig extConfig;
+    extConfig.pendingWaitTimeoutMs = 2000U;
+    auto metaMng = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U, extConfig);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+
+    const std::string key = "pending_async_prefetch";
+    auto memObj = MmcMakeRef<MmcMemObjMeta>();
+    auto pendingBlob = MmcMakeRef<MmcMemBlob>(0, 0x1000, SIZE_32K, MEDIA_DRAM, ALLOCATED, SIZE_32K);
+    ASSERT_EQ(memObj->AddBlob(pendingBlob), MMC_OK);
+    ASSERT_EQ(MetaContainer(metaMng)->Insert(key, memObj), MMC_OK);
+
+    auto submitFuture = std::async(std::launch::async, [&]() { return metaMng->AsyncPrefetchKeys({key}); });
+    const auto submitStatus = submitFuture.wait_for(std::chrono::milliseconds(500));
+    {
+        std::lock_guard<std::mutex> guard(memObj->Mutex());
+        pendingBlob->UpdateState(MMC_WRITE_OK);
+        pendingBlob->NotifyReadable();
+    }
+    EXPECT_EQ(submitStatus, std::future_status::ready);
+    EXPECT_EQ(submitFuture.get(), MMC_OK);
+    EXPECT_EQ(pendingBlob->UseCount(), 0U);
+
+    metaMng->Stop();
+}
+
+TEST_F(TestMmcMetaManager, SsdAvailabilityFollowsStorageRegistration)
+{
+    MmcLocation loc{3U, MEDIA_DRAM};
+    MmcLocalMemlInitInfo locInfo{100U, SIZE_32K};
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+    EXPECT_FALSE(metaMng->IsSsdAvailable(loc.rank_));
+
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    std::vector<MmcLocation> locs{loc};
+    std::vector<MmcLocalMemlInitInfo> locInfos{locInfo};
+    ASSERT_EQ(metaMng->Mount(locs, locInfos, blobMap, true), MMC_OK);
+    EXPECT_TRUE(metaMng->IsSsdAvailable(loc.rank_));
+    metaMng->SetSsdMetadataMode(MMC_SSD_METADATA_SEPARATED);
+    // 存储能力来自 LocalService 注册，不随 SSD 元数据管理模式变化。
+    EXPECT_TRUE(metaMng->IsSsdAvailable(loc.rank_));
+
+    ASSERT_EQ(metaMng->Unmount(loc), MMC_OK);
+    EXPECT_FALSE(metaMng->IsSsdAvailable(loc.rank_));
+}
+
+TEST_F(TestMmcMetaManager, GetRandomStorageRankUsesStorageRegistration)
+{
+    constexpr uint64_t defaultTtl = 2000U;
+    constexpr uint16_t evictThresholdHigh = 70U;
+    constexpr uint16_t evictThresholdLow = 60U;
+    constexpr uint32_t requestRank = 3U;
+    constexpr uint32_t anotherStorageRank = 5U;
+    constexpr uint32_t allocatorOnlyRank = 7U;
+    constexpr uint32_t unregisteredRank = 1U;
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, evictThresholdHigh, evictThresholdLow);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    MmcLocalMemlInitInfo locInfo{100U, 1000U};
+    MmcLocation requestLoc{requestRank, MEDIA_DRAM};
+    MmcLocation anotherStorageLoc{anotherStorageRank, MEDIA_DRAM};
+    MmcLocation allocatorOnlyLoc{allocatorOnlyRank, MEDIA_DRAM};
+    uint32_t storageRank = UINT32_MAX;
+    EXPECT_EQ(metaMng->GetRandomStorageRank(unregisteredRank, storageRank), MMC_INVALID_PARAM);
+    metaMng->SetSsdMetadataMode(MMC_SSD_METADATA_SEPARATED);
+    EXPECT_EQ(metaMng->GetRandomStorageRank(unregisteredRank, storageRank), MMC_SSD_NOT_AVAILABLE);
+
+    std::vector<MmcLocation> allocatorOnlyLocs{allocatorOnlyLoc};
+    std::vector<MmcLocalMemlInitInfo> allocatorOnlyInfos{locInfo};
+    ASSERT_EQ(metaMng->Mount(allocatorOnlyLocs, allocatorOnlyInfos, blobMap, false), MMC_OK);
+    EXPECT_EQ(metaMng->GetRandomStorageRank(allocatorOnlyRank, storageRank), MMC_SSD_NOT_AVAILABLE);
+
+    std::vector<MmcLocation> requestLocs{requestLoc};
+    std::vector<MmcLocalMemlInitInfo> requestInfos{locInfo};
+    ASSERT_EQ(metaMng->Mount(requestLocs, requestInfos, blobMap, true), MMC_OK);
+    storageRank = UINT32_MAX;
+    ASSERT_EQ(metaMng->GetRandomStorageRank(requestRank, storageRank), MMC_OK);
+    EXPECT_EQ(storageRank, requestRank);
+
+    storageRank = UINT32_MAX;
+    ASSERT_EQ(metaMng->GetRandomStorageRank(allocatorOnlyRank, storageRank), MMC_OK);
+    EXPECT_EQ(storageRank, requestRank);
+
+    std::vector<MmcLocation> anotherStorageLocs{anotherStorageLoc};
+    std::vector<MmcLocalMemlInitInfo> anotherStorageInfos{locInfo};
+    ASSERT_EQ(metaMng->Mount(anotherStorageLocs, anotherStorageInfos, blobMap, true), MMC_OK);
+    storageRank = UINT32_MAX;
+    ASSERT_EQ(metaMng->GetRandomStorageRank(anotherStorageRank, storageRank), MMC_OK);
+    EXPECT_EQ(storageRank, anotherStorageRank);
+
+    ASSERT_EQ(metaMng->Unmount(requestLoc), MMC_OK);
+    storageRank = UINT32_MAX;
+    ASSERT_EQ(metaMng->GetRandomStorageRank(unregisteredRank, storageRank), MMC_OK);
+    EXPECT_EQ(storageRank, anotherStorageRank);
+
+    ASSERT_EQ(metaMng->Unmount(anotherStorageLoc), MMC_OK);
+    storageRank = UINT32_MAX;
+    EXPECT_EQ(metaMng->GetRandomStorageRank(unregisteredRank, storageRank), MMC_SSD_NOT_AVAILABLE);
+    EXPECT_EQ(storageRank, UINT32_MAX);
+    ASSERT_EQ(metaMng->Unmount(allocatorOnlyLoc), MMC_OK);
+}
+
 TEST_F(TestMmcMetaManager, AllocAndFree)
 {
     MmcLocation loc{0, MEDIA_DRAM};
@@ -149,7 +282,7 @@ TEST_F(TestMmcMetaManager, AllocAndFree)
     MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 60U);
     metaMng->Start();
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(loc, locInfo, blobMap, false);
+    metaMng->Mount(loc, locInfo, blobMap);
 
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0}; // blobSize, numBlobs, mediaType, preferredRank, flags
     MmcMemMetaDesc objMeta;
@@ -174,7 +307,7 @@ TEST_F(TestMmcMetaManager, AllocUsesPerRequestLeaseTtl)
     MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 60U);
     metaMng->Start();
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(loc, locInfo, blobMap, false);
+    metaMng->Mount(loc, locInfo, blobMap);
 
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
     MmcMemMetaDesc objMetaDefault;
@@ -206,7 +339,7 @@ TEST_F(TestMmcMetaManager, AllocAndFreeMulti)
     MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 60U);
     metaMng->Start();
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(loc, locInfo, blobMap, false);
+    metaMng->Mount(loc, locInfo, blobMap);
 
     uint16_t numKeys = 10U;
     std::vector<std::string> keys;
@@ -240,7 +373,7 @@ TEST_F(TestMmcMetaManager, GetAndUpdate)
     MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 60U);
     metaMng->Start();
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(loc, locInfo, blobMap, false);
+    metaMng->Mount(loc, locInfo, blobMap);
 
     uint16_t numKeys = 20U;
     std::vector<std::string> keys;
@@ -278,7 +411,7 @@ TEST_F(TestMmcMetaManager, LRU)
     MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 50U);
     metaMng->Start();
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(loc, locInfo, blobMap, false);
+    metaMng->Mount(loc, locInfo, blobMap);
 
     uint16_t numKeys = 8U;
     std::vector<std::string> keys;
@@ -323,7 +456,7 @@ TEST_F(TestMmcMetaManager, AllocAndExistKey)
     MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 60U);
     metaMng->Start();
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(loc, locInfo, blobMap, false);
+    metaMng->Mount(loc, locInfo, blobMap);
 
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
     MmcMemMetaDesc objMeta;
@@ -346,7 +479,7 @@ TEST_F(TestMmcMetaManager, AllocAndBatchExistKey)
     MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 60U);
     metaMng->Start();
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(loc, locInfo, blobMap, false);
+    metaMng->Mount(loc, locInfo, blobMap);
 
     uint16_t numKeys = 5U;
     std::vector<std::string> keys;
@@ -403,7 +536,7 @@ TEST_F(TestMmcMetaManager, BatchExist)
     MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 60U);
     metaMng->Start();
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(loc, locInfo, blobMap, false);
+    metaMng->Mount(loc, locInfo, blobMap);
 
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
     for (uint16_t i = 0U; i < 5U; ++i) {
@@ -445,7 +578,7 @@ TEST_F(TestMmcMetaManager, Remove)
     MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 60U);
     metaMng->Start();
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(loc, locInfo, blobMap, false);
+    metaMng->Mount(loc, locInfo, blobMap);
 
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
     MmcMemMetaDesc objMeta;
@@ -475,7 +608,7 @@ TEST_F(TestMmcMetaManager, Get_NotAllBlobsReady)
     MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 60U);
     metaMng->Start();
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(loc, locInfo, blobMap, false);
+    metaMng->Mount(loc, locInfo, blobMap);
 
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
     MmcMemMetaDesc objMeta;
@@ -499,7 +632,7 @@ TEST_F(TestMmcMetaManager, Alloc_ThresholdEviction)
     MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 60U);
     metaMng->Start();
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(loc, locInfo, blobMap, false);
+    metaMng->Mount(loc, locInfo, blobMap);
 
     std::vector<std::string> keys = {"key1", "key2"};
     for (const auto &key : keys) {
@@ -538,7 +671,7 @@ TEST_F(TestMmcMetaManager, EvictCallback_NoSsd_GoesToRemove)
     MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 50U);
     metaMng->Start();
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+    metaMng->Mount(dramLoc, dramInfo, blobMap);
 
     std::vector<std::string> keys = {"evict_key1", "evict_key2", "evict_key3"};
     for (size_t i = 0; i < keys.size(); ++i) {
@@ -574,7 +707,7 @@ TEST_F(TestMmcMetaManager, EvictCallback_AllocatedOnly_GoesToRemove)
     MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 50U);
     metaMng->Start();
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+    metaMng->Mount(dramLoc, dramInfo, blobMap);
     uint64_t operateId = 1;
     constexpr size_t survivingKeyIdx = 2;
 
@@ -610,8 +743,8 @@ TEST_F(TestMmcMetaManager, EvictCallback_MoveDownIndependentOfBlobOrder)
     MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 50U);
     metaMng->Start();
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
-    metaMng->Mount(ssdLoc, ssdInfo, blobMap, false);
+    metaMng->Mount(dramLoc, dramInfo, blobMap);
+    metaMng->Mount(ssdLoc, ssdInfo, blobMap);
 
     std::vector<std::string> keys = {"order_key1", "order_key2", "order_key3"};
     for (size_t i = 0; i < keys.size(); ++i) {
@@ -659,8 +792,8 @@ TEST_F(TestMmcMetaManager, EvictCallback_SsdEvictionDelegatesViaRpc)
     ASSERT_EQ(metaMng->Start(), MMC_OK);
 
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
-    metaMng->Mount(ssdLoc, ssdInfo, blobMap, false);
+    metaMng->Mount(dramLoc, dramInfo, blobMap);
+    metaMng->Mount(ssdLoc, ssdInfo, blobMap);
 
     std::vector<std::string> keys = {"rpc_key1", "rpc_key2", "rpc_key3"};
     for (size_t i = 0; i < keys.size(); ++i) {
@@ -702,8 +835,8 @@ TEST_F(TestMmcMetaManager, MountSsdAndDram_NoUbsIoProxy)
     ASSERT_EQ(metaMng->Start(), MMC_OK);
 
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
-    metaMng->Mount(ssdLoc, ssdInfo, blobMap, false);
+    metaMng->Mount(dramLoc, dramInfo, blobMap);
+    metaMng->Mount(ssdLoc, ssdInfo, blobMap);
 
     // MetaManager no longer holds ubsIoProxy_; SSD I/O is delegated via RPC to LocalService
 
@@ -729,8 +862,8 @@ TEST_F(TestMmcMetaManager, RemoveMixedMedia_FreesAllAllocators)
     ASSERT_EQ(metaMng->Start(), MMC_OK);
 
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(hbmLoc, hbmInfo, blobMap, false);
-    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+    metaMng->Mount(hbmLoc, hbmInfo, blobMap);
+    metaMng->Mount(dramLoc, dramInfo, blobMap);
 
     // HBM 上直接分配一个 key
     std::string key = "mixed_key";
@@ -771,7 +904,7 @@ TEST_F(TestMmcMetaManager, DramOnlyRemove_SsdPreFreeNoop)
     ASSERT_EQ(metaMng->Start(), MMC_OK);
 
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+    metaMng->Mount(dramLoc, dramInfo, blobMap);
 
     std::string key = "dram_only";
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
@@ -811,7 +944,7 @@ TEST_F(TestMmcMetaManager, Get_DramHit_NoSsdRewarm)
     ASSERT_EQ(metaMng->Start(), MMC_OK);
 
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+    metaMng->Mount(dramLoc, dramInfo, blobMap);
     // 不 Mount SSD — 也没有 SSD 回温的可能
 
     std::string key = "get_dram_key";
@@ -846,7 +979,7 @@ TEST_F(TestMmcMetaManager, RewarmBlob_NoSsdBlob_ReturnsError)
     ASSERT_EQ(metaMng->Start(), MMC_OK);
 
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+    metaMng->Mount(dramLoc, dramInfo, blobMap);
     // 不 Mount SSD
 
     // 在 DRAM 上分配 key（非 SSD）
@@ -876,7 +1009,7 @@ TEST_F(TestMmcMetaManager, GvaAlloc_PendingWriteCannotRead)
     ASSERT_TRUE(metaMng != nullptr);
     ASSERT_EQ(metaMng->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    ASSERT_EQ(metaMng->Mount(loc, locInfo, blobMap, false), MMC_OK);
+    ASSERT_EQ(metaMng->Mount(loc, locInfo, blobMap), MMC_OK);
 
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, ALLOC_FLAGS_GVA_MALLOC_MASK};
 
@@ -907,7 +1040,7 @@ TEST_F(TestMmcMetaManager, GvaWriteOk_BecomesReadable)
     ASSERT_TRUE(metaMng != nullptr);
     ASSERT_EQ(metaMng->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    ASSERT_EQ(metaMng->Mount(loc, locInfo, blobMap, false), MMC_OK);
+    ASSERT_EQ(metaMng->Mount(loc, locInfo, blobMap), MMC_OK);
 
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, ALLOC_FLAGS_GVA_MALLOC_MASK};
 
@@ -954,7 +1087,7 @@ TEST_F(TestMmcMetaManager, AddRemoveLease_WorksForRegularReadableSingleBlob)
     ASSERT_TRUE(metaMng != nullptr);
     ASSERT_EQ(metaMng->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    ASSERT_EQ(metaMng->Mount(loc, locInfo, blobMap, false), MMC_OK);
+    ASSERT_EQ(metaMng->Mount(loc, locInfo, blobMap), MMC_OK);
 
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
 
@@ -989,7 +1122,7 @@ TEST_F(TestMmcMetaManager, GvaRemoveAfterReadable_CleansIndex)
     ASSERT_TRUE(metaMng != nullptr);
     ASSERT_EQ(metaMng->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    ASSERT_EQ(metaMng->Mount(loc, locInfo, blobMap, false), MMC_OK);
+    ASSERT_EQ(metaMng->Mount(loc, locInfo, blobMap), MMC_OK);
 
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, ALLOC_FLAGS_GVA_MALLOC_MASK};
 
@@ -1032,7 +1165,7 @@ TEST_F(TestMmcMetaManager, GvaWriteFail_RemovesKey)
     ASSERT_TRUE(metaMng != nullptr);
     ASSERT_EQ(metaMng->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    ASSERT_EQ(metaMng->Mount(loc, locInfo, blobMap, false), MMC_OK);
+    ASSERT_EQ(metaMng->Mount(loc, locInfo, blobMap), MMC_OK);
 
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, ALLOC_FLAGS_GVA_MALLOC_MASK};
 
@@ -1075,7 +1208,7 @@ TEST_F(TestMmcMetaManager, GvaUnmount_CleansSegmentIndex)
     ASSERT_TRUE(metaMng != nullptr);
     ASSERT_EQ(metaMng->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    ASSERT_EQ(metaMng->Mount(loc, locInfo, blobMap, false), MMC_OK);
+    ASSERT_EQ(metaMng->Mount(loc, locInfo, blobMap), MMC_OK);
 
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, ALLOC_FLAGS_GVA_MALLOC_MASK};
 
@@ -1126,6 +1259,32 @@ TEST_F(TestMmcMetaManager, PrefetchKeys_EmptyKeys_ReturnsOk)
 
     std::vector<std::string> emptyKeys;
     EXPECT_EQ(metaMng->PrefetchKeys(emptyKeys), MMC_OK);
+
+    metaMng->Stop();
+}
+
+TEST_F(TestMmcMetaManager, GetByRankPrefetchDoesNotAddDramReadLease)
+{
+    auto metaMng = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+
+    const std::string key = "prefetch_without_read_lease";
+    auto memObj = MmcMakeRef<MmcMemObjMeta>();
+    auto blob = MmcMakeRef<MmcMemBlob>(0, 0x1000, SIZE_32K, MEDIA_DRAM, READABLE, SIZE_32K);
+    ASSERT_EQ(memObj->AddBlob(blob), MMC_OK);
+    ASSERT_EQ(MetaContainer(metaMng)->Insert(key, memObj), MMC_OK);
+
+    std::vector<MmcMemMetaDesc> objMetas;
+    ASSERT_EQ(metaMng->GetByRank({key}, GenerateOperateId(UINT32_MAX), objMetas, {}, false), MMC_OK);
+    ASSERT_EQ(objMetas.size(), 1U);
+    EXPECT_EQ(objMetas[0].numBlobs_, 1U);
+    EXPECT_EQ(blob->UseCount(), 0U);
+
+    const uint64_t getOperateId = GenerateOperateId(0);
+    ASSERT_EQ(metaMng->GetByRank({key}, getOperateId, objMetas), MMC_OK);
+    EXPECT_EQ(blob->UseCount(), 1U);
+    EXPECT_EQ(metaMng->UpdateState(key, {0, MEDIA_DRAM}, MMC_READ_FINISH, getOperateId), MMC_OK);
+    EXPECT_EQ(blob->UseCount(), 0U);
 
     metaMng->Stop();
 }
@@ -1184,7 +1343,7 @@ TEST_F(TestMmcMetaManager, UpdateConfigUnchangedKeepsValues)
     metaMng->Stop();
 }
 
-// PrefetchKeys with valid keys returns MMC_OK (async operation)
+// PrefetchKeys with valid keys returns MMC_OK after synchronous prefetch
 TEST_F(TestMmcMetaManager, PrefetchKeys_ValidKeys_ReturnsOk)
 {
     MmcLocation dramLoc{0, MEDIA_DRAM};
@@ -1195,7 +1354,7 @@ TEST_F(TestMmcMetaManager, PrefetchKeys_ValidKeys_ReturnsOk)
     ASSERT_EQ(metaMng->Start(), MMC_OK);
 
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+    metaMng->Mount(dramLoc, dramInfo, blobMap);
 
     // Allocate a key in DRAM
     std::string key = "prefetch_test_key";
@@ -1204,12 +1363,9 @@ TEST_F(TestMmcMetaManager, PrefetchKeys_ValidKeys_ReturnsOk)
     ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
     ASSERT_EQ(metaMng->UpdateState(key, dramLoc, MMC_WRITE_OK, 1), MMC_OK);
 
-    // PrefetchKeys should return MMC_OK (async operation dispatched)
+    // PrefetchKeys should return MMC_OK after synchronous prefetch
     std::vector<std::string> keys = {key};
     EXPECT_EQ(metaMng->PrefetchKeys(keys), MMC_OK);
-
-    // Wait for async operation
-    usleep(100000U);
 
     metaMng->Stop();
 }
@@ -1225,7 +1381,7 @@ TEST_F(TestMmcMetaManager, EvictKeys_ValidKeys_ReturnsOk)
     ASSERT_EQ(metaMng->Start(), MMC_OK);
 
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+    metaMng->Mount(dramLoc, dramInfo, blobMap);
 
     // Allocate a key in DRAM
     std::string key = "evict_test_key";
@@ -1255,7 +1411,7 @@ TEST_F(TestMmcMetaManager, PrefetchKey_SingleKey_ReturnsOk)
     ASSERT_EQ(metaMng->Start(), MMC_OK);
 
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+    metaMng->Mount(dramLoc, dramInfo, blobMap);
 
     std::string key = "prefetch_single_key";
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
@@ -1280,7 +1436,7 @@ TEST_F(TestMmcMetaManager, EvictKey_SingleKey_ReturnsOk)
     ASSERT_EQ(metaMng->Start(), MMC_OK);
 
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+    metaMng->Mount(dramLoc, dramInfo, blobMap);
 
     std::string key = "evict_single_key";
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
@@ -1384,7 +1540,7 @@ TEST_F(TestMmcMetaManager, BackupReadLeaseReleaseSkipsReusedBlobInOriginalObject
     auto manager = MmcMakeRef<MmcMetaManager>(leaseTtlMs, evictHigh, evictLow);
     ASSERT_EQ(manager->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> mounted;
-    ASSERT_EQ(manager->Mount({0, MEDIA_DRAM}, {gva, size}, mounted, false), MMC_OK);
+    ASSERT_EQ(manager->Mount({0, MEDIA_DRAM}, {gva, size}, mounted), MMC_OK);
     AllocOptions options{size, oneBlob, MEDIA_DRAM, {0}, 0};
     std::vector<MmcMemBlobPtr> allocated;
     ASSERT_EQ(GlobalAllocator(manager)->Alloc(options, allocated), MMC_OK);
@@ -1436,7 +1592,7 @@ TEST_F(TestMmcMetaManager, BackupReadLeaseReleaseHandlesConcurrentRemoval)
     auto manager = MmcMakeRef<MmcMetaManager>(leaseTtlMs, evictHigh, evictLow);
     ASSERT_EQ(manager->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> mounted;
-    ASSERT_EQ(manager->Mount({0, MEDIA_DRAM}, {gva, size}, mounted, false), MMC_OK);
+    ASSERT_EQ(manager->Mount({0, MEDIA_DRAM}, {gva, size}, mounted), MMC_OK);
     std::vector<MmcMemBlobPtr> allocated;
     ASSERT_EQ(GlobalAllocator(manager)->Alloc({size, oneBlob, MEDIA_DRAM, {0}, 0}, allocated), MMC_OK);
     auto blob = allocated.front();
@@ -1495,7 +1651,7 @@ TEST_F(TestMmcMetaManager, PromoteKey_ExistingKey_ReturnsOk)
     ASSERT_EQ(metaMng->Start(), MMC_OK);
 
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+    metaMng->Mount(dramLoc, dramInfo, blobMap);
 
     std::string key = "promote_test_key";
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
@@ -1523,7 +1679,7 @@ TEST_F(TestMmcMetaManager, Query_WithLayerWiseFlag_SkipsNonReadableBlobs)
     ASSERT_EQ(metaMng->Start(), MMC_OK);
 
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+    metaMng->Mount(dramLoc, dramInfo, blobMap);
 
     std::string key = "layer_wise_non_readable";
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
@@ -1554,7 +1710,7 @@ TEST_F(TestMmcMetaManager, Query_WithLayerWiseFlag_ReturnsReadableDramBlobs)
     ASSERT_EQ(metaMng->Start(), MMC_OK);
 
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+    metaMng->Mount(dramLoc, dramInfo, blobMap);
 
     std::string key = "layer_wise_readable";
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
@@ -1592,7 +1748,7 @@ TEST_F(TestMmcMetaManager, Query_WithoutLayerWiseFlag_ReturnsAllBlobs)
     ASSERT_EQ(metaMng->Start(), MMC_OK);
 
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+    metaMng->Mount(dramLoc, dramInfo, blobMap);
 
     std::string key = "no_flag_alloc_only";
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
@@ -1623,7 +1779,7 @@ TEST_F(TestMmcMetaManager, Query_WithLayerWiseFlag_SkipsSsdBlobs)
     ASSERT_EQ(metaMng->Start(), MMC_OK);
 
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(ssdLoc, ssdInfo, blobMap, false);
+    metaMng->Mount(ssdLoc, ssdInfo, blobMap);
 
     std::string key = "layer_wise_ssd";
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_SSD, {0}, 0};

@@ -97,6 +97,104 @@ TEST_F(TestProtoMsg, BlobDeleteRequest_MsgIdMatchesMetaNetClientRegistration)
     EXPECT_EQ(static_cast<int16_t>(LM_BLOB_DELETE_REQ), static_cast<int16_t>(LM_BLOB_DELETE_RSP));
 }
 
+TEST_F(TestProtoMsg, BmRegisterRequestStorageEnabledRoundTrips)
+{
+    BmRegisterRequest request;
+    request.storageEnabled_ = true;
+
+    NetMsgPacker packer;
+    ASSERT_EQ(request.Serialize(packer), MMC_OK);
+    BmRegisterRequest decoded;
+    NetMsgUnpacker unpacker(packer.String());
+    ASSERT_EQ(decoded.Deserialize(unpacker), MMC_OK);
+
+    EXPECT_TRUE(decoded.storageEnabled_);
+}
+
+TEST_F(TestProtoMsg, BmRegisterRequestKeepsOriginalPayloadLayout)
+{
+    NetMsgPacker packer;
+    const int16_t msgVer = 0;
+    const int16_t msgId = ML_BM_REGISTER_REQ;
+    const uint32_t destRankId = 0;
+    const uint32_t rank = 9;
+    const std::string backendId = "legacy_backend";
+    const std::vector<uint16_t> mediaTypes;
+    const std::vector<uint64_t> addresses;
+    const std::vector<uint64_t> capacities;
+    const std::vector<std::pair<std::string, MmcMemBlobDesc>> blobList;
+    const bool storageEnabled = true;
+    packer.Serialize(msgVer);
+    packer.Serialize(msgId);
+    packer.Serialize(destRankId);
+    packer.Serialize(rank);
+    packer.Serialize(backendId);
+    packer.Serialize(mediaTypes);
+    packer.Serialize(addresses);
+    packer.Serialize(capacities);
+    packer.Serialize(blobList);
+    packer.Serialize(storageEnabled);
+
+    BmRegisterRequest decoded;
+    NetMsgUnpacker unpacker(packer.String());
+    ASSERT_EQ(decoded.Deserialize(unpacker), MMC_OK);
+    EXPECT_EQ(decoded.rank_, rank);
+    EXPECT_TRUE(decoded.storageEnabled_);
+}
+
+TEST_F(TestProtoMsg, GetExternalConfigMessagesRoundTrip)
+{
+    constexpr int16_t getExternalConfigMsgId = 30;
+    GetExternalConfigRequest request;
+    NetMsgPacker requestPacker;
+    ASSERT_EQ(request.Serialize(requestPacker), MMC_OK);
+    GetExternalConfigRequest decodedRequest;
+    NetMsgUnpacker requestUnpacker(requestPacker.String());
+    ASSERT_EQ(decodedRequest.Deserialize(requestUnpacker), MMC_OK);
+    EXPECT_EQ(decodedRequest.msgId, ML_GET_EXTERNAL_CONFIG_REQ);
+
+    GetExternalConfigResponse response;
+    response.ret_ = MMC_OK;
+    response.ssdMetadataMode_ = MMC_SSD_METADATA_SEPARATED;
+    NetMsgPacker responsePacker;
+    ASSERT_EQ(response.Serialize(responsePacker), MMC_OK);
+    GetExternalConfigResponse decodedResponse;
+    NetMsgUnpacker responseUnpacker(responsePacker.String());
+    ASSERT_EQ(decodedResponse.Deserialize(responseUnpacker), MMC_OK);
+    EXPECT_EQ(decodedResponse.ret_, MMC_OK);
+    EXPECT_EQ(decodedResponse.ssdMetadataMode_, MMC_SSD_METADATA_SEPARATED);
+    EXPECT_EQ(static_cast<int16_t>(ML_GET_EXTERNAL_CONFIG_REQ), getExternalConfigMsgId);
+    EXPECT_EQ(static_cast<int16_t>(ML_GET_EXTERNAL_CONFIG_REQ), static_cast<int16_t>(ML_GET_EXTERNAL_CONFIG_RESP));
+}
+
+TEST_F(TestProtoMsg, BatchStorageStatMessagesRoundTrip)
+{
+    constexpr int16_t batchStorageStatMsgId = 29;
+    const std::vector<std::string> keys = {"stat_first", "stat_second"};
+    BatchStorageStatRequest request(keys);
+    NetMsgPacker requestPacker;
+    ASSERT_EQ(request.Serialize(requestPacker), MMC_OK);
+    BatchStorageStatRequest decodedRequest;
+    NetMsgUnpacker requestUnpacker(requestPacker.String());
+    ASSERT_EQ(decodedRequest.Deserialize(requestUnpacker), MMC_OK);
+    EXPECT_EQ(decodedRequest.keys_, keys);
+
+    const std::vector<Result> results = {MMC_OK, MMC_UNMATCHED_KEY};
+    const std::vector<uint64_t> sizes = {4096U, 0U};
+    BatchStorageStatResponse response(results, sizes);
+    NetMsgPacker responsePacker;
+    ASSERT_EQ(response.Serialize(responsePacker), MMC_OK);
+    BatchStorageStatResponse decodedResponse;
+    NetMsgUnpacker responseUnpacker(responsePacker.String());
+    ASSERT_EQ(decodedResponse.Deserialize(responseUnpacker), MMC_OK);
+    EXPECT_EQ(decodedResponse.results_, results);
+    EXPECT_EQ(decodedResponse.sizes_, sizes);
+    EXPECT_EQ(static_cast<int16_t>(LM_BATCH_STORAGE_STAT_REQ), batchStorageStatMsgId);
+    EXPECT_EQ(static_cast<int16_t>(LM_BATCH_STORAGE_STAT_REQ), static_cast<int16_t>(LM_BATCH_STORAGE_STAT_RESP));
+    EXPECT_NE(static_cast<int16_t>(LM_BATCH_STORAGE_STAT_REQ), static_cast<int16_t>(ML_PREFETCH_REQ));
+    EXPECT_NE(static_cast<int16_t>(ML_GET_EXTERNAL_CONFIG_REQ), static_cast<int16_t>(ML_EVICT_REQ));
+}
+
 // BatchQueryResponse oversized container guard
 TEST_F(TestProtoMsg, BatchQueryResponse_OversizedContainer)
 {

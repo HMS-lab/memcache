@@ -104,7 +104,7 @@ TEST_F(TestMetaManagerKvEvents, UpdateStateEmitsStored)
     auto metaMng = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U);
     ASSERT_EQ(metaMng->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobList;
-    metaMng->Mount(loc, locInfo, blobList, false);
+    metaMng->Mount(loc, locInfo, blobList);
 
     FakeMetaChangeSink sink;
     MmcMetaChangeCallbacks callbacks;
@@ -138,7 +138,7 @@ TEST_F(TestMetaManagerKvEvents, RemoveEmitsRemoved)
     auto metaMng = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U);
     ASSERT_EQ(metaMng->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobList;
-    metaMng->Mount(loc, locInfo, blobList, false);
+    metaMng->Mount(loc, locInfo, blobList);
 
     FakeMetaChangeSink sink;
     MmcMetaChangeCallbacks callbacks;
@@ -174,7 +174,7 @@ TEST_F(TestMetaManagerKvEvents, NoSinkIsNoop)
     auto metaMng = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U);
     ASSERT_EQ(metaMng->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobList;
-    metaMng->Mount(loc, locInfo, blobList, false);
+    metaMng->Mount(loc, locInfo, blobList);
     // 不调用 SetChangeCallbacks
 
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
@@ -194,7 +194,7 @@ TEST_F(TestMetaManagerKvEvents, RemoveAllEmitsRemovedPerKey)
     auto metaMng = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U);
     ASSERT_EQ(metaMng->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobList;
-    metaMng->Mount(loc, locInfo, blobList, false);
+    metaMng->Mount(loc, locInfo, blobList);
 
     FakeMetaChangeSink sink;
     MmcMetaChangeCallbacks callbacks;

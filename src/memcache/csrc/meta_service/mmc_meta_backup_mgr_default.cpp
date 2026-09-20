@@ -21,8 +21,9 @@ namespace ock {
 namespace mmc {
 
 namespace {
+constexpr int ASYNC_FLUSH_RPC_TIMEOUT_SECOND = 60;
 constexpr std::chrono::seconds kDrainRankTimeout{30};
-}
+} // namespace
 
 std::map<std::string, MmcRef<MMCMetaBackUpMgr>> MMCMetaBackUpMgrFactory::instances_;
 std::mutex MMCMetaBackUpMgrFactory::instanceMutex_;
@@ -148,7 +149,7 @@ void MMCMetaBackUpMgrDefault::SendBackupForRank(uint32_t rank, std::vector<MetaB
 
     Response response;
     TP_TRACE_BEGIN(TP_MMC_META_ASYNC_FLUSH_RPC);
-    Result ret = metaNetServer_->SyncCall(rank, request, response, 60);
+    Result ret = metaNetServer_->SyncCall(rank, request, response, ASYNC_FLUSH_RPC_TIMEOUT_SECOND);
     TP_TRACE_END(TP_MMC_META_ASYNC_FLUSH_RPC, ret);
     for (const auto &lease : leases) {
         releaseReadLease_(lease);
@@ -173,8 +174,11 @@ void MMCMetaBackUpMgrDefault::SendBackupForRank(uint32_t rank, std::vector<MetaB
     std::vector<std::pair<std::string, MmcMemBlobDesc>> flushedBlobs;
     for (size_t i = 0; i < response.keyResults_.size(); ++i) {
         if (request.ops_[i] == META_BACKUP_ADD) {
-            if (isSsdAvailableFunc_ == nullptr || !isSsdAvailableFunc_(rank)) {
-                // 非刷盘模式：ADD 成功仅表示元数据已记录，不构造 SSD 副本
+            // 只有 DRAM ADD 发往可用源 rank 时才会由 LocalService 读取 GVA 并写入 UBSIO；
+            // 其他 ADD 即使返回成功也只是普通元数据备份，不能误报为异步刷盘成功。
+            const bool isFlush = request.blobs_[i].mediaType_ == MEDIA_DRAM && isSsdAvailableFunc_ != nullptr &&
+                                 isSsdAvailableFunc_(rank);
+            if (!isFlush) {
                 if (response.keyResults_[i] != MMC_OK) {
                     MMC_LOG_WARN("backup add failed for key=" << request.keys_[i]
                                                               << ", ret=" << response.keyResults_[i]);

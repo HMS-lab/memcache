@@ -90,14 +90,11 @@ ResourceTracker::ResourceTracker()
     sigaction(SIGINT, &sa, nullptr);  // Ctrl+C
     sigaction(SIGTERM, &sa, nullptr); // kill command
     sigaction(SIGHUP, &sa, nullptr);  // Terminal closed
-
-    // Register exit handler
-    std::atexit(exitHandler);
 }
 
 ResourceTracker::~ResourceTracker()
 {
-    // Cleanup is handled by exitHandler
+    cleanupAllResources();
 }
 
 void ResourceTracker::registerInstance(MmcacheStore *instance)
@@ -143,11 +140,6 @@ void ResourceTracker::signalHandler(int signal)
     sa.sa_flags = 0;
     sigaction(signal, &sa, nullptr);
     raise(signal);
-}
-
-void ResourceTracker::exitHandler()
-{
-    getInstance().cleanupAllResources();
 }
 
 MmcacheStore::MmcacheStore()

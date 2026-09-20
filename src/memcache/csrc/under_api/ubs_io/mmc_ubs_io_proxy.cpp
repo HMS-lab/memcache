@@ -21,6 +21,70 @@
 
 namespace ock {
 namespace mmc {
+namespace {
+// UBSIO KVC 批接口的整体返回码，与逐 key 返回的 BoostIO CResult 属于不同错误域。
+enum class UbsioKvcError : Result {
+    OK = 0,
+    ERROR = 1,
+    INNER_ERROR = 2,
+    INVALID_PARAM = 3,
+    ALLOC_FAILED = 4,
+    TRY_AGAIN = 5,
+    BIO_ERROR = 6,
+    NO_NDS = 7,
+    MAX = 8,
+};
+
+// BatchStat、BatchDelete 等接口中每个 key 返回的 BoostIO CResult。
+enum class UbsioCacheError : Result {
+    OK = 0,
+    PROTECTED = 1,
+    ERROR = 2,
+    INVALID_PARAM = 3,
+    BUSY = 4,
+    NEED_RETRY = 5,
+    NOT_READY = 6,
+    NOT_FOUND = 7,
+    CONFLICT = 8,
+    MISS = 9,
+    NO_SPACE = 10,
+    UNAVAILABLE = 11,
+    EXCEED_QUOTA = 12,
+    PARTITION_FAULT = 13,
+    READ_EXCEED = 14,
+    ALREADY_EXISTS = 15,
+    DISK_FAULT = 16,
+    UNDERFS_FAULT = 17,
+    MAX = 18,
+};
+
+Result NormalizeUbsioItemResult(Result result)
+{
+    // UBSIO 使用正数 CResult，而 MemCache 公开 API 使用稳定的负数错误码。
+    // 只有逐 key 的 NOT_FOUND 表示缓存未命中，其他正数均表示执行失败。
+    const auto error = static_cast<UbsioCacheError>(result);
+    if (error == UbsioCacheError::OK) {
+        return MMC_OK;
+    }
+    return error == UbsioCacheError::NOT_FOUND ? MMC_UNMATCHED_KEY : MMC_ERROR;
+}
+
+Result NormalizeUbsioCallResult(Result result)
+{
+    if (result <= MMC_OK) {
+        return result;
+    }
+    const auto error = static_cast<UbsioKvcError>(result);
+    if (error == UbsioKvcError::INVALID_PARAM) {
+        return MMC_INVALID_PARAM;
+    }
+    if (error == UbsioKvcError::BIO_ERROR) {
+        return MMC_SSD_NOT_AVAILABLE;
+    }
+    return MMC_ERROR;
+}
+} // namespace
+
 std::map<std::string, MmcRef<MmcUbsIoProxy>> MmcUbsIoProxyFactory::instances_;
 std::mutex MmcUbsIoProxyFactory::instanceMutex_;
 
@@ -348,6 +412,38 @@ Result MmcUbsIoProxy::BatchGetLength(const std::vector<std::string> &keys, std::
     int32_t ret = DlUbsioApi::UbsioBatchGetLength(keyPtrs.data(), keysCount, lengths.data(), results.data(), flags);
     TP_TRACE_END(TP_MMC_UBS_IO_BATCH_LENGTH, ret);
     return ret;
+}
+
+Result MmcUbsIoProxy::BatchStat(const std::vector<std::string> &keys, std::vector<uint64_t> &sizes,
+                                std::vector<Result> &results)
+{
+    MMC_ASSERT_LOG_AND_RETURN(started_, "started_ = " << started_, MMC_NOT_INITIALIZED);
+    MMC_ASSERT_LOG_AND_RETURN(!keys.empty(), "keys are empty", MMC_INVALID_PARAM);
+
+    const uint32_t keysCount = static_cast<uint32_t>(keys.size());
+    std::vector<const char *> keyPtrs;
+    keyPtrs.reserve(keysCount);
+    for (const auto &key : keys) {
+        keyPtrs.emplace_back(key.c_str());
+    }
+
+    sizes.assign(keysCount, 0);
+    results.assign(keysCount, MMC_ERROR);
+    constexpr uint32_t flags = 0;
+    std::vector<UbsioKvBatchStat> stats(keysCount);
+    TP_TRACE_BEGIN(TP_MMC_UBS_IO_BATCH_STAT);
+    Result rawRet = DlUbsioApi::UbsioBatchStat(keyPtrs.data(), keysCount, stats.data(), flags);
+    TP_TRACE_END(TP_MMC_UBS_IO_BATCH_STAT, rawRet);
+    Result ret = NormalizeUbsioCallResult(rawRet);
+    if (ret != MMC_OK) {
+        std::fill(results.begin(), results.end(), ret);
+        return ret;
+    }
+    for (size_t index = 0; index < stats.size(); ++index) {
+        sizes[index] = stats[index].size;
+        results[index] = NormalizeUbsioItemResult(stats[index].result);
+    }
+    return MMC_OK;
 }
 } // namespace mmc
 } // namespace ock

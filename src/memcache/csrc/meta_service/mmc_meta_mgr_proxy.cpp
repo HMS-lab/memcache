@@ -245,6 +245,16 @@ Result MmcMetaMgrProxy::Get(const GetRequest &req, AllocResponse &resp)
     MmcMemMetaDesc objMeta;
     MmcBlobFilterPtr filterPtr = MmcMakeRef<MmcBlobFilter>(UINT32_MAX, MEDIA_NONE, NONE);
     Result ret = metaMangerPtr_->Get(req.key_, req.operateId_, filterPtr, objMeta);
+    if (ret == MMC_UNMATCHED_KEY && metaMangerPtr_->IsSsdMetadataSeparated()) {
+        std::vector<MmcMemMetaDesc> rewarmMetas;
+        ret = metaMangerPtr_->GetByRank({req.key_}, req.operateId_, rewarmMetas);
+        if (ret == MMC_OK) {
+            objMeta = std::move(rewarmMetas.front());
+            if (objMeta.numBlobs_ == 0 || objMeta.blobs_.empty()) {
+                ret = MMC_UNMATCHED_KEY;
+            }
+        }
+    }
     if (ret != MMC_OK) {
         IncrementResultCounter(metricManager, RestMetricType::GET, ret, rank);
         MMC_LOG_ERROR("failed to get objMeta for key " << req.key_ << ", ret=" << ret);
@@ -334,8 +344,11 @@ Result MmcMetaMgrProxy::BatchGet(const BatchGetRequest &req, BatchAllocResponse 
 
     std::vector<MmcMemMetaDesc> objMetas;
     TP_TRACE_BEGIN(TP_MMC_META_BATCH_GET_BY_RANK);
-    metaMangerPtr_->GetByRank(req.keys_, req.operateId_, objMetas);
-    TP_TRACE_END(TP_MMC_META_BATCH_GET_BY_RANK, MMC_OK);
+    Result getRet = metaMangerPtr_->GetByRank(req.keys_, req.operateId_, objMetas);
+    TP_TRACE_END(TP_MMC_META_BATCH_GET_BY_RANK, getRet);
+    if (getRet != MMC_OK) {
+        MMC_LOG_WARN("BatchGet GetByRank failed, ret=" << getRet << ", key count=" << keyCount);
+    }
 
     for (size_t i = 0; i < keyCount; ++i) {
         metricManager.IncrementRequestCounter(RestMetricType::GET, rank);
@@ -359,6 +372,25 @@ Result MmcMetaMgrProxy::BatchGet(const BatchGetRequest &req, BatchAllocResponse 
     return MMC_OK;
 }
 
+Result MmcMetaMgrProxy::ExistKey(const IsExistRequest &req, IsExistResponse &resp)
+{
+    MmcMetaMetricManager &metricManager = MmcMetaMetricManager::GetInstance();
+    metricManager.IncrementRequestCounter(RestMetricType::EXIST_KEY, UINT32_MAX);
+    resp.ret_ = metaMangerPtr_->ExistKey(req.key_);
+    if (resp.ret_ == MMC_UNMATCHED_KEY && metaMangerPtr_->IsSsdMetadataSeparated()) {
+        // 分离模式下 Meta miss 可能只是 SSD-only；BatchStat 同时返回存在性和预取所需长度。
+        std::vector<Result> storageResults;
+        std::vector<uint64_t> storageSizes;
+        Result storageRet = metaMangerPtr_->BatchLookupStorage({req.key_}, storageResults, storageSizes, UINT32_MAX);
+        resp.ret_ = storageRet == MMC_OK ? storageResults.front() : storageRet;
+        if (storageRet != MMC_OK) {
+            MMC_LOG_WARN("Storage stat failed for key=" << req.key_ << ", ret=" << storageRet);
+        }
+    }
+    IncrementResultCounter(metricManager, RestMetricType::EXIST_KEY, resp.ret_, UINT32_MAX);
+    return resp.ret_;
+}
+
 Result MmcMetaMgrProxy::BatchExistKey(const BatchIsExistRequest &req, BatchIsExistResponse &resp)
 {
     MmcMetaMetricManager &metricManager = MmcMetaMetricManager::GetInstance();
@@ -368,6 +400,36 @@ Result MmcMetaMgrProxy::BatchExistKey(const BatchIsExistRequest &req, BatchIsExi
     if (ret != MMC_OK) {
         MMC_LOG_ERROR("batch exist failed, ret: " << ret);
     }
+
+    std::vector<size_t> missingIndexes;
+    std::vector<std::string> missingKeys;
+    if (metaMangerPtr_->IsSsdMetadataSeparated()) {
+        missingIndexes.reserve(req.keys_.size());
+        missingKeys.reserve(req.keys_.size());
+        for (size_t i = 0; i < resp.results_.size(); ++i) {
+            if (resp.results_[i] == MMC_UNMATCHED_KEY) {
+                missingIndexes.push_back(i);
+                missingKeys.push_back(req.keys_[i]);
+            }
+        }
+    }
+
+    if (!missingKeys.empty()) {
+        std::vector<Result> storageResults;
+        std::vector<uint64_t> storageSizes;
+        Result storageRet = metaMangerPtr_->BatchLookupStorage(missingKeys, storageResults, storageSizes, UINT32_MAX);
+        if (storageRet != MMC_OK) {
+            MMC_LOG_WARN("Batch storage stat failed, ret=" << storageRet);
+            for (size_t index : missingIndexes) {
+                resp.results_[index] = storageRet;
+            }
+        } else {
+            for (size_t index = 0; index < missingIndexes.size(); ++index) {
+                resp.results_[missingIndexes[index]] = storageResults[index];
+            }
+        }
+    }
+
     for (size_t i = 0; i < resp.results_.size(); ++i) {
         metricManager.IncrementRequestCounter(RestMetricType::EXIST_KEY, UINT32_MAX);
         if (resp.results_[i] != MMC_OK && resp.results_[i] != MMC_UNMATCHED_KEY) {
@@ -386,6 +448,45 @@ Result MmcMetaMgrProxy::BatchPromote(const BatchPromoteRequest &req, BatchPromot
         auto ret = metaMangerPtr_->PromoteKey(req.keys_[i]);
         resp.results_.emplace_back(ret);
     }
+    return MMC_OK;
+}
+
+Result MmcMetaMgrProxy::Query(const QueryRequest &req, QueryResponse &resp)
+{
+    MmcMetaMetricManager &metricManager = MmcMetaMetricManager::GetInstance();
+    metricManager.IncrementRequestCounter(RestMetricType::QUERY, UINT32_MAX);
+    if ((req.flag_ & GET_KEY_INFO_FOR_LAYER_WISE) != 0) {
+        Result prefetchRet = metaMangerPtr_->PrefetchKeys({req.key_});
+        if (prefetchRet != MMC_OK) {
+            MMC_LOG_WARN("Query prefetch failed, key=" << req.key_ << ", ret=" << prefetchRet);
+        }
+    }
+    // 预取结果不影响查询，最终以 Query 返回的 Blob/GVA 和结果为准。
+    Result metaRet = metaMangerPtr_->Query(req.key_, req.operateId_, req.flag_, resp.queryInfo_);
+    IncrementResultCounter(metricManager, RestMetricType::QUERY, metaRet, UINT32_MAX);
+    return metaRet;
+}
+
+Result MmcMetaMgrProxy::BatchQuery(const BatchQueryRequest &req, BatchQueryResponse &resp)
+{
+    MmcMetaMetricManager &metricManager = MmcMetaMetricManager::GetInstance();
+    metricManager.IncrementRequestCounter(RestMetricType::BATCH_QUERY, UINT32_MAX);
+    std::vector<Result> results(req.keys_.size(), MMC_OK);
+    if ((req.flag_ & GET_KEY_INFO_FOR_LAYER_WISE) != 0) {
+        Result prefetchRet = metaMangerPtr_->PrefetchKeys(req.keys_);
+        if (prefetchRet != MMC_OK) {
+            MMC_LOG_WARN("BatchQuery prefetch failed, ret=" << prefetchRet);
+        }
+    }
+    resp.batchQueryInfos_.reserve(req.keys_.size());
+    for (size_t index = 0; index < req.keys_.size(); ++index) {
+        MemObjQueryInfo queryInfo;
+        metricManager.IncrementRequestCounter(RestMetricType::QUERY, UINT32_MAX);
+        results[index] = metaMangerPtr_->Query(req.keys_[index], req.operateId_, req.flag_, queryInfo);
+        resp.batchQueryInfos_.push_back(queryInfo);
+        IncrementResultCounter(metricManager, RestMetricType::QUERY, results[index], UINT32_MAX);
+    }
+    IncrementBatchResultCounter(metricManager, RestMetricType::BATCH_QUERY, results, UINT32_MAX);
     return MMC_OK;
 }
 

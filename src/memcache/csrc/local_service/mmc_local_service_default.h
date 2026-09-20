@@ -22,6 +22,7 @@
 #include "mmc_def.h"
 #include "mmc_thread_pool.h"
 #include "mmc_periodic_task.h"
+#include "mmc_storage_mode.h"
 
 namespace ock {
 namespace mmc {
@@ -58,6 +59,9 @@ public:
     std::vector<Result> BatchCopyBlob(const std::vector<std::string> &keys, const std::vector<MmcMemBlobDesc> &srcBlobs,
                                       const std::vector<MmcMemBlobDesc> &dstBlobs);
 
+    Result BatchStorageStat(const std::vector<std::string> &keys, std::vector<Result> &results,
+                            std::vector<uint64_t> &sizes);
+
     Result BlobDelete(const std::string &key, const MmcMemBlobDesc &blob);
 
     const std::string &Name() const override;
@@ -73,6 +77,8 @@ public:
     inline MetaNetClientPtr GetMetaClient() const;
 
 private:
+    Result GetExternalConfig();
+
     struct BatchIoParams {
         std::vector<std::string> keys;
         std::vector<void *> vas;
@@ -119,6 +125,7 @@ private:
     std::atomic<bool> stopRequested_{false};
     std::string name_;
     mmc_local_service_config_t options_;
+    SsdMetadataMode ssdMetadataMode_{MMC_SSD_METADATA_AGGREGATED};
     std::map<std::string, std::vector<MmcMemBlobDesc>> blobMap_;
     const int32_t blobRebuildSendMaxCount = 10240;
 

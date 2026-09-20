@@ -50,6 +50,7 @@ Result MetaNetClient::Start(const NetEngineOptions &config)
     client->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::ML_REMOVE_REQ, nullptr);
     client->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::ML_BATCH_REMOVE_REQ, nullptr);
     client->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::ML_BM_REGISTER_REQ, nullptr);
+    client->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::ML_GET_EXTERNAL_CONFIG_REQ, nullptr);
     client->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::ML_IS_EXIST_REQ, nullptr);
     client->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::ML_BATCH_IS_EXIST_REQ, nullptr);
     client->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::ML_BM_UNREGISTER_REQ, nullptr);
@@ -69,6 +70,8 @@ Result MetaNetClient::Start(const NetEngineOptions &config)
                                       std::bind(&MetaNetClient::HandleBlobDelete, this, std::placeholders::_1));
     client->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::LM_BATCH_BLOB_COPY_REQ,
                                       std::bind(&MetaNetClient::HandleBatchBlobCopy, this, std::placeholders::_1));
+    client->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::LM_BATCH_STORAGE_STAT_REQ,
+                                      std::bind(&MetaNetClient::HandleBatchStorageStat, this, std::placeholders::_1));
     client->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::LM_REMOVE_ALL_REQ, nullptr);
     client->RegLinkBrokenHandler(std::bind(&MetaNetClient::HandleLinkBroken, this, std::placeholders::_1));
     /* start engine */
@@ -419,5 +422,31 @@ Result MetaNetClient::HandleBatchBlobCopy(const NetContextPtr &context)
     }
     return context->Reply(req.msgId, resp);
 }
+
+Result MetaNetClient::HandleBatchStorageStat(const NetContextPtr &context)
+{
+    BatchStorageStatRequest req;
+    BatchStorageStatResponse resp;
+    context->GetRequest<BatchStorageStatRequest>(req);
+    if (batchStorageStatHandler_ == nullptr) {
+        MMC_LOG_ERROR("batchStorageStatHandler_ is nullptr");
+        resp.results_.assign(req.keys_.size(), MMC_SSD_NOT_AVAILABLE);
+        resp.sizes_.assign(req.keys_.size(), 0);
+        return context->Reply(req.msgId, resp);
+    }
+
+    Result ret = batchStorageStatHandler_(req.keys_, resp.results_, resp.sizes_);
+    if (resp.results_.size() != req.keys_.size() || resp.sizes_.size() != req.keys_.size()) {
+        MMC_LOG_ERROR("batch storage stat response size mismatch, keys="
+                      << req.keys_.size() << ", results=" << resp.results_.size() << ", sizes=" << resp.sizes_.size()
+                      << ", ret=" << ret);
+        resp.results_.assign(req.keys_.size(), MMC_ERROR);
+        resp.sizes_.assign(req.keys_.size(), 0);
+    } else if (ret != MMC_OK) {
+        MMC_LOG_WARN("batch storage stat failed, keyCount=" << req.keys_.size() << ", ret=" << ret);
+    }
+    return context->Reply(req.msgId, resp);
+}
+
 } // namespace mmc
 } // namespace ock

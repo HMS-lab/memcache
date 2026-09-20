@@ -10,15 +10,16 @@
  * See the Mulan PSL v2 for more details.
 */
 
-#include <algorithm>
-#include <array>
 #include <sys/stat.h>
 
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <thread>
 
 #include "smem_bm_api.h"
 #include "mmc_meta_net_client.h"
+#include "mmc_storage_mode.h"
 #include "mmc_msg_client_meta.h"
 #include "mmc_ptracer.h"
 #include "mmc_functions.h"
@@ -32,6 +33,11 @@ constexpr int CLIENT_THREAD_COUNT = 2;
 constexpr size_t kSsdRebuildQueryBatchSize = 1024;
 
 namespace {
+bool IsSsdMetadataSeparated(uint32_t mode)
+{
+    return mode == MMC_SSD_METADATA_SEPARATED;
+}
+
 bool IsEtcdStoreUrl(const char *storeUrl)
 {
     return storeUrl != nullptr && (std::string(storeUrl).find("etcd://") == 0);
@@ -135,6 +141,14 @@ Result MmcLocalServiceDefault::Start(const mmc_local_service_config_t &config)
         }
     }
 
+    Result configRet = GetExternalConfig();
+    if (configRet != MMC_OK) {
+        MMC_LOG_ERROR("Failed to query initialization config from MetaService, ret=" << configRet);
+        DestroyBm();
+        metaNetClient_->Stop();
+        return configRet;
+    }
+
     if (options_.storageEnabled) {
         ubsioEventPool_ = MmcMakeRef<MmcThreadPool>("io_evt_pool", UBSIO_EVENT_POOL_SIZE);
         MMC_ASSERT_LOG_AND_RETURN(ubsioEventPool_ != nullptr, "ubsioEventPool_ is nullptr", MMC_MALLOC_FAILED);
@@ -175,6 +189,9 @@ Result MmcLocalServiceDefault::Start(const mmc_local_service_config_t &config)
         std::bind(&MmcLocalServiceDefault::BlobDelete, this, std::placeholders::_1, std::placeholders::_2),
         std::bind(&MmcLocalServiceDefault::BatchCopyBlob, this, std::placeholders::_1, std::placeholders::_2,
                   std::placeholders::_3));
+    metaNetClient_->RegisterStorageHandler(std::bind(&MmcLocalServiceDefault::BatchStorageStat, this,
+                                                     std::placeholders::_1, std::placeholders::_2,
+                                                     std::placeholders::_3));
 
     metaNetClient_->RegisterDiscoverUrlFunc([this]() -> std::string { return DiscoverMetaServiceUrl(); });
 
@@ -308,6 +325,29 @@ Result MmcLocalServiceDefault::InitBm()
     return ret;
 }
 
+Result MmcLocalServiceDefault::GetExternalConfig()
+{
+    GetExternalConfigRequest request;
+    GetExternalConfigResponse response;
+    Result ret = SyncCallMeta(request, response, TIMEOUT_THIRTY);
+    if (ret != MMC_OK) {
+        MMC_LOG_ERROR("Get external config RPC failed, rank=" << options_.rankId << ", ret=" << ret);
+        return ret;
+    }
+    if (response.ret_ != MMC_OK) {
+        MMC_LOG_ERROR("Get external config failed on MetaService, rank=" << options_.rankId
+                                                                         << ", ret=" << response.ret_);
+        return response.ret_;
+    }
+    if (response.ssdMetadataMode_ > MMC_SSD_METADATA_SEPARATED) {
+        MMC_LOG_ERROR("Invalid SSD metadata mode returned by MetaService: " << response.ssdMetadataMode_);
+        return MMC_INVALID_PARAM;
+    }
+    ssdMetadataMode_ = static_cast<SsdMetadataMode>(response.ssdMetadataMode_);
+    MMC_LOG_TRACE("Resolved SSD metadata mode from MetaService: " << response.ssdMetadataMode_);
+    return MMC_OK;
+}
+
 Result MmcLocalServiceDefault::DestroyBm()
 {
     MMC_RETURN_ERROR(bmProxyPtr_ == nullptr, "bm proxy has not been initialized.");
@@ -332,15 +372,15 @@ Result MmcLocalServiceDefault::DestroyBm()
     return MMC_OK;
 }
 
-static size_t AppendRebuildBlobs(const std::string &key, std::vector<MmcMemBlobDesc> &descs, bool checkSsd,
-                                 bool ssdExists, BmRegisterRequest &request)
+static size_t AppendRebuildBlobs(const std::string &key, std::vector<MmcMemBlobDesc> &descs, bool metadataSeparated,
+                                 bool checkSsd, bool ssdExists, BmRegisterRequest &request)
 {
     bool hasSsdInMap = false;
     size_t removedCount = 0;
     for (auto descIt = descs.begin(); descIt != descs.end();) {
         if (descIt->mediaType_ == MEDIA_SSD) {
             hasSsdInMap = true;
-            if (checkSsd && !ssdExists) {
+            if (metadataSeparated || (checkSsd && !ssdExists)) {
                 descIt = descs.erase(descIt);
                 ++removedCount;
                 continue;
@@ -350,7 +390,7 @@ static size_t AppendRebuildBlobs(const std::string &key, std::vector<MmcMemBlobD
         ++descIt;
     }
 
-    if (!hasSsdInMap && checkSsd && ssdExists && !descs.empty()) {
+    if (!metadataSeparated && !hasSsdInMap && checkSsd && ssdExists && !descs.empty()) {
         MmcMemBlobDesc ssdDesc = descs.front();
         ssdDesc.gva_ = 0;
         ssdDesc.mediaType_ = MEDIA_SSD;
@@ -364,6 +404,8 @@ Result MmcLocalServiceDefault::RegisterBm()
 {
     MMC_RETURN_ERROR(bmProxyPtr_ == nullptr, "bm proxy has not been initialized.");
 
+    // metadata mode 由独立查询接口从 MetaService 获取；BM 注册保持原有 storageEnabled 语义，不参与模式协商。
+    const bool metadataSeparated = options_.storageEnabled && IsSsdMetadataSeparated(ssdMetadataMode_);
     BmRegisterRequest req;
     req.rank_ = options_.rankId;
     req.backendId_ = ResolveBackendId();
@@ -400,7 +442,7 @@ Result MmcLocalServiceDefault::RegisterBm()
             ++batchEnd;
         }
         std::array<bool, kSsdRebuildQueryBatchSize> exists{};
-        if (ubsIoProxyPtr_ != nullptr) {
+        if (ubsIoProxyPtr_ != nullptr && !metadataSeparated) {
             // Query all keys, including DRAM/HBM-only entries that may need an SSD descriptor restored.
             Result ret = ubsIoProxyPtr_->BatchExist(queryKeys, exists.data());
             if (ret != MMC_OK) {
@@ -414,7 +456,8 @@ Result MmcLocalServiceDefault::RegisterBm()
         size_t removedCount = 0;
         for (size_t index = 0; it != batchEnd; ++index) {
             auto &descs = it->second;
-            removedCount += AppendRebuildBlobs(it->first, descs, ubsIoProxyPtr_ != nullptr, exists[index], req);
+            removedCount +=
+                AppendRebuildBlobs(it->first, descs, metadataSeparated, ubsIoProxyPtr_ != nullptr, exists[index], req);
             if (descs.empty()) {
                 it = blobMap_.erase(it);
             } else {
@@ -456,9 +499,13 @@ Result MmcLocalServiceDefault::InitUbsIo(int32_t deviceId, const std::string &co
                               "metaNetClient_ not ready when registering UBS IO callback", MMC_NOT_INITIALIZED);
     ubsIoProxyPtr_ = ubsIoProxy;
 
-    ubsIoProxy->SetMetaEventCallback([this](int type, const std::vector<std::string> &keys) {
-        ubsioEventPool_->Enqueue([this, type, keys]() { HandleUbsIoMetaEvents(type, keys); });
-    });
+    // 只有 aggregated 模式才用 SSD 生命周期事件更新集中式元数据；separated 模式由 UBSIO 管理，
+    // MetaService 本来就不保存 SSD 条目，因此无需更新或删除。
+    if (!IsSsdMetadataSeparated(ssdMetadataMode_)) {
+        ubsIoProxy->SetMetaEventCallback([this](int type, const std::vector<std::string> &keys) {
+            ubsioEventPool_->Enqueue([this, type, keys]() { HandleUbsIoMetaEvents(type, keys); });
+        });
+    }
 
     auto ret = ubsIoProxy->InitUbsIo(deviceId, confPath);
     if (ret != MMC_OK) {
@@ -537,6 +584,10 @@ std::vector<size_t> MmcLocalServiceDefault::ProcessBackupMetadata(const std::vec
     std::lock_guard<std::mutex> guard(blobMutex_);
     size_t unexpectedOps = 0;
     for (size_t i = 0; i < length; i++) {
+        if (IsSsdMetadataSeparated(ssdMetadataMode_) && blobs[i].mediaType_ == MEDIA_SSD) {
+            keyResults[i] = MMC_OK;
+            continue;
+        }
         if (ops[i] == META_BACKUP_ADD) {
             auto &descs = blobMap_[keys[i]];
             if (!AddDesc(descs, blobs[i])) {
@@ -603,6 +654,11 @@ size_t MmcLocalServiceDefault::ExecuteFlushBatch(BatchIoParams &params, const st
     size_t successCnt = 0;
     for (size_t i = 0; i < params.keys.size(); ++i) {
         if (batchRet == MMC_OK && batchResults[i] == 0) {
+            if (IsSsdMetadataSeparated(ssdMetadataMode_)) {
+                keyResults[params.validIdx[i]] = MMC_OK;
+                ++successCnt;
+                continue;
+            }
             MmcMemBlobDesc ssdDesc = blobs[params.validIdx[i]];
             ssdDesc.mediaType_ = MEDIA_SSD;
             ssdDesc.gva_ = 0;
@@ -753,6 +809,39 @@ std::vector<Result> MmcLocalServiceDefault::BatchCopyBlob(const std::vector<std:
     ExecuteBatchIo(params, srcIsSsd, results);
 
     return results;
+}
+
+Result MmcLocalServiceDefault::BatchStorageStat(const std::vector<std::string> &keys, std::vector<Result> &results,
+                                                std::vector<uint64_t> &sizes)
+{
+    results.assign(keys.size(), MMC_ERROR);
+    sizes.assign(keys.size(), 0);
+    if (keys.empty()) {
+        return MMC_OK;
+    }
+
+    if (!options_.storageEnabled || ubsIoProxyPtr_ == nullptr || !ubsIoProxyPtr_->IsReady()) {
+        MMC_LOG_ERROR("SSD storage is unavailable for batch stat, rank=" << options_.rankId
+                                                                         << ", keyCount=" << keys.size());
+        std::fill(results.begin(), results.end(), MMC_SSD_NOT_AVAILABLE);
+        return MMC_SSD_NOT_AVAILABLE;
+    }
+
+    TP_TRACE_BEGIN(TP_MMC_LOCAL_UBS_IO_BATCH_STAT);
+    Result ret = ubsIoProxyPtr_->BatchStat(keys, sizes, results);
+    TP_TRACE_END(TP_MMC_LOCAL_UBS_IO_BATCH_STAT, ret);
+    if (sizes.size() != keys.size() || results.size() != keys.size()) {
+        MMC_LOG_ERROR("UBSIO batch stat response size mismatch, keys=" << keys.size() << ", sizes=" << sizes.size()
+                                                                       << ", results=" << results.size());
+        results.assign(keys.size(), MMC_ERROR);
+        sizes.assign(keys.size(), 0);
+        return MMC_ERROR;
+    }
+    if (ret != MMC_OK) {
+        results.assign(keys.size(), ret);
+        return ret;
+    }
+    return MMC_OK;
 }
 
 void MmcLocalServiceDefault::CollectBatchIoParams(const std::vector<std::string> &keys,

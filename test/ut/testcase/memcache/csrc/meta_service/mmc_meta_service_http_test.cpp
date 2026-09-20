@@ -663,6 +663,35 @@ TEST_F(MmcMetaServiceHttpTest, ProxyDuplicateAllocCountersTrackFailures)
     EXPECT_EQ(afterSnapshot.allocFailureCount, beforeSnapshot.allocFailureCount + requestDelta);
 }
 
+TEST_F(MmcMetaServiceHttpTest, AllocAndBatchAllocDoNotRequireSeparatedStorageLookup)
+{
+    const std::string allocKey = "http-pure-alloc-key";
+    const std::string batchAllocKey = "http-pure-batch-alloc-key";
+    // Fixture 已在 HBM 中预分配一个 32 KiB blob；这里改用空闲的 DRAM，避免两次新增分配耗尽 64 KiB HBM。
+    const AllocOptions options(SIZE_32K, kHttpExpectedBlobCount, MEDIA_DRAM, {kHttpRankId},
+                               ALLOC_FLAGS_GVA_MALLOC_MASK);
+    metaManager_->SetSsdMetadataMode(MMC_SSD_METADATA_SEPARATED);
+
+    AllocRequest allocRequest(allocKey, options, GenerateOperateId(kHttpRankId));
+    AllocResponse allocResponse;
+    ASSERT_EQ(metaMgrProxy_->Alloc(allocRequest, allocResponse), MMC_OK);
+    ASSERT_EQ(allocResponse.blobs_.size(), kHttpExpectedBlobCountSize);
+    EXPECT_EQ(allocResponse.blobs_.front().size_, SIZE_32K);
+
+    BatchAllocRequest batchAllocRequest({batchAllocKey}, {options}, ALLOC_FLAGS_GVA_MALLOC_MASK,
+                                        GenerateOperateId(kHttpRankId));
+    BatchAllocResponse batchAllocResponse;
+    ASSERT_EQ(metaMgrProxy_->BatchAlloc(batchAllocRequest, batchAllocResponse), MMC_OK);
+    ASSERT_EQ(batchAllocResponse.results_.size(), kHttpExpectedBlobCountSize);
+    EXPECT_EQ(batchAllocResponse.results_.front(), MMC_OK);
+    ASSERT_EQ(batchAllocResponse.blobs_.size(), kHttpExpectedBlobCountSize);
+    ASSERT_EQ(batchAllocResponse.blobs_.front().size(), kHttpExpectedBlobCountSize);
+    EXPECT_EQ(batchAllocResponse.blobs_.front().front().size_, SIZE_32K);
+
+    EXPECT_EQ(metaManager_->Remove(allocKey), MMC_OK);
+    EXPECT_EQ(metaManager_->Remove(batchAllocKey), MMC_OK);
+}
+
 TEST_F(MmcMetaServiceHttpTest, ProxyGetCountersTrackAttempts)
 {
     constexpr uint64_t getRequestDelta = 4;

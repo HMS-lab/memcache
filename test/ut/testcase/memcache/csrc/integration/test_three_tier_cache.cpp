@@ -67,7 +67,7 @@ TEST_F(TestThreeTierCache, PutGet_HbmHit)
     MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U);
     ASSERT_EQ(mgr->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    mgr->Mount(hbmLoc, hbmInfo, blobMap, false);
+    mgr->Mount(hbmLoc, hbmInfo, blobMap);
 
     std::string key = "hbm_key";
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_HBM, {0}, 0};
@@ -95,8 +95,8 @@ TEST_F(TestThreeTierCache, EvictDram_CascadingEviction)
     MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 50U);
     ASSERT_EQ(mgr->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    mgr->Mount(dramLoc, dramInfo, blobMap, false);
-    mgr->Mount(ssdLoc, ssdInfo, blobMap, false);
+    mgr->Mount(dramLoc, dramInfo, blobMap);
+    mgr->Mount(ssdLoc, ssdInfo, blobMap);
 
     std::vector<std::string> keys;
     int keySize = 6;
@@ -138,8 +138,8 @@ TEST_F(TestThreeTierCache, MassivePut_MultiLevelEviction)
     MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 50U);
     ASSERT_EQ(mgr->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    mgr->Mount(dramLoc, dramInfo, blobMap, false);
-    mgr->Mount(ssdLoc, ssdInfo, blobMap, false);
+    mgr->Mount(dramLoc, dramInfo, blobMap);
+    mgr->Mount(ssdLoc, ssdInfo, blobMap);
 
     // Allocate many keys on DRAM
     std::vector<std::string> keys;
@@ -184,7 +184,7 @@ TEST_F(TestThreeTierCache, EmptyCluster_GetReturnsUnmatchedKey)
     MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U);
     ASSERT_EQ(mgr->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    mgr->Mount(dramLoc, dramInfo, blobMap, false);
+    mgr->Mount(dramLoc, dramInfo, blobMap);
 
     MmcMemMetaDesc result;
     EXPECT_EQ(mgr->Get("nonexistent", 1, nullptr, result), MMC_UNMATCHED_KEY);
@@ -202,7 +202,7 @@ TEST_F(TestThreeTierCache, RepeatedPut_OverwritesOldData)
     MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U);
     ASSERT_EQ(mgr->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    mgr->Mount(dramLoc, dramInfo, blobMap, false);
+    mgr->Mount(dramLoc, dramInfo, blobMap);
 
     std::string key = "overwrite_key";
 
@@ -251,8 +251,8 @@ TEST_F(TestThreeTierCache, SsdWriteFailure_EvictionFallsBackToRemove)
     MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 50U);
     ASSERT_EQ(mgr->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    mgr->Mount(dramLoc, dramInfo, blobMap, false);
-    mgr->Mount(ssdLoc, ssdInfo, blobMap, false);
+    mgr->Mount(dramLoc, dramInfo, blobMap);
+    mgr->Mount(ssdLoc, ssdInfo, blobMap);
 
     std::vector<std::string> keys;
     int keySize = 6;
@@ -291,7 +291,7 @@ TEST_F(TestThreeTierCache, RebuildMeta_SegmentInfoConsistent)
     MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U);
     ASSERT_EQ(mgr->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    mgr->Mount(dramLoc, dramInfo, blobMap, false);
+    mgr->Mount(dramLoc, dramInfo, blobMap);
 
     std::string key = "rebuild_key";
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
@@ -318,8 +318,8 @@ TEST_F(TestThreeTierCache, SsdFull_DramEviction_HandlesGracefully)
     MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 50U);
     ASSERT_EQ(mgr->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    mgr->Mount(dramLoc, dramInfo, blobMap, false);
-    mgr->Mount(ssdLoc, ssdInfo, blobMap, false);
+    mgr->Mount(dramLoc, dramInfo, blobMap);
+    mgr->Mount(ssdLoc, ssdInfo, blobMap);
 
     std::vector<std::string> keys;
     for (uint i = 0; i < 8U; i++) {
@@ -361,8 +361,8 @@ TEST_F(TestThreeTierCache, NoMetaNetServer_RpcFailsGracefully)
     MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U);
     ASSERT_EQ(mgr->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    mgr->Mount(dramLoc, dramInfo, blobMap, false);
-    mgr->Mount(ssdLoc, ssdInfo, blobMap, false);
+    mgr->Mount(dramLoc, dramInfo, blobMap);
+    mgr->Mount(ssdLoc, ssdInfo, blobMap);
 
     // DRAM operations work locally (no RPC needed)
     std::string key = "nometa";
@@ -392,7 +392,7 @@ TEST_F(TestThreeTierCache, ConcurrentGet_DuringWrite)
     MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U);
     ASSERT_EQ(mgr->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    mgr->Mount(dramLoc, dramInfo, blobMap, false);
+    mgr->Mount(dramLoc, dramInfo, blobMap);
 
     std::string key = "conc_key";
 
@@ -439,8 +439,8 @@ TEST_F(TestThreeTierCache, GetLatency_Benchmark)
     MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U);
     ASSERT_EQ(mgr->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    mgr->Mount(dramLoc, dramInfo, blobMap, false);
-    mgr->Mount(ssdLoc, ssdInfo, blobMap, false);
+    mgr->Mount(dramLoc, dramInfo, blobMap);
+    mgr->Mount(ssdLoc, ssdInfo, blobMap);
 
     std::string key = "perf_get";
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
@@ -474,8 +474,8 @@ TEST_F(TestThreeTierCache, Eviction_Throughput)
     MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 50U);
     ASSERT_EQ(mgr->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    mgr->Mount(dramLoc, dramInfo, blobMap, false);
-    mgr->Mount(ssdLoc, ssdInfo, blobMap, false);
+    mgr->Mount(dramLoc, dramInfo, blobMap);
+    mgr->Mount(ssdLoc, ssdInfo, blobMap);
 
     const int numKeys = 12;
     std::vector<std::string> keys;
@@ -525,9 +525,9 @@ TEST_F(TestThreeTierCache, ThreeTierFullPath_LatencyRegression)
     MmcRef<MmcMetaManager> mgr = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U);
     ASSERT_EQ(mgr->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    mgr->Mount(hbmLoc, hbmInfo, blobMap, false);
-    mgr->Mount(dramLoc, dramInfo, blobMap, false);
-    mgr->Mount(ssdLoc, ssdInfo, blobMap, false);
+    mgr->Mount(hbmLoc, hbmInfo, blobMap);
+    mgr->Mount(dramLoc, dramInfo, blobMap);
+    mgr->Mount(ssdLoc, ssdInfo, blobMap);
 
     std::vector<long> getAllocLat;
     std::vector<long> getDramLat;

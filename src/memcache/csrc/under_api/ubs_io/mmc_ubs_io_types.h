@@ -18,6 +18,19 @@
 constexpr uint32_t UBSIO_RESOURCE_DISK_PATH_MAX_SIZE = 256;
 constexpr uint32_t UBSIO_RESOURCE_MAX_DISK_NUM = 16;
 
+#ifndef UBSIO_KV_MAX_KEY_SIZE
+constexpr uint32_t UBSIO_KV_MAX_KEY_SIZE = 256;
+#endif
+
+#ifndef UBSIO_KV_BATCH_STAT_DEFINED
+#define UBSIO_KV_BATCH_STAT_DEFINED
+typedef struct {
+    char key[UBSIO_KV_MAX_KEY_SIZE];
+    uint32_t size;
+    int32_t result;
+} UbsioKvBatchStat;
+#endif
+
 typedef struct {
     uint16_t status;
     char path[UBSIO_RESOURCE_DISK_PATH_MAX_SIZE];

@@ -40,6 +40,8 @@ using ClientBlobDeleteHandler = std::function<int32_t(const std::string &key, co
 using ClientBatchBlobCopyHandler =
     std::function<std::vector<Result>(const std::vector<std::string> &keys, const std::vector<MmcMemBlobDesc> &srcBlobs,
                                       const std::vector<MmcMemBlobDesc> &dstBlobs)>;
+using ClientBatchStorageStatHandler = std::function<Result(const std::vector<std::string> &keys,
+                                                           std::vector<Result> &results, std::vector<uint64_t> &sizes)>;
 using UrlResolver = std::function<bool(const std::string &url, std::string &ip, uint16_t &port)>;
 using DiscoverUrlFunc = std::function<std::string()>;
 class MetaNetClient : public MmcReferable {
@@ -206,6 +208,11 @@ public:
         batchBlobCopyHandler_ = batchBlobCopyHandler;
     }
 
+    void RegisterStorageHandler(const ClientBatchStorageStatHandler &batchStorageStatHandler)
+    {
+        batchStorageStatHandler_ = batchStorageStatHandler;
+    }
+
     void SetBackupPool(const MmcThreadPoolPtr &pool)
     {
         backupPool_ = pool;
@@ -223,6 +230,7 @@ private:
     Result HandleBlobCopy(const NetContextPtr &context);
     Result HandleBlobDelete(const NetContextPtr &context);
     Result HandleBatchBlobCopy(const NetContextPtr &context);
+    Result HandleBatchStorageStat(const NetContextPtr &context);
     Result ResolveAndConnect(bool isForce);
 
 private:
@@ -238,6 +246,7 @@ private:
     ClientBlobCopyHandler blobCopyHandler_ = nullptr;
     ClientBlobDeleteHandler blobDeleteHandler_ = nullptr;
     ClientBatchBlobCopyHandler batchBlobCopyHandler_ = nullptr;
+    ClientBatchStorageStatHandler batchStorageStatHandler_ = nullptr;
     MmcThreadPoolPtr backupPool_;
     DiscoverUrlFunc discoverUrlFunc_;
     std::string serverUrl_;

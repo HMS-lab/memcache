@@ -37,6 +37,7 @@ using ubsio_batch_get_hbmFunc = int32_t (*)(const char **, uint32_t, void ***, s
 using ubsio_batch_existFunc = int32_t (*)(const char **, uint32_t, bool *, uint32_t);
 using ubsio_batch_deleteFunc = int32_t (*)(const char **, uint32_t, int32_t *, uint32_t);
 using ubsio_batch_get_lengthFunc = int32_t (*)(const char **, uint32_t, size_t *, int32_t *, uint32_t);
+using UbsioBatchStatFunc = int32_t (*)(const char **, uint32_t, UbsioKvBatchStat *, uint32_t);
 using ubsio_batch_free_addressFunc = int32_t (*)(void **, uint32_t);
 using ubsio_get_resource_infoFunc = int32_t (*)(UbsioResourceInfo *);
 
@@ -156,6 +157,14 @@ public:
         return pUbsioBatchGetLength(keys, keys_count, lengths, results, flags);
     }
 
+    static inline Result UbsioBatchStat(const char **keys, uint32_t keysCount, UbsioKvBatchStat *stats, uint32_t flags)
+    {
+        if (pUbsioBatchStat == nullptr) {
+            return MMC_NOT_INITIALIZED;
+        }
+        return pUbsioBatchStat(keys, keysCount, stats, flags);
+    }
+
     static inline Result UbsioBatchFreeAddress(void **bufs, uint32_t keys_count)
     {
         if (pUbsioBatchFreeAddress == nullptr) {
@@ -199,6 +208,7 @@ private:
     static ubsio_batch_existFunc pUbsioBatchExist;
     static ubsio_batch_deleteFunc pUbsioBatchDelete;
     static ubsio_batch_get_lengthFunc pUbsioBatchGetLength;
+    static UbsioBatchStatFunc pUbsioBatchStat;
     static ubsio_batch_free_addressFunc pUbsioBatchFreeAddress;
     static ubsio_register_meta_event_callbackFunc pUbsioRegisterMetaEventCallback;
     static ubsio_kv_cache_exitFunc pUbsioKvCacheExit;

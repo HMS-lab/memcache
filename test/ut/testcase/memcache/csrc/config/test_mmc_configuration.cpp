@@ -539,6 +539,34 @@ TEST_F(TestMmcConfiguration, DramBestEffortEnabledTest)
     ASSERT_NE(localServiceConfig.flags & SMEM_BM_FLAG_DRAM_BEST_EFFORT, 0U);
 }
 
+TEST_F(TestMmcConfiguration, MetaServiceSsdMetadataModeDefaultsToAggregated)
+{
+    MetaServiceConfig metaConfig;
+    metaConfig.LoadDefault();
+    mmc_meta_service_config_t config{};
+    metaConfig.GetMetaServiceConfig(config);
+    EXPECT_EQ(config.ssdMetadataMode, MMC_SSD_METADATA_AGGREGATED);
+}
+
+TEST_F(TestMmcConfiguration, MetaServiceSsdMetadataModeParsesSeparated)
+{
+    MetaServiceConfig metaConfig;
+    metaConfig.LoadDefault();
+    metaConfig.Set(ConfConstant::OCK_MMC_META_SERVICE_STORAGE_METADATA_MODE.first, std::string("SePaRaTeD"));
+    EXPECT_TRUE(metaConfig.ValidateConf().empty());
+    mmc_meta_service_config_t config{};
+    metaConfig.GetMetaServiceConfig(config);
+    EXPECT_EQ(config.ssdMetadataMode, MMC_SSD_METADATA_SEPARATED);
+}
+
+TEST_F(TestMmcConfiguration, MetaServiceSsdMetadataModeRejectsInvalidValue)
+{
+    MetaServiceConfig metaConfig;
+    metaConfig.LoadDefault();
+    metaConfig.Set(ConfConstant::OCK_MMC_META_SERVICE_STORAGE_METADATA_MODE.first, std::string("invalid"));
+    EXPECT_FALSE(metaConfig.ValidateConf().empty());
+}
+
 TEST_F(TestMmcConfiguration, LogOutputTargetEnumConversionTest)
 {
     // Test string-to-enum conversion for log_output_target config

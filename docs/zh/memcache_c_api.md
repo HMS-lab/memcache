@@ -714,6 +714,7 @@ int32_t mmc_set_log_level(int level);
 - `accTlsConfig`：元数据服务TLS配置。
 - `configStoreTlsConfig`：config store的TLS配置。
 - `metricsTlsConfig`：metrics HTTP 服务的 mTLS 配置。
+- `ssdMetadataMode`：SSD元数据模式；`0`表示由MetaService统一管理，`1`表示由存储后端管理。
 
 ### mmc_local_service_config_t
 

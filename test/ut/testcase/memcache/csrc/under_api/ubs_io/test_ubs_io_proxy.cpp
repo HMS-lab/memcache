@@ -244,3 +244,23 @@ TEST_F(TestUbsIoProxy, BatchGetLength)
         ASSERT_EQ(lengths[i], values[i].size());
     }
 }
+
+TEST_F(TestUbsIoProxy, BatchStatReturnsSizesAndPerKeyResults)
+{
+    const std::vector<std::string> keys = {"batch_stat_present", "batch_stat_missing"};
+    std::string value = "batch_stat_value";
+    result_ = proxy_->Put(keys.front(), value.data(), value.size());
+    ASSERT_EQ(result_, MMC_OK);
+
+    std::vector<uint64_t> sizes;
+    std::vector<Result> results;
+    result_ = proxy_->BatchStat(keys, sizes, results);
+
+    ASSERT_EQ(result_, MMC_OK);
+    ASSERT_EQ(sizes.size(), keys.size());
+    ASSERT_EQ(results.size(), keys.size());
+    EXPECT_EQ(results.front(), MMC_OK);
+    EXPECT_EQ(sizes.front(), value.size());
+    EXPECT_EQ(results.back(), MMC_UNMATCHED_KEY);
+    EXPECT_EQ(sizes.back(), 0U);
+}

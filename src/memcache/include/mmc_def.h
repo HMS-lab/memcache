@@ -105,6 +105,8 @@ typedef struct {
     uint32_t lruType;
     /* Used only when lruType is MMC_META_LRU_TYPE_SHARDED_LRU. Must be a power of two in [1, 1024]. */
     uint32_t lruShardCount;
+    // SSD 元数据模式属于 MetaService 启动配置；零值保持原有 aggregated 行为。
+    uint32_t ssdMetadataMode; // 0: aggregated; 1: separated
 } mmc_meta_service_config_t;
 
 typedef struct {

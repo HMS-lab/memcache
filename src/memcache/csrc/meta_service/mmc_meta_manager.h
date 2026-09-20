@@ -17,12 +17,13 @@
 #include <functional>
 #include <list>
 #include <mutex>
-#include <atomic>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <utility>
 
 #include "mmc_global_allocator.h"
+#include "mmc_storage_mode.h"
 #include "mmc_mem_obj_meta.h"
 #include "mmc_meta_container.h"
 #include "mmc_meta_backup_mgr.h"
@@ -219,12 +220,15 @@ public:
                  MmcMemMetaDesc &objMeta);
 
     /**
-     * @brief Batch get with rewarm grouped by SSD rank
+     * @brief Batch get with Meta classification and rewarm grouped by execution rank
      * @param keys         [in] keys of the meta objects
      * @param operateId    [in] operate id
      * @param objMetas     [out] meta descriptors per key
+     * @param sizes        [in] optional sizes already returned by storage stat
+     * @param attachReadLease [in] whether to hold a DRAM read lease for the caller
      */
-    Result GetByRank(const std::vector<std::string> &keys, uint64_t operateId, std::vector<MmcMemMetaDesc> &objMetas);
+    Result GetByRank(const std::vector<std::string> &keys, uint64_t operateId, std::vector<MmcMemMetaDesc> &objMetas,
+                     const std::vector<uint64_t> &sizes = {}, bool attachReadLease = true);
 
     /**
      * @brief Update the state
@@ -251,8 +255,7 @@ public:
      * @param blobList          [in] if not empty, the allocator will be rebuild from blobList
      */
     Result Mount(const MmcLocation &loc, const MmcLocalMemlInitInfo &localMemInitInfo,
-                 std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList, bool storageEnabled,
-                 bool enableMaxValueMode = false);
+                 std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList, bool enableMaxValueMode = false);
 
     Result Mount(const std::vector<MmcLocation> &locs, const std::vector<MmcLocalMemlInitInfo> &localMemInitInfos,
                  std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList, bool storageEnabled,
@@ -275,8 +278,7 @@ public:
     nlohmann::json GetAllSegmentInfo() const;
 
     /**
-     * @brief Prefetch keys from src media to dst media.
-     *        Currently only supports SSD to DRAM, other combos are not supported yet.
+     * @brief Prefetch keys from SSD to DRAM.
      * @param keys          [in] keys of the meta objects to be prefetched
      * @param srcMedia      [in] source media type, default MEDIA_SSD (reserved)
      * @param dstMedia      [in] destination media type, default MEDIA_DRAM (reserved)
@@ -286,15 +288,14 @@ public:
                         MediaType dstMedia = MediaType::MEDIA_DRAM, uint32_t flags = 0);
 
     /**
-    * @brief Asynchronously prefetch keys from lower tier to upper tier, grouped by rank.
-    *        Unlike PrefetchKeys (which waits for rewarm completion), it only submits the
-    *        rewarm tasks to the rewarm pool in background and returns immediately.
-    * @param keys          [in] keys of the meta objects to be prefetched
-    */
-    Result PrefetchKeysAsync(const std::vector<std::string> &keys);
+     * @brief Prefetch keys from SSD to DRAM.
+     * @param keys             [in] keys to prefetch
+     * @param sizes            [in] storage value sizes aligned with keys
+     */
+    Result AsyncPrefetchKeys(const std::vector<std::string> &keys, const std::vector<uint64_t> &sizes = {});
 
     /**
-    * @brief Prefetch a single key from SSD to DRAM.
+     * @brief Prefetch a single key from SSD to DRAM.
      * @param key           [in] key of the meta object to be prefetched
      */
     Result PrefetchKey(const std::string &key)
@@ -342,7 +343,6 @@ public:
      * @brief Rewarm blob from SSD to DRAM (P5: SSD→DRAM回温)
      * @param key           [in] key of the meta object
      * @param objMeta       [in] meta object (already looked up, lock held)
-     * @param guard         [in/out] lock on objMeta, may be unlocked/relocked for RPC
      */
     Result RewarmBlob(const std::string &key, const MmcMemObjMetaPtr &objMeta, std::unique_lock<std::mutex> &guard,
                       const MmcMemBlobDesc &srcDesc, MediaType dstMediaType, MmcMemBlobPtr &dstBlob);
@@ -350,8 +350,6 @@ public:
     Result RewarmAllocBlob(const std::string &key, const MmcMemBlobDesc &srcDesc, MediaType dstMediaType,
                            const MmcMemObjMetaPtr &objMeta, MmcMemBlobPtr &outBlob, MmcMemBlobDesc &outDesc);
     void RewarmFinalize(const std::string &key, const MmcMemBlobPtr &blob, MediaType dstMediaType, uint32_t srcRank);
-
-    void TriggerPrefetch(const std::string &key, const MmcMemObjMetaPtr &objMeta, const MmcMemBlobPtr &ssdBlob);
 
     /**
       * @brief Get blob query info with key
@@ -467,6 +465,50 @@ public:
         return !ssdEnabledRanks_.empty();
     }
 
+    /**
+     * @brief 设置 SSD 元数据管理模式
+     * @param mode             [in] 初始化时确定的元数据管理模式
+     */
+    void SetSsdMetadataMode(SsdMetadataMode mode)
+    {
+        ssdMetadataMode_ = mode;
+    }
+
+    /**
+     * @brief 判断是否启用 SSD 元数据分离模式
+     */
+    bool IsSsdMetadataSeparated() const
+    {
+        return ssdMetadataMode_ == MMC_SSD_METADATA_SEPARATED;
+    }
+
+    /**
+     * @brief 优先选择指定存储 rank，否则从启用存储的 rank 中随机选择
+     * @param preferredRank    [in] 优先选择的 rank，UINT32_MAX 表示不指定
+     * @param storageRank      [out] 选中的存储 rank
+     */
+    Result GetRandomStorageRank(uint32_t preferredRank, uint32_t &storageRank) const noexcept;
+
+    /**
+     * @brief 通过 RPC 批量查询存储 key 的存在性和大小
+     * @param keys             [in] 待查询的 key
+     * @param results          [out] 每个 key 的查询结果
+     * @param sizes            [out] 每个 key 的存储 value size
+     * @param requestRank      [in] 请求来源 rank，用于优先选择存储节点
+     */
+    Result BatchStorageStatRpc(const std::vector<std::string> &keys, std::vector<Result> &results,
+                               std::vector<uint64_t> &sizes, uint32_t requestRank);
+
+    /**
+     * @brief 同步查询存储，按预取策略异步回温命中的 key
+     * @param keys             [in] 待查询的 key
+     * @param results          [out] 每个 key 的查询结果，不等待回温完成
+     * @param sizes            [out] 每个 key 的存储 value size
+     * @param requestRank      [in] 请求来源 rank，用于优先选择存储节点
+     */
+    Result BatchLookupStorage(const std::vector<std::string> &keys, std::vector<Result> &results,
+                              std::vector<uint64_t> &sizes, uint32_t requestRank);
+
 private:
     Result ExistKeyCore(const std::string &key, MmcMemObjMetaPtr &memObj, MmcMemBlobPtr &upperBlob,
                         MmcMemBlobPtr &lowerBlob);
@@ -562,6 +604,33 @@ private:
         MmcMemBlobPtr pendingBlob;
     };
 
+    struct GetByRankContext {
+        const std::vector<std::string> &keys;
+        std::vector<MmcMemMetaDesc> &objMetas;
+        uint32_t opRankId;
+        uint32_t opSeq;
+        std::map<uint32_t, std::vector<RewarmEntry>> rankGroups; // 按执行 rank 分组的回温任务。
+        std::vector<PendingRewarmWait> pendingWaitList;          // 等待其他请求完成回温的 key。
+        std::vector<DeferredLockEntry> deferredLockList;         // 待统一申请读租约的 DRAM 命中项。
+
+        // 以下字段仅用于 SSD 元数据分离模式下的存储查询和 SSD-only key 回温。
+        const std::vector<uint64_t> &sizes; // 已查询的 value size；为空时查询 SSD。
+        std::vector<size_t> missingIndexes; // Meta 缺失 key 的原始下标。
+
+        /**
+         * @brief 初始化批量查询上下文，并从操作标识解析 rank 和序列号
+         * @param keyList          [in] 原始请求 key
+         * @param id               [in] 操作标识
+         * @param metas            [out] 每个 key 的 Blob 元数据
+         * @param storageSizes     [in] 可选的存储 value size
+         */
+        GetByRankContext(const std::vector<std::string> &keyList, uint64_t id, std::vector<MmcMemMetaDesc> &metas,
+                         const std::vector<uint64_t> &storageSizes)
+            : keys(keyList), objMetas(metas), opRankId(GetRankIdByOperateId(id)), opSeq(GetSequenceByOperateId(id)),
+              sizes(storageSizes)
+        {}
+    };
+
     struct BatchRpcData {
         std::vector<std::string> keys;
         std::vector<MmcMemBlobDesc> srcBlobs;
@@ -576,11 +645,33 @@ private:
         MediaType dstMedia = MEDIA_NONE;
     };
 
-    void ClassifyAndGroupKeys(const std::vector<std::string> &keys, uint32_t opRankId, uint32_t opSeq,
-                              std::vector<MmcMemMetaDesc> &objMetas,
-                              std::map<uint32_t, std::vector<RewarmEntry>> &rankGroups,
-                              std::vector<PendingRewarmWait> &pendingWaitList,
-                              std::vector<DeferredLockEntry> &deferredLockList);
+    /**
+     * @brief 为 SSD-only key 准备目标 DRAM Blob，并加入对应 rank 的回温分组
+     * @param index            [in] key 在原始请求中的下标
+     * @param storageSize      [in] 存储 value size
+     * @param context          [in/out] 批量查询结果和回温分组
+     */
+    void PrepareBatchRewarmBlob(size_t index, uint64_t storageSize, GetByRankContext &context);
+
+    /**
+     * @brief 将单个 Meta key 分类为可读、等待写入或需要回温，并归入对应分组
+     * @param index            [in] key 在原始请求中的下标
+     * @param memObj           [in] 已查询到的 Meta 对象
+     * @param context          [in/out] 批量查询结果和回温分组
+     */
+    void ClassifyAndGroupMetaKey(size_t index, const MmcMemObjMetaPtr &memObj, GetByRankContext &context);
+
+    /**
+     * @brief 批量查询并分类 Meta key，记录需要继续查询存储的缺失项
+     * @param context          [in/out] 请求 key、查询结果和分类分组
+     */
+    void ClassifyAndGroupMetaKeys(GetByRankContext &context);
+
+    /**
+     * @brief 分离模式下聚合 Meta 缺失项，获取存储大小并准备回温 Blob
+     * @param context          [in/out] Meta 缺失项、存储大小和回温分组
+     */
+    Result ClassifyStorageMisses(GetByRankContext &context);
 
     void RewarmRankGroup(uint32_t rank, std::vector<RewarmEntry> &group, const std::vector<std::string> &keys,
                          uint32_t opRankId, uint32_t opSeq, std::vector<MmcMemMetaDesc> &objMetas,
@@ -589,8 +680,7 @@ private:
     void AttachReadLocks(const std::vector<std::string> &keys, uint32_t opRankId, uint32_t opSeq,
                          std::vector<MmcMemMetaDesc> &objMetas, std::vector<DeferredLockEntry> &deferredLockList);
 
-    void PendingWaitAndFill(const std::vector<std::string> &keys, uint32_t opRankId, uint32_t opSeq,
-                            std::vector<MmcMemMetaDesc> &objMetas, PendingRewarmWait &w,
+    void PendingWaitAndFill(GetByRankContext &context, PendingRewarmWait &w, bool attachReadLease,
                             const std::chrono::steady_clock::time_point &deadline);
 
     Result SendBatchRpc(uint32_t rank, const std::vector<std::string> &keys, const std::vector<RewarmEntry> &group,
@@ -626,6 +716,8 @@ private:
     MmcMetaChangeCallbacks changeCallbacks_;
     MmcThreadPoolPtr rewarmThreadPool_;
     MmcThreadPoolPtr removeThreadPool_;
+    // 由 MetaService 冷启动配置统一设置。
+    SsdMetadataMode ssdMetadataMode_{MMC_SSD_METADATA_AGGREGATED};
     std::unordered_set<uint32_t> ssdEnabledRanks_;
     mutable std::mutex ssdMutex_;
 };

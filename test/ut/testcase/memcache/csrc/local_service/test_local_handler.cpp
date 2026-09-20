@@ -15,6 +15,7 @@
 #include <memory>
 #include "mmc_meta_manager.h"
 #include "mmc_bm_proxy.h"
+#include "mmc_local_service_default.h"
 #include "mmc_ref.h"
 #include "gtest/gtest.h"
 
@@ -100,9 +101,27 @@ TEST_F(TestLocalHandler, Init)
     MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 60U);
     metaMng->Start();
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(loc, locInfo, blobMap, false);
+    metaMng->Mount(loc, locInfo, blobMap);
     ASSERT_TRUE(metaMng != nullptr);
     metaMng->Stop();
+}
+
+TEST_F(TestLocalHandler, BatchStorageStatWithoutStorageReturnsPerKeyErrors)
+{
+    MmcLocalServiceDefault localService("batch_storage_stat_disabled");
+    const std::vector<std::string> keys = {"stat_disabled_first", "stat_disabled_second"};
+    std::vector<Result> results;
+    std::vector<uint64_t> sizes;
+
+    Result ret = localService.BatchStorageStat(keys, results, sizes);
+
+    EXPECT_EQ(ret, MMC_SSD_NOT_AVAILABLE);
+    ASSERT_EQ(results.size(), keys.size());
+    ASSERT_EQ(sizes.size(), keys.size());
+    for (size_t index = 0; index < keys.size(); ++index) {
+        EXPECT_EQ(results[index], MMC_SSD_NOT_AVAILABLE);
+        EXPECT_EQ(sizes[index], 0U);
+    }
 }
 
 TEST_F(TestLocalHandler, Alloc)
@@ -114,7 +133,7 @@ TEST_F(TestLocalHandler, Alloc)
     MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 60U);
     metaMng->Start();
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    metaMng->Mount(loc, locInfo, blobMap, false);
+    metaMng->Mount(loc, locInfo, blobMap);
 
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0}; // blobSize, numBlobs, mediaType, preferredRank, flags
     MmcMemMetaDesc objMeta;

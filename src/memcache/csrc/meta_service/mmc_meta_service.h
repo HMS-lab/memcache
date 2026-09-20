@@ -103,7 +103,6 @@ private:
     MmcKvEventRuntime kvEvents_;
     bool kvEventsPublishActive_{false};
     std::atomic<bool> periodicEvictActive_{false};
-
     void StartMetricsReportTask();
     bool IsSsdAvailable(uint32_t rank) const;
     void OnAsyncFlushComplete(uint32_t rank, const std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobs);

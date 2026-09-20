@@ -159,14 +159,7 @@ public:
         return metaMangerPtr_->CleanSsdBlobs(rank);
     }
 
-    Result ExistKey(const IsExistRequest &req, IsExistResponse &resp)
-    {
-        MmcMetaMetricManager &metricManager = MmcMetaMetricManager::GetInstance();
-        metricManager.IncrementRequestCounter(RestMetricType::EXIST_KEY, UINT32_MAX);
-        resp.ret_ = metaMangerPtr_->ExistKey(req.key_);
-        IncrementResultCounter(metricManager, RestMetricType::EXIST_KEY, resp.ret_, UINT32_MAX);
-        return resp.ret_;
-    }
+    Result ExistKey(const IsExistRequest &req, IsExistResponse &resp);
 
     Result BatchExistKey(const BatchIsExistRequest &req, BatchIsExistResponse &resp);
 
@@ -184,43 +177,9 @@ public:
         return metaMangerPtr_->EvictKeys(std::move(keys), srcMedia, dstMedia, flags);
     }
 
-    Result Query(const QueryRequest &req, QueryResponse &resp)
-    {
-        MmcMetaMetricManager &metricManager = MmcMetaMetricManager::GetInstance();
-        metricManager.IncrementRequestCounter(RestMetricType::QUERY, UINT32_MAX);
-        if ((req.flag_ & GET_KEY_INFO_FOR_LAYER_WISE) != 0) {
-            metaMangerPtr_->PrefetchKeys({req.key_});
-        }
-        Result metaRet = metaMangerPtr_->Query(req.key_, req.operateId_, req.flag_, resp.queryInfo_);
-        IncrementResultCounter(metricManager, RestMetricType::QUERY, metaRet, UINT32_MAX);
-        return metaRet;
-    }
+    Result Query(const QueryRequest &req, QueryResponse &resp);
 
-    Result BatchQuery(const BatchQueryRequest &req, BatchQueryResponse &resp)
-    {
-        MmcMetaMetricManager &metricManager = MmcMetaMetricManager::GetInstance();
-        metricManager.IncrementRequestCounter(RestMetricType::BATCH_QUERY, UINT32_MAX);
-        if ((req.flag_ & GET_KEY_INFO_FOR_LAYER_WISE) != 0) {
-            TP_TRACE_BEGIN(TP_MMC_META_BATCH_QUERY_PREFETCH);
-            metaMangerPtr_->PrefetchKeys(req.keys_);
-            TP_TRACE_END(TP_MMC_META_BATCH_QUERY_PREFETCH, MMC_OK);
-        }
-        std::vector<Result> results;
-        results.resize(req.keys_.size());
-        resp.batchQueryInfos_.resize(req.keys_.size());
-        size_t idx = 0;
-        for (const std::string &key : req.keys_) {
-            MemObjQueryInfo queryInfo;
-            metricManager.IncrementRequestCounter(RestMetricType::QUERY, UINT32_MAX);
-            Result metaRet = metaMangerPtr_->Query(key, req.operateId_, req.flag_, queryInfo);
-            results[idx] = metaRet;
-            resp.batchQueryInfos_[idx] = std::move(queryInfo);
-            IncrementResultCounter(metricManager, RestMetricType::QUERY, metaRet, UINT32_MAX);
-            ++idx;
-        }
-        IncrementBatchResultCounter(metricManager, RestMetricType::BATCH_QUERY, results, UINT32_MAX);
-        return MMC_OK;
-    }
+    Result BatchQuery(const BatchQueryRequest &req, BatchQueryResponse &resp);
 
     const MmcMetaManagerPtr &GetMetaManager()
     {
@@ -260,7 +219,6 @@ private:
     bool started_ = false;
     MmcMetaManagerPtr metaMangerPtr_;
     MetaNetServerPtr netServerPtr_;
-    const int32_t timeOut_ = 60;
 };
 using MmcMetaMgrProxyPtr = MmcRef<MmcMetaMgrProxy>;
 

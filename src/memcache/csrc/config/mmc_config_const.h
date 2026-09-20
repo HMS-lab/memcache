@@ -31,6 +31,8 @@ constexpr auto OCK_MMC_META_SERVICE_HTTP_URL =
 constexpr auto OCK_MMC_METRICS_REPORT_INTERVAL_SECONDS =
     std::make_pair("ock.mmc.meta_service.metrics_report_interval_seconds", 30UL);
 constexpr auto OCK_MMC_META_HA_ENABLE = std::make_pair("ock.mmc.meta.ha.enable", false);
+constexpr auto OCK_MMC_META_SERVICE_STORAGE_METADATA_MODE =
+    std::make_pair("ock.mmc.meta_service.storage.metadata_mode", "aggregated");
 constexpr auto OKC_MMC_EVICT_THRESHOLD_HIGH = std::make_pair("ock.mmc.evict_threshold_high", 90);
 constexpr auto OKC_MMC_EVICT_THRESHOLD_LOW = std::make_pair("ock.mmc.evict_threshold_low", 80);
 constexpr auto OCK_MMC_EVICT_CHECK_INTERVAL_SECONDS = std::make_pair("ock.mmc.evict_check_interval_seconds", 5);

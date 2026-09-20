@@ -53,9 +53,6 @@ private:
     // Signal handler function
     static void signalHandler(int signal);
 
-    // Exit handler function
-    static void exitHandler();
-
     std::mutex mutex_;
     std::unordered_set<MmcacheStore *> instances_;
 };

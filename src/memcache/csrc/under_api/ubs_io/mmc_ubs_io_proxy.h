@@ -54,6 +54,7 @@ public:
     Result BatchDelete(const std::vector<std::string> &keys, std::vector<int32_t> &results);
     Result BatchGetLength(const std::vector<std::string> &keys, std::vector<size_t> &lengths,
                           std::vector<int32_t> &results);
+    Result BatchStat(const std::vector<std::string> &keys, std::vector<uint64_t> &sizes, std::vector<Result> &results);
     Result BatchGetFree(void **bufs, int keysCount);
 
     void SetMetaEventCallback(UbsIoMetaCallback callback)

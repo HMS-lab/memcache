@@ -22,6 +22,7 @@
 #include "mmc_config_validator.h"
 #include "mmc_config_convertor.h"
 #include "mmc_config_const.h"
+#include "mmc_storage_mode.h"
 #include "mmc_def.h"
 #include "mmc_logger.h"
 #include "mmc_types.h"
@@ -47,6 +48,7 @@ const std::string BOOL_ENUM_STR = "false||true";
 const std::string LOG_LEVEL_ENUM_STR = "debug||info||warn||error";
 const std::string META_LRU_TYPE_ENUM_STR = "lru||sharded_lru";
 const std::string LOG_OUTPUT_TARGET_ENUM_STR = "screen||file||both";
+const std::string SSD_METADATA_MODE_ENUM_STR = "aggregated||separated";
 constexpr int32_t LOG_OUTPUT_TARGET_SCREEN = 0;
 constexpr int32_t LOG_OUTPUT_TARGET_FILE = 1;
 constexpr int32_t LOG_OUTPUT_TARGET_BOTH = 2;
@@ -211,6 +213,8 @@ public:
                                            MAX_INTERVAL_SECONDS),
                       0);
         AddBoolConf(OCK_MMC_META_HA_ENABLE, VStrEnum::Create(OCK_MMC_META_HA_ENABLE.first, BOOL_ENUM_STR), 0);
+        AddStrConf(OCK_MMC_META_SERVICE_STORAGE_METADATA_MODE,
+                   VStrEnum::Create(OCK_MMC_META_SERVICE_STORAGE_METADATA_MODE.first, SSD_METADATA_MODE_ENUM_STR), 0);
         AddStrConf(OCK_MMC_LOG_LEVEL, VStrEnum::Create(OCK_MMC_LOG_LEVEL.first, LOG_LEVEL_ENUM_STR), 0);
         AddStrConf(OCK_MMC_LOG_PATH, VStrLength::Create(OCK_MMC_LOG_PATH.first, PATH_MAX_LEN), 0);
         AddIntConf(OCK_MMC_LOG_ROTATION_FILE_SIZE,
@@ -354,6 +358,10 @@ public:
         }
         config.metricsReportIntervalSeconds = GetUInt64(ConfConstant::OCK_MMC_METRICS_REPORT_INTERVAL_SECONDS);
         config.evictCheckIntervalSeconds = GetUInt64(ConfConstant::OCK_MMC_EVICT_CHECK_INTERVAL_SECONDS);
+        std::string ssdMetadataMode = GetString(ConfConstant::OCK_MMC_META_SERVICE_STORAGE_METADATA_MODE);
+        StringToUpper(ssdMetadataMode);
+        config.ssdMetadataMode =
+            ssdMetadataMode == "SEPARATED" ? MMC_SSD_METADATA_SEPARATED : MMC_SSD_METADATA_AGGREGATED;
         GetAccTlsConfig(config.accTlsConfig);
         GetConfigStoreTlsConfig(config.configStoreTlsConfig);
         config.kvEvents.enable = GetBool(ConfConstant::OCK_MMC_KV_EVENTS_ENABLE);

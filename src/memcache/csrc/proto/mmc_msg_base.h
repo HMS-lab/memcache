@@ -31,34 +31,36 @@ struct MsgBase {
 };
 
 enum LOCAL_META_OPCODE_REQ : int16_t {
-    ML_PING_REQ = 0,                /* ping request between client/service and service to service */
-    ML_ALLOC_REQ = 1,               /* allocate an object by key and size */
-    ML_UPDATE_REQ = 2,              /* update an object */
-    ML_GET_REQ = 3,                 /* get object info by key */
-    ML_REMOVE_REQ = 4,              /* remove object by key */
-    ML_BM_REGISTER_REQ = 5,         /* register local bm to meta service */
-    LM_PING_REQ = 6,                /* duplicated */
-    LM_META_REPLICATE_REQ = 7,      /* get replicate list of object by key */
-    ML_IS_EXIST_REQ = 8,            /* check if object exists */
-    ML_BATCH_IS_EXIST_REQ = 9,      /* check if objects exist in batch */
-    ML_BATCH_REMOVE_REQ = 10,       /* remove objects by keys in batch */
-    ML_BM_UNREGISTER_REQ = 11,      /* unregister local bm to meta service */
-    ML_BATCH_GET_REQ = 12,          /* get object info by keys in batch */
-    ML_QUERY_REQ = 13,              /* query a key to meta service to get blob info */
-    ML_BATCH_QUERY_REQ = 14,        /* query keys to meta service to get blob info */
-    ML_BATCH_ALLOC_REQ = 15,        /* allocate batch of objects by key and size */
-    ML_BATCH_UPDATE_REQ = 16,       /* update batch of objects by key and size */
-    LM_BLOB_COPY_REQ = 17,          /* copy blob for other rank */
-    LM_REMOVE_ALL_REQ = 18,         /* remove all keys */
-    ML_BATCH_UPDATE_BLOB_REQ = 19,  /* update blob action by gva, for write path */
-    LM_BLOB_DELETE_REQ = 20,        /* delete SSD blob data */
-    LM_BATCH_BLOB_COPY_REQ = 21,    /* batch copy blobs for rewarm by rank */
-    ML_UBSIO_META_DELETE_REQ = 23,  /* UBS IO DELETE metadata event from LS to MS */
-    ML_BATCH_UPDATE_LEASE_REQ = 24, /* add or remove read leases by keys in batch */
-    ML_STATS_REPORT_REQ = 25,       /* client→meta metric report */
-    ML_PREFETCH_REQ = 26,           /* prefetch keys from SSD to DRAM */
-    ML_EVICT_REQ = 27,              /* evict keys from DRAM to SSD */
-    ML_BATCH_PROMOTE_REQ = 28,      /* promote keys in LRU without blob access */
+    ML_PING_REQ = 0,                 /* ping request between client/service and service to service */
+    ML_ALLOC_REQ = 1,                /* allocate an object by key and size */
+    ML_UPDATE_REQ = 2,               /* update an object */
+    ML_GET_REQ = 3,                  /* get object info by key */
+    ML_REMOVE_REQ = 4,               /* remove object by key */
+    ML_BM_REGISTER_REQ = 5,          /* register local bm to meta service */
+    LM_PING_REQ = 6,                 /* duplicated */
+    LM_META_REPLICATE_REQ = 7,       /* get replicate list of object by key */
+    ML_IS_EXIST_REQ = 8,             /* check if object exists */
+    ML_BATCH_IS_EXIST_REQ = 9,       /* check if objects exist in batch */
+    ML_BATCH_REMOVE_REQ = 10,        /* remove objects by keys in batch */
+    ML_BM_UNREGISTER_REQ = 11,       /* unregister local bm to meta service */
+    ML_BATCH_GET_REQ = 12,           /* get object info by keys in batch */
+    ML_QUERY_REQ = 13,               /* query a key to meta service to get blob info */
+    ML_BATCH_QUERY_REQ = 14,         /* query keys to meta service to get blob info */
+    ML_BATCH_ALLOC_REQ = 15,         /* allocate batch of objects by key and size */
+    ML_BATCH_UPDATE_REQ = 16,        /* update batch of objects by key and size */
+    LM_BLOB_COPY_REQ = 17,           /* copy blob for other rank */
+    LM_REMOVE_ALL_REQ = 18,          /* remove all keys */
+    ML_BATCH_UPDATE_BLOB_REQ = 19,   /* update blob action by gva, for write path */
+    LM_BLOB_DELETE_REQ = 20,         /* delete SSD blob data */
+    LM_BATCH_BLOB_COPY_REQ = 21,     /* batch copy blobs for rewarm by rank */
+    ML_UBSIO_META_DELETE_REQ = 23,   /* UBS IO DELETE metadata event from LS to MS */
+    ML_BATCH_UPDATE_LEASE_REQ = 24,  /* add or remove read leases by keys in batch */
+    ML_STATS_REPORT_REQ = 25,        /* client→meta metric report */
+    ML_PREFETCH_REQ = 26,            /* prefetch keys from SSD to DRAM */
+    ML_EVICT_REQ = 27,               /* evict keys from DRAM to SSD */
+    ML_BATCH_PROMOTE_REQ = 28,       /* promote keys in LRU without blob access */
+    LM_BATCH_STORAGE_STAT_REQ = 29,  /* query UBSIO file status and size by keys in batch */
+    ML_GET_EXTERNAL_CONFIG_REQ = 30, /* query external config managed by MetaService */
 };
 
 enum LOCAL_META_OPCODE_RESP : int16_t {
@@ -75,13 +77,15 @@ enum LOCAL_META_OPCODE_RESP : int16_t {
     ML_BATCH_QUERY_RESP = 10,
     ML_BATCH_UPDATE_RESP = 11,
     ML_BATCH_UPDATE_LEASE_RESP = 12,
-    LM_BLOB_DELETE_RSP = 20,        /* delete SSD blob data response */
-    LM_BATCH_BLOB_COPY_RSP = 21,    /* batch copy blobs response */
-    ML_UBSIO_META_DELETE_RESP = 23, /* UBS IO DELETE metadata event response */
-    ML_STATS_REPORT_RESP = 25,      /* stats report response */
-    ML_PREFETCH_RESP = 26,          /* prefetch keys response */
-    ML_EVICT_RESP = 27,             /* evict keys response */
-    ML_BATCH_PROMOTE_RESP = 28,     /* batch promote response */
+    LM_BLOB_DELETE_RSP = 20,          /* delete SSD blob data response */
+    LM_BATCH_BLOB_COPY_RSP = 21,      /* batch copy blobs response */
+    ML_UBSIO_META_DELETE_RESP = 23,   /* UBS IO DELETE metadata event response */
+    ML_STATS_REPORT_RESP = 25,        /* stats report response */
+    ML_PREFETCH_RESP = 26,            /* prefetch keys response */
+    ML_EVICT_RESP = 27,               /* evict keys response */
+    ML_BATCH_PROMOTE_RESP = 28,       /* batch promote response */
+    LM_BATCH_STORAGE_STAT_RESP = 29,  /* response to the UBSIO batch status query */
+    ML_GET_EXTERNAL_CONFIG_RESP = 30, /* response to the external config query */
 };
 } // namespace mmc
 } // namespace ock

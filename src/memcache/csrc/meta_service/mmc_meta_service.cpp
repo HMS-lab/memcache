@@ -102,6 +102,8 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
                                           extConfig, options.evictYieldInterval, options.evictYieldDurationUs,
                                           options_.lruShardCount, static_cast<MetaLruType>(options_.lruType)),
                      "Failed to start meta mgr proxy of meta service " << name_);
+    // 模式由 MetaService 启动配置统一确定，不能再由任一 rank 的注册请求改变。
+    metaMgrProxy_->GetMetaManager()->SetSsdMetadataMode(static_cast<SsdMetadataMode>(options_.ssdMetadataMode));
 
     metaBackUpMgrPtr_ = MMCMetaBackUpMgrFactory::GetInstance("DefaultMetaBackup");
     auto backupConf = MmcMakeRef<MMCMetaBackUpConfDefault>(metaNetServer_);
@@ -153,7 +155,6 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
         return MMC_OK;
     });
     MMC_LOG_TRACE("Config store server started, broken handler registered");
-
     // 注册回调可能同步重发 leader 状态并重新加锁，先解锁避免死锁。
     lock.unlock();
     RegisterHaLeaderCallback();
@@ -520,8 +521,12 @@ void MmcMetaService::OnAsyncFlushComplete(uint32_t rank,
 {
     auto &metricMgr = MmcMetaMetricManager::GetInstance();
     if (metaMgrProxy_.Get() != nullptr && metaMgrProxy_->GetMetaManager().Get() != nullptr) {
+        auto metaManager = metaMgrProxy_->GetMetaManager();
+        const bool metadataSeparated = metaManager->IsSsdMetadataSeparated();
         for (const auto &[key, desc] : blobs) {
-            metaMgrProxy_->GetMetaManager()->AddSsdBlob(key, desc);
+            if (!metadataSeparated) {
+                metaManager->AddSsdBlob(key, desc);
+            }
             metricMgr.IncrementAsyncFlushBlobAdded(rank, desc.size_);
         }
     }

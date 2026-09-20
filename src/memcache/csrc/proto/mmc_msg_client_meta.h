@@ -16,6 +16,7 @@
 #include "mmc_mem_blob.h"
 #include "mmc_msg_base.h"
 #include "mmc_msg_packer.h"
+#include "mmc_storage_mode.h"
 #include "mmc_client_metric_snapshot.h"
 
 namespace ock {
@@ -521,6 +522,53 @@ struct Response : MsgBase {
     }
 };
 
+struct GetExternalConfigRequest : MsgBase {
+    GetExternalConfigRequest() : MsgBase{0, ML_GET_EXTERNAL_CONFIG_REQ, 0} {}
+
+    Result Serialize(NetMsgPacker &packer) const override
+    {
+        packer.Serialize(msgVer);
+        packer.Serialize(msgId);
+        packer.Serialize(destRankId);
+        return MMC_OK;
+    }
+
+    Result Deserialize(NetMsgUnpacker &packer) override
+    {
+        packer.Deserialize(msgVer);
+        packer.Deserialize(msgId);
+        packer.Deserialize(destRankId);
+        return MMC_OK;
+    }
+};
+
+struct GetExternalConfigResponse : MsgBase {
+    Result ret_{MMC_OK};
+    uint32_t ssdMetadataMode_{MMC_SSD_METADATA_AGGREGATED};
+
+    GetExternalConfigResponse() : MsgBase{0, ML_GET_EXTERNAL_CONFIG_RESP, 0} {}
+
+    Result Serialize(NetMsgPacker &packer) const override
+    {
+        packer.Serialize(msgVer);
+        packer.Serialize(msgId);
+        packer.Serialize(destRankId);
+        packer.Serialize(ret_);
+        packer.Serialize(ssdMetadataMode_);
+        return MMC_OK;
+    }
+
+    Result Deserialize(NetMsgUnpacker &packer) override
+    {
+        packer.Deserialize(msgVer);
+        packer.Deserialize(msgId);
+        packer.Deserialize(destRankId);
+        packer.Deserialize(ret_);
+        packer.Deserialize(ssdMetadataMode_);
+        return MMC_OK;
+    }
+};
+
 struct BatchUpdateResponse : MsgBase {
     std::vector<Result> results_;
 
@@ -761,6 +809,63 @@ struct BatchBlobCopyResponse : public MsgBase {
         packer.Deserialize(msgId);
         packer.Deserialize(destRankId);
         packer.Deserialize(results_);
+        return MMC_OK;
+    }
+};
+
+struct BatchStorageStatRequest : public MsgBase {
+    std::vector<std::string> keys_;
+
+    BatchStorageStatRequest() : MsgBase{0, LM_BATCH_STORAGE_STAT_REQ, 0} {}
+    explicit BatchStorageStatRequest(std::vector<std::string> keys)
+        : MsgBase{0, LM_BATCH_STORAGE_STAT_REQ, 0}, keys_(std::move(keys))
+    {}
+
+    Result Serialize(NetMsgPacker &packer) const override
+    {
+        packer.Serialize(msgVer);
+        packer.Serialize(msgId);
+        packer.Serialize(destRankId);
+        packer.Serialize(keys_);
+        return MMC_OK;
+    }
+
+    Result Deserialize(NetMsgUnpacker &packer) override
+    {
+        packer.Deserialize(msgVer);
+        packer.Deserialize(msgId);
+        packer.Deserialize(destRankId);
+        packer.Deserialize(keys_);
+        return MMC_OK;
+    }
+};
+
+struct BatchStorageStatResponse : public MsgBase {
+    std::vector<Result> results_;
+    std::vector<uint64_t> sizes_;
+
+    BatchStorageStatResponse() : MsgBase{0, LM_BATCH_STORAGE_STAT_RESP, 0} {}
+    BatchStorageStatResponse(std::vector<Result> results, std::vector<uint64_t> sizes)
+        : MsgBase{0, LM_BATCH_STORAGE_STAT_RESP, 0}, results_(std::move(results)), sizes_(std::move(sizes))
+    {}
+
+    Result Serialize(NetMsgPacker &packer) const override
+    {
+        packer.Serialize(msgVer);
+        packer.Serialize(msgId);
+        packer.Serialize(destRankId);
+        packer.Serialize(results_);
+        packer.Serialize(sizes_);
+        return MMC_OK;
+    }
+
+    Result Deserialize(NetMsgUnpacker &packer) override
+    {
+        packer.Deserialize(msgVer);
+        packer.Deserialize(msgId);
+        packer.Deserialize(destRankId);
+        packer.Deserialize(results_);
+        packer.Deserialize(sizes_);
         return MMC_OK;
     }
 };

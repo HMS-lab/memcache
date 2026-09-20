@@ -52,6 +52,8 @@ Result ock::mmc::MetaNetServer::Start(NetEngineOptions &options)
                                       std::bind(&MetaNetServer::HandleAlloc, this, std::placeholders::_1));
     server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::ML_BM_REGISTER_REQ,
                                       std::bind(&MetaNetServer::HandleBmRegister, this, std::placeholders::_1));
+    server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::ML_GET_EXTERNAL_CONFIG_REQ,
+                                      std::bind(&MetaNetServer::HandleGetExternalConfig, this, std::placeholders::_1));
     server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::ML_PING_REQ,
                                       std::bind(&MetaNetServer::HandlePing, this, std::placeholders::_1));
     server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::ML_UPDATE_REQ,
@@ -86,6 +88,8 @@ Result ock::mmc::MetaNetServer::Start(NetEngineOptions &options)
     server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::LM_META_REPLICATE_REQ, nullptr);
     server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::LM_BLOB_COPY_REQ, nullptr);
     server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::LM_BATCH_BLOB_COPY_REQ, nullptr);
+    // 这些请求由 Meta 反向调用 LocalService；MetaNetServer 只声明 opcode，实际处理器在客户端侧注册。
+    server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::LM_BATCH_STORAGE_STAT_REQ, nullptr);
     server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::ML_UBSIO_META_DELETE_REQ,
                                       std::bind(&MetaNetServer::HandleUbsIoMetaDelete, this, std::placeholders::_1));
     server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::ML_STATS_REPORT_REQ,
@@ -123,6 +127,17 @@ Result MetaNetServer::HandleBmRegister(const NetContextPtr &context)
                                             << ", rebuild blob size: " << req.blobList_.size() << ", ret: " << result);
     Response resp;
     resp.ret_ = result;
+    return context->Reply(req.msgId, resp);
+}
+
+Result MetaNetServer::HandleGetExternalConfig(const NetContextPtr &context)
+{
+    MMC_ASSERT_LOG_AND_RETURN(metaService_ != nullptr, "metaService_ is nullptr", MMC_ERROR);
+    MMC_ASSERT_LOG_AND_RETURN(context != nullptr, "context is nullptr", MMC_ERROR);
+    GetExternalConfigRequest req;
+    context->GetRequest<GetExternalConfigRequest>(req);
+    GetExternalConfigResponse resp;
+    resp.ssdMetadataMode_ = metaService_->Options().ssdMetadataMode;
     return context->Reply(req.msgId, resp);
 }
 

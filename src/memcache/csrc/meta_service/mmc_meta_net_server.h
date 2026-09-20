@@ -44,6 +44,8 @@ private:
 
     Result HandleBmRegister(const NetContextPtr &context);
 
+    Result HandleGetExternalConfig(const NetContextPtr &context);
+
     Result HandleBmUnregister(const NetContextPtr &context);
 
     Result HandlePing(const NetContextPtr &context);

@@ -17,6 +17,12 @@
 #include <vector>
 #include <algorithm>
 
+#include "mmc_ubs_io_types.h"
+
+constexpr int32_t K_MOCK_UBSIO_ERROR = -1;
+constexpr int32_t K_MOCK_UBSIO_NOT_FOUND = 7;
+constexpr uint32_t K_NULL_TERMINATOR_SIZE = 1;
+
 // 全局存储模拟
 std::map<std::string, std::string> gUbsioStorage;
 std::mutex gUbsioMutex;
@@ -274,6 +280,32 @@ extern "C" int32_t UbsioKvCacheBatchGetLength(const char **keys, uint32_t keys_c
 
         lengths[i] = it->second.size();
         results[i] = 0;
+    }
+    return 0;
+}
+
+extern "C" int32_t UbsioKvCacheBatchStat(const char **keys, uint32_t keysCount, UbsioKvBatchStat *stats, uint32_t flags)
+{
+    (void)flags;
+    if (keys == nullptr || stats == nullptr) {
+        return K_MOCK_UBSIO_ERROR;
+    }
+
+    std::lock_guard<std::mutex> lock(gUbsioMutex);
+    for (uint32_t index = 0; index < keysCount; ++index) {
+        stats[index] = {};
+        if (keys[index] == nullptr) {
+            stats[index].result = K_MOCK_UBSIO_ERROR;
+            continue;
+        }
+        std::strncpy(stats[index].key, keys[index], UBSIO_KV_MAX_KEY_SIZE - K_NULL_TERMINATOR_SIZE);
+        auto iter = gUbsioStorage.find(keys[index]);
+        if (iter == gUbsioStorage.end()) {
+            stats[index].result = K_MOCK_UBSIO_NOT_FOUND;
+            continue;
+        }
+        stats[index].size = static_cast<uint32_t>(iter->second.size());
+        stats[index].result = 0;
     }
     return 0;
 }
