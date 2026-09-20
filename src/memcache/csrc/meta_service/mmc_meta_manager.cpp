@@ -1119,7 +1119,8 @@ Result MmcMetaManager::AddSsdBlob(const std::string &key, const MmcMemBlobDesc &
         return MMC_UNMATCHED_KEY;
     }
     std::unique_lock<std::mutex> guard(objMeta->Mutex());
-    auto ssdBlob = MmcMakeRef<MmcMemBlob>(desc.rank_, 0, desc.size_, MEDIA_SSD, READABLE);
+    // SSD 副本不走 allocator 释放，无切块语义，allocSize 显式置 0
+    auto ssdBlob = MmcMakeRef<MmcMemBlob>(desc.rank_, 0, desc.size_, MEDIA_SSD, READABLE, 0);
     if (ssdBlob == nullptr) {
         MMC_LOG_ERROR("Failed to create SSD blob, key=" << key);
         return MMC_MALLOC_FAILED;
@@ -1234,9 +1235,10 @@ Result MmcMetaManager::RemoveAll()
 }
 
 Result MmcMetaManager::Mount(const MmcLocation &loc, const MmcLocalMemlInitInfo &localMemInitInfo,
-                             std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList, bool storageEnabled)
+                             std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList, bool storageEnabled,
+                             bool enableMaxValueMode)
 {
-    Result ret = globalAllocator_->Mount(loc, localMemInitInfo);
+    Result ret = globalAllocator_->Mount(loc, localMemInitInfo, enableMaxValueMode);
     if (ret != MMC_OK) {
         MMC_LOG_ERROR("allocator mount failed, loc rank: " << loc.rank_ << " mediaType_: " << loc.mediaType_);
         return ret;
@@ -1268,7 +1270,8 @@ Result MmcMetaManager::Mount(const MmcLocation &loc, const MmcLocalMemlInitInfo 
 
 Result MmcMetaManager::Mount(const std::vector<MmcLocation> &locs,
                              const std::vector<MmcLocalMemlInitInfo> &localMemInitInfos,
-                             std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList, bool storageEnabled)
+                             std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList, bool storageEnabled,
+                             bool enableMaxValueMode)
 {
     if (locs.size() != localMemInitInfos.size()) {
         MMC_LOG_ERROR("Mount: loc size:" << locs.size() << " != localMemInitInfo size:" << localMemInitInfos.size());
@@ -1277,7 +1280,7 @@ Result MmcMetaManager::Mount(const std::vector<MmcLocation> &locs,
     Result ret = MMC_OK;
     uint32_t i = 0;
     for (; i < locs.size(); i++) {
-        ret = Mount(locs[i], localMemInitInfos[i], blobList, storageEnabled);
+        ret = Mount(locs[i], localMemInitInfos[i], blobList, storageEnabled, enableMaxValueMode);
         if (ret != MMC_OK) {
             MMC_LOG_ERROR("Mount failed ret:" << ret << " loc rank:" << locs[i].rank_
                                               << " mediaType_: " << locs[i].mediaType_);
@@ -1306,7 +1309,7 @@ Result MmcMetaManager::RebuildMeta(std::vector<std::pair<std::string, MmcMemBlob
         BlobState state = (desc.state_ == NONE ? READABLE : desc.state_);
         MmcMemBlobPtr blobPtr =
             MmcMakeRef<MmcMemBlob>(desc.rank_, desc.gva_, desc.size_, static_cast<MediaType>(desc.mediaType_), state,
-                                   defaultTtlMs_.load(std::memory_order_relaxed));
+                                   desc.allocSize_, defaultTtlMs_.load(std::memory_order_relaxed));
         if (blobPtr == nullptr) {
             MMC_LOG_ERROR("Failed to create blob while rebuilding meta, key: " << key);
             return MMC_MALLOC_FAILED;

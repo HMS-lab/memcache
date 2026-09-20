@@ -23,7 +23,7 @@ bool MmcBlobAllocator::CanAlloc(uint64_t blobSize)
         MMC_LOG_WARN("Allocator rank: " << rank_ << " mediaType: " << mediaType_ << " is stopped");
         return false;
     }
-    SpaceRange anchor{0, AllocSizeAlignUp(blobSize)};
+    auto alignedSize = AllocSizeAlignUp(blobSize);
 
     spinlock_.lock();
     if (!started_) {
@@ -31,6 +31,10 @@ bool MmcBlobAllocator::CanAlloc(uint64_t blobSize)
         MMC_LOG_WARN("Allocator rank: " << rank_ << " mediaType: " << mediaType_ << " is stopped");
         return false;
     }
+    if (enableMaxValueMode_) {
+        alignedSize = std::max(maxAlignedSize_->load(std::memory_order_relaxed), alignedSize);
+    }
+    SpaceRange anchor{0, alignedSize};
     bool exists = (sizeTree_.lower_bound(anchor) != sizeTree_.end());
     spinlock_.unlock();
 
@@ -45,14 +49,16 @@ MmcMemBlobPtr MmcBlobAllocator::Alloc(uint64_t blobSize)
     }
     auto alignedSize = AllocSizeAlignUp(blobSize);
 
-    SpaceRange anchor{0, alignedSize};
-
     spinlock_.lock();
     if (!started_) {
         spinlock_.unlock();
         MMC_LOG_WARN("Allocator rank: " << rank_ << " mediaType: " << mediaType_ << " is stopped");
         return nullptr;
     }
+    auto maxAlignedSize = maxAlignedSize_->load(std::memory_order_relaxed);
+    uint64_t allocSize = enableMaxValueMode_ ? std::max(maxAlignedSize, alignedSize) : alignedSize;
+
+    SpaceRange anchor{0, allocSize};
     auto sizePos = sizeTree_.lower_bound(anchor);
     if (sizePos == sizeTree_.end()) {
         spinlock_.unlock();
@@ -73,17 +79,21 @@ MmcMemBlobPtr MmcBlobAllocator::Alloc(uint64_t blobSize)
 
     sizeTree_.erase(sizePos);
     addressTree_.erase(addrPos);
-    if (targetSize > alignedSize) {
-        SpaceRange left{targetOffset + alignedSize, targetSize - alignedSize};
+    if (targetSize > allocSize) {
+        SpaceRange left{targetOffset + allocSize, targetSize - allocSize};
         addressTree_.emplace(left.offset_, left.size_);
         sizeTree_.emplace(left);
     }
-    allocatedSize_ += alignedSize;
+    // CAS-max：只在创新高时写入，稳态零写入；并发下只增不减，不丢更新
+    uint64_t currentMax = maxAlignedSize_->load(std::memory_order_relaxed);
+    while (alignedSize > currentMax &&
+           !maxAlignedSize_->compare_exchange_weak(currentMax, alignedSize, std::memory_order_relaxed)) {}
+    allocatedSize_ += allocSize;
     spinlock_.unlock();
 
     MMC_LOG_DEBUG("Alloc rank=" << rank_ << ", type=" << mediaType_ << " allocated=" << blobSize
                                 << " total=" << allocatedSize_ << "/" << capacity_);
-    return MmcMakeRef<MmcMemBlob>(rank_, bmAddr_ + targetOffset, blobSize, mediaType_, ALLOCATED);
+    return MmcMakeRef<MmcMemBlob>(rank_, bmAddr_ + targetOffset, blobSize, mediaType_, ALLOCATED, allocSize);
 }
 
 Result MmcBlobAllocator::Release(const MmcMemBlobPtr &blob)
@@ -92,7 +102,7 @@ Result MmcBlobAllocator::Release(const MmcMemBlobPtr &blob)
         MMC_LOG_ERROR("blob is null");
         return MMC_ERROR;
     }
-    auto alignedSize = AllocSizeAlignUp(blob->Size());
+    auto alignedSize = AllocSizeAlignUp(blob->AllocSize());
     MMC_ASSERT_LOG_AND_RETURN(allocatedSize_ >= alignedSize,
                               "allocatedSize_ = " << allocatedSize_ << ", alignedSize = " << alignedSize, MMC_ERROR);
     auto blobAddr = blob->Gva();
@@ -174,13 +184,22 @@ Result MmcBlobAllocator::BuildFromBlobs(std::vector<std::pair<std::string, MmcMe
         uint64_t size = it->second.size_;
         uint64_t offset = gva - bmAddr_; // 转换为分配器内部偏移
 
-        Result res = ValidateAndAddAllocation(offset, size);
+        Result res = ValidateAndAddAllocation(offset, size, it->second.allocSize_);
         if (res != MMC_OK) {
             MMC_LOG_ERROR("rebuild allocator failed, rank: " << rank_ << " mediaType: " << mediaType_
                                                              << ", blob off:" << offset << ", size: " << size);
             it = blobList.erase(it);
             continue;
         }
+        // 按恢复数据重建历史最大对齐尺寸，避免重启后 max 模式从 0 重新爬升导致切块粒度漂移。
+        // recorded 与 ValidateAndAddAllocation 的切块值严格一致，回填给 desc 作为单一真相源：
+        // RebuildMeta 重建 Blob、Release 归还、后续 GetDesc 传播均使用该值，旧数据（allocSize_=0）自愈
+        uint64_t recorded = std::max(AllocSizeAlignUp(it->second.allocSize_), AllocSizeAlignUp(size));
+        it->second.allocSize_ = recorded;
+        // CAS-max：恢复时多 rank 可并行（各持各自的锁），CAS 保证全局 max 只增不减
+        uint64_t currentMax = maxAlignedSize_->load(std::memory_order_relaxed);
+        while (recorded > currentMax &&
+               !maxAlignedSize_->compare_exchange_weak(currentMax, recorded, std::memory_order_relaxed)) {}
         MMC_LOG_DEBUG("rebuild block successful, rank: " << it->second);
         ++it;
     }
@@ -188,7 +207,7 @@ Result MmcBlobAllocator::BuildFromBlobs(std::vector<std::pair<std::string, MmcMe
     return MMC_OK;
 }
 
-Result MmcBlobAllocator::ValidateAndAddAllocation(uint64_t offset, uint64_t size)
+Result MmcBlobAllocator::ValidateAndAddAllocation(uint64_t offset, uint64_t size, uint64_t allocSize)
 {
     // 验证地址范围有效性
     if (offset > std::numeric_limits<uint64_t>::max() - size) {
@@ -200,8 +219,9 @@ Result MmcBlobAllocator::ValidateAndAddAllocation(uint64_t offset, uint64_t size
         return MMC_ERROR;
     }
 
-    // 计算对齐后的大小
-    uint64_t alignedSize = AllocSizeAlignUp(size);
+    // 切块大小优先用 Desc 记录的真实值（已对齐，max 模式下大于对齐值）；防御性取较大，
+    // 同时覆盖 allocSize 为 0（旧数据回退对齐值）与小于对齐值（异常数据）两种情况
+    uint64_t alignedSize = std::max(AllocSizeAlignUp(allocSize), AllocSizeAlignUp(size));
     if (offset > std::numeric_limits<uint64_t>::max() - alignedSize) {
         MMC_LOG_ERROR("offset plus size overflow: offset=" << offset << ", size=" << size);
         return MMC_ERROR;

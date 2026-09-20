@@ -115,8 +115,8 @@ TEST_F(TestMmcServiceInterface, MultiLevelEvict)
     uint64_t totalSize = SIZE_32K * 10U;
 
     mmc_local_service_config_t localServiceConfig = {
-        "",        0, 0, 1,  "", "",      "", 0, "device_sdma", totalSize, totalSize, totalSize,
-        totalSize, 0, 0, {}, 0,  nullptr, {}, {}};
+        "", 0, 0, 1,  "", "",      "", 0, "device_sdma", totalSize, totalSize, totalSize, totalSize,
+        0,  0, 0, {}, 0,  nullptr, {}, {}};
     localServiceConfig.logLevel = INFO_LEVEL;
     localServiceConfig.accTlsConfig.tlsEnable = false;
     UrlStringToChar(metaUrl, localServiceConfig.discoveryURL);
@@ -207,8 +207,8 @@ TEST_F(TestMmcServiceInterface, metaServiceStart)
     ASSERT_TRUE(meta_service != nullptr);
 
     mmc_local_service_config_t localServiceConfig = {
-        "",        0, 0, 1,  "", "",      "", 0, "device_sdma", 104857600, 104857600, 104857600,
-        104857600, 0, 0, {}, 0,  nullptr, {}, {}};
+        "", 0, 0, 1,  "", "",      "", 0, "device_sdma", 104857600, 104857600, 104857600, 104857600,
+        0,  0, 0, {}, 0,  nullptr, {}, {}};
     localServiceConfig.logLevel = INFO_LEVEL;
     localServiceConfig.accTlsConfig.tlsEnable = false;
     UrlStringToChar(metaUrl, localServiceConfig.discoveryURL);
@@ -496,8 +496,9 @@ protected:
     void SetUp() override
     {
         baseMem = new char[CAPACITY];
-        allocator = new ock::mmc::MmcBlobAllocator(0, static_cast<ock::mmc::MediaType>(0),
-                                                   reinterpret_cast<uint64_t>(baseMem), CAPACITY);
+        allocator =
+            new ock::mmc::MmcBlobAllocator(0, static_cast<ock::mmc::MediaType>(0), reinterpret_cast<uint64_t>(baseMem),
+                                           CAPACITY, false, &maxAlignedSize_);
         std::vector<std::pair<std::string, ock::mmc::MmcMemBlobDesc>> blobMap;
         allocator->BuildFromBlobs(blobMap);
         allocator->Start();
@@ -519,6 +520,8 @@ protected:
 
     ock::mmc::MmcBlobAllocator *allocator;
     char *baseMem;
+    // 生命周期覆盖 allocator：TearDown 先 delete allocator，fixture 析构时才销毁
+    std::atomic<uint64_t> maxAlignedSize_{0};
     static constexpr uint64_t CAPACITY = 4096 * 16;
 };
 
@@ -536,7 +539,7 @@ TEST_F(TestMmcBlobAllocator, testBlobAllocatorEdgeCases)
     ASSERT_EQ(allocator->Release(fullBlob), ock::mmc::MMC_ERROR);
 
     auto invalidBlob =
-        ock::mmc::MmcMakeRef<ock::mmc::MmcMemBlob>(0, 0xDEADBEEF, 1024, ock::mmc::MediaType(0), ock::mmc::NONE);
+        ock::mmc::MmcMakeRef<ock::mmc::MmcMemBlob>(0, 0xDEADBEEF, 1024, ock::mmc::MediaType(0), ock::mmc::NONE, 1024);
     ASSERT_EQ(allocator->Release(invalidBlob), ock::mmc::MMC_ERROR);
 }
 
@@ -578,7 +581,7 @@ TEST_F(TestMmcBlobAllocator, ReleaseCoverage)
     EXPECT_EQ(allocator->Release(nullptr), ock::mmc::MMC_ERROR);
 
     auto invalidAddrBlob = ock::mmc::MmcMakeRef<ock::mmc::MmcMemBlob>(
-        0, static_cast<uint64_t>(0xDEADBEEF), 1024, static_cast<ock::mmc::MediaType>(0), ock::mmc::NONE);
+        0, static_cast<uint64_t>(0xDEADBEEF), 1024, static_cast<ock::mmc::MediaType>(0), ock::mmc::NONE, 1024);
     EXPECT_EQ(allocator->Release(invalidAddrBlob), ock::mmc::MMC_ERROR);
 
     auto validBlob = allocator->Alloc(1024);

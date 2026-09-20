@@ -248,10 +248,12 @@ public:
      * @param blobList          [in] if not empty, the allocator will be rebuild from blobList
      */
     Result Mount(const MmcLocation &loc, const MmcLocalMemlInitInfo &localMemInitInfo,
-                 std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList, bool storageEnabled);
+                 std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList, bool storageEnabled,
+                 bool enableMaxValueMode = false);
 
     Result Mount(const std::vector<MmcLocation> &locs, const std::vector<MmcLocalMemlInitInfo> &localMemInitInfos,
-                 std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList, bool storageEnabled);
+                 std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList, bool storageEnabled,
+                 bool enableMaxValueMode = false);
     /**
      * @brief unmount the mempool contributor at given location
      * @param loc          [in] location of the mem pool contributor to be unmounted

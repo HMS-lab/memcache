@@ -154,7 +154,7 @@ public:
         return ret;
     };
 
-    Result Mount(const MmcLocation &loc, const MmcLocalMemlInitInfo &localMemInitInfo)
+    Result Mount(const MmcLocation &loc, const MmcLocalMemlInitInfo &localMemInitInfo, bool enableMaxValueMode = false)
     {
         globalAllocLock_.LockWrite();
         auto iter = allocators_.find(loc);
@@ -164,7 +164,7 @@ public:
             return MMC_OK;
         }
 
-        allocators_[loc] = MmcBlobAllocator::Create(loc, localMemInitInfo);
+        allocators_[loc] = MmcBlobAllocator::Create(loc, localMemInitInfo, enableMaxValueMode, &maxAlignedSize_);
 
         MMC_LOG_TRACE("Mount bm on " << loc << ", capacity:" << localMemInitInfo.capacity_ << "  successfully");
         globalAllocLock_.UnlockWrite();
@@ -370,6 +370,11 @@ public:
         return segmentArray;
     }
 
+    uint64_t GetMaxAlignedSize() const
+    {
+        return maxAlignedSize_.load(std::memory_order_relaxed);
+    }
+
 private:
     Result InnerAlloc(const AllocOptions &allocReq, std::vector<MmcMemBlobPtr> &blobs,
                       std::unordered_set<uint32_t> &excludeRanks) const
@@ -411,6 +416,8 @@ private:
         return result;
     }
 
+    // maxAlignedSize_ 声明在 allocators_ 之前，确保析构时 blob allocator 先销毁（它们持有此指针）
+    std::atomic<uint64_t> maxAlignedSize_{0};
     MmcAllocators allocators_;
     ReadWriteLock globalAllocLock_;
 };

@@ -724,16 +724,27 @@ int32_t mmc_set_log_level(int level);
 - `worldSize`：本地服务的总数。
 - `bmIpPort`：BM IP端口。
 - `bmHcomUrl`：BM HCOM URL。
+- `backendId`：kv_event的后端标识（如Pod IP）；为空时回退到环境变量`MMC_LOCAL_SERVICE_BACKEND_ID`。
 - `createId`：创建ID。
 - `dataOpType`：数据操作类型。
 - `localDRAMSize`：本地DRAM大小。
+- `localMaxDRAMSize`：所有本地进程DRAM大小的最大值，各本地进程DRAM大小不一致时必填。
 - `localHBMSize`：本地HBM大小。
+- `localMaxHBMSize`：所有本地进程HBM大小的最大值，各本地进程HBM大小不一致时必填。
+- `storageEnabled`：是否启用本地SSD存储。
+- `enableMaxValueMode`：是否启用max-value分配模式，所有本地服务必须配置相同值；仅在BmRegister注册时生效，不可动态热更。
 - `flags`：标志。
 - `accTlsConfig`：本地服务的TLS配置。
 - `logLevel`：日志级别。
 - `logFunc`：外部日志函数。
 - `hcomTlsConfig`：本地服务的TLS配置。
 - `configStoreTlsConfig`：config store的TLS配置。
+- `dynamicConfigEnable`：是否开启动态配置。
+- `dynamicConfigInterval`：动态配置的刷新间隔（秒）。
+- `configFilePath`：配置文件路径。
+- `bmIpPortDomain`：BM IP端口的原始域名形式，用于周期性重新解析。
+- `tag`：标签。
+- `tagOpInfo`：标签操作信息。
 
 ### mmc_buffer
 

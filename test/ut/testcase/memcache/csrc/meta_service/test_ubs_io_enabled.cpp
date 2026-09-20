@@ -122,8 +122,8 @@ TEST_F(TestUbsIoEnabled, PutAndGetWithUbsIoFallback)
     uint64_t totalSize = SIZE_32K * 10U;
 
     mmc_local_service_config_t localServiceConfig = {
-        "",        0, 0, 1,  "", "",      "", 0, "device_sdma", totalSize, totalSize, totalSize,
-        totalSize, 0, 0, {}, 0,  nullptr, {}, {}};
+        "", 0, 0, 1,  "", "",      "", 0, "device_sdma", totalSize, totalSize, totalSize, totalSize,
+        0,  0, 0, {}, 0,  nullptr, {}, {}};
     localServiceConfig.logLevel = INFO_LEVEL;
     localServiceConfig.accTlsConfig.tlsEnable = false;
     UrlStringToChar(metaUrl, localServiceConfig.discoveryURL);
@@ -204,8 +204,8 @@ TEST_F(TestUbsIoEnabled, BatchGetWithUbsIoFallback)
     uint64_t totalSize = SIZE_32K * 10U;
 
     mmc_local_service_config_t localServiceConfig = {
-        "",        0, 0, 1,  "", "",      "", 0, "device_sdma", totalSize, totalSize, totalSize,
-        totalSize, 0, 0, {}, 0,  nullptr, {}, {}};
+        "", 0, 0, 1,  "", "",      "", 0, "device_sdma", totalSize, totalSize, totalSize, totalSize,
+        0,  0, 0, {}, 0,  nullptr, {}, {}};
     localServiceConfig.logLevel = INFO_LEVEL;
     localServiceConfig.accTlsConfig.tlsEnable = false;
     UrlStringToChar(metaUrl, localServiceConfig.discoveryURL);
@@ -304,8 +304,8 @@ TEST_F(TestUbsIoEnabled, ExistOperationsWithUbsIo)
     uint64_t totalSize = SIZE_32K * 10U;
 
     mmc_local_service_config_t localServiceConfig = {
-        "",        0, 0, 1,  "", "",      "", 0, "device_sdma", totalSize, totalSize, totalSize,
-        totalSize, 0, 0, {}, 0,  nullptr, {}, {}};
+        "", 0, 0, 1,  "", "",      "", 0, "device_sdma", totalSize, totalSize, totalSize, totalSize,
+        0,  0, 0, {}, 0,  nullptr, {}, {}};
     localServiceConfig.logLevel = INFO_LEVEL;
     localServiceConfig.accTlsConfig.tlsEnable = false;
     UrlStringToChar(metaUrl, localServiceConfig.discoveryURL);
@@ -385,8 +385,8 @@ TEST_F(TestUbsIoEnabled, QueryOperationsWithUbsIo)
     uint64_t totalSize = SIZE_32K * 10U;
 
     mmc_local_service_config_t localServiceConfig = {
-        "",        0, 0, 1,  "", "",      "", 0, "device_sdma", totalSize, totalSize, totalSize,
-        totalSize, 0, 0, {}, 0,  nullptr, {}, {}};
+        "", 0, 0, 1,  "", "",      "", 0, "device_sdma", totalSize, totalSize, totalSize, totalSize,
+        0,  0, 0, {}, 0,  nullptr, {}, {}};
     localServiceConfig.logLevel = INFO_LEVEL;
     localServiceConfig.accTlsConfig.tlsEnable = false;
     UrlStringToChar(metaUrl, localServiceConfig.discoveryURL);
@@ -469,8 +469,8 @@ TEST_F(TestUbsIoEnabled, UbsIoFallbackWhenMemcacheFull)
     uint64_t totalSize = SIZE_32K * 2;
 
     mmc_local_service_config_t localServiceConfig = {
-        "",        0, 0, 1,  "", "",      "", 0, "device_sdma", totalSize, totalSize, totalSize,
-        totalSize, 0, 0, {}, 0,  nullptr, {}, {}};
+        "", 0, 0, 1,  "", "",      "", 0, "device_sdma", totalSize, totalSize, totalSize, totalSize,
+        0,  0, 0, {}, 0,  nullptr, {}, {}};
     localServiceConfig.logLevel = INFO_LEVEL;
     localServiceConfig.accTlsConfig.tlsEnable = false;
     UrlStringToChar(metaUrl, localServiceConfig.discoveryURL);
@@ -556,8 +556,8 @@ TEST_F(TestUbsIoEnabled, UbsIoDisabledCompare)
     uint64_t totalSize = SIZE_32K * 10U;
 
     mmc_local_service_config_t localServiceConfig = {
-        "",        0, 0, 1,  "", "",      "", 0, "device_sdma", totalSize, totalSize, totalSize,
-        totalSize, 0, 0, {}, 0,  nullptr, {}, {}};
+        "", 0, 0, 1,  "", "",      "", 0, "device_sdma", totalSize, totalSize, totalSize, totalSize,
+        0,  0, 0, {}, 0,  nullptr, {}, {}};
     localServiceConfig.logLevel = INFO_LEVEL;
     localServiceConfig.accTlsConfig.tlsEnable = false;
     UrlStringToChar(metaUrl, localServiceConfig.discoveryURL);

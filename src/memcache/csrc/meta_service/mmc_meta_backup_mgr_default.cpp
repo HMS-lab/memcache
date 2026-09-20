@@ -162,6 +162,7 @@ void MMCMetaBackUpMgrDefault::SendBackupForRank(uint32_t rank, std::vector<MetaB
                 MmcMemBlobDesc ssdDesc = request.blobs_[i];
                 ssdDesc.mediaType_ = MEDIA_SSD;
                 ssdDesc.gva_ = 0;
+                ssdDesc.allocSize_ = 0; // SSD 副本不走 allocator 释放，无切块语义
                 flushedBlobs.emplace_back(request.keys_[i], ssdDesc);
             } else {
                 MMC_LOG_WARN("async flush failed for key=" << request.keys_[i] << ", ret=" << response.keyResults_[i]);

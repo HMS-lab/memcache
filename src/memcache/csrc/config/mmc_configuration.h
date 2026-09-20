@@ -438,6 +438,8 @@ public:
             0);
         AddBoolConf(OCK_MMC_LOCAL_SERVICE_STORAGE_ENABLED,
                     VStrEnum::Create(OCK_MMC_LOCAL_SERVICE_STORAGE_ENABLED.first, BOOL_ENUM_STR), 0);
+        AddBoolConf(OCK_MMC_LOCAL_SERVICE_ENABLE_MAX_VALUE_MODE,
+                    VStrEnum::Create(OCK_MMC_LOCAL_SERVICE_ENABLE_MAX_VALUE_MODE.first, BOOL_ENUM_STR), 0);
         AddBoolConf(OCK_MMC_LOCAL_SERVICE_DRAM_BEST_EFFORT,
                     VStrEnum::Create(OCK_MMC_LOCAL_SERVICE_DRAM_BEST_EFFORT.first, BOOL_ENUM_STR), 0);
         AddIntConf(OCK_MMC_CLIENT_AGGREGATE_NUM,
@@ -474,6 +476,7 @@ public:
         config.localHBMSize = GetUInt64(ConfConstant::OKC_MMC_LOCAL_SERVICE_HBM_SIZE.first, 0);
         config.localMaxHBMSize = GetUInt64(ConfConstant::OKC_MMC_LOCAL_SERVICE_MAX_HBM_SIZE.first, config.localHBMSize);
         config.storageEnabled = GetBool(ConfConstant::OCK_MMC_LOCAL_SERVICE_STORAGE_ENABLED);
+        config.enableMaxValueMode = GetBool(ConfConstant::OCK_MMC_LOCAL_SERVICE_ENABLE_MAX_VALUE_MODE);
         if (GetBool(ConfConstant::OCK_MMC_LOCAL_SERVICE_DRAM_BEST_EFFORT)) {
             config.flags |= SMEM_BM_FLAG_DRAM_BEST_EFFORT;
         }

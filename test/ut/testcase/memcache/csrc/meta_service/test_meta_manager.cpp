@@ -83,7 +83,7 @@ TEST_F(TestMmcMetaManager, PendingGetDoesNotDependOnRewarmWorkerAvailability)
 
     const std::string key = "pending_without_rewarm_worker";
     auto memObj = MmcMakeRef<MmcMemObjMeta>();
-    auto pendingBlob = MmcMakeRef<MmcMemBlob>(0, 0x1000, SIZE_32K, MEDIA_DRAM, ALLOCATED);
+    auto pendingBlob = MmcMakeRef<MmcMemBlob>(0, 0x1000, SIZE_32K, MEDIA_DRAM, ALLOCATED, SIZE_32K);
     ASSERT_NE(memObj, nullptr);
     ASSERT_NE(pendingBlob, nullptr);
     ASSERT_EQ(memObj->AddBlob(pendingBlob), MMC_OK);
@@ -1309,7 +1309,7 @@ TEST_F(TestMmcMetaManager, BackupReadLeaseReleasesOriginalObjectAfterKeyRemovalO
     auto manager = MmcMakeRef<MmcMetaManager>(leaseTtlMs, evictHigh, evictLow);
     ASSERT_EQ(manager->Start(), MMC_OK);
     auto object = MmcMakeRef<MmcMemObjMeta>();
-    auto blob = MmcMakeRef<MmcMemBlob>(0, gva, size, MEDIA_DRAM, READABLE);
+    auto blob = MmcMakeRef<MmcMemBlob>(0, gva, size, MEDIA_DRAM, READABLE, size);
     ASSERT_EQ(object->AddBlob(blob), MMC_OK);
     ASSERT_EQ(MetaContainer(manager)->Insert(key, object), MMC_OK);
     auto desc = blob->GetDesc();
@@ -1328,7 +1328,7 @@ TEST_F(TestMmcMetaManager, BackupReadLeaseReleasesOriginalObjectAfterKeyRemovalO
     manager->ReleaseBackupReadLease(firstLease);
     EXPECT_EQ(blob->UseCount(), oneReader);
     auto replacementObject = MmcMakeRef<MmcMemObjMeta>();
-    auto replacement = MmcMakeRef<MmcMemBlob>(0, gva, size, MEDIA_DRAM, READABLE);
+    auto replacement = MmcMakeRef<MmcMemBlob>(0, gva, size, MEDIA_DRAM, READABLE, size);
     ASSERT_EQ(replacementObject->AddBlob(replacement), MMC_OK);
     ASSERT_EQ(MetaContainer(manager)->Insert(key, replacementObject), MMC_OK);
     ASSERT_EQ(replacement->UpdateState(key, clientRank, clientRequest, MMC_READ_START), MMC_OK);
@@ -1352,8 +1352,8 @@ TEST_F(TestMmcMetaManager, BackupReadLeaseReleaseFindsMatchingLeaseAmongBlobs)
     auto manager = MmcMakeRef<MmcMetaManager>(leaseTtlMs, evictHigh, evictLow);
     ASSERT_EQ(manager->Start(), MMC_OK);
     auto object = MmcMakeRef<MmcMemObjMeta>();
-    auto firstBlob = MmcMakeRef<MmcMemBlob>(0, gva, size, MEDIA_DRAM, READABLE);
-    auto secondBlob = MmcMakeRef<MmcMemBlob>(otherRank, gva, size, MEDIA_DRAM, READABLE);
+    auto firstBlob = MmcMakeRef<MmcMemBlob>(0, gva, size, MEDIA_DRAM, READABLE, size);
+    auto secondBlob = MmcMakeRef<MmcMemBlob>(otherRank, gva, size, MEDIA_DRAM, READABLE, size);
     ASSERT_EQ(object->AddBlob(firstBlob), MMC_OK);
     ASSERT_EQ(object->AddBlob(secondBlob), MMC_OK);
     ASSERT_EQ(MetaContainer(manager)->Insert(key, object), MMC_OK);

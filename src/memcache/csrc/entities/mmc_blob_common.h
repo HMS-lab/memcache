@@ -30,12 +30,13 @@ struct MmcMemBlobDesc {
     uint16_t mediaType_ = UINT16_MAX; /* media type where blob located */
     BlobState state_ = NONE;          /* blob state on meta side when descriptor is filled */
     uint64_t leaseTimeoutTtlMs_ = 0;  /* remaining read lease TTL in milliseconds */
+    uint64_t allocSize_ = 0;          /* actual allocated size, 0 means not recorded and falls back to aligned size */
 
     MmcMemBlobDesc() = default;
     MmcMemBlobDesc(const uint32_t &rank, const uint64_t &gva, const uint64_t &size, const uint16_t &mediaType,
-                   BlobState state = NONE, uint64_t leaseTimeoutTtlMs = 0)
+                   BlobState state = NONE, uint64_t leaseTimeoutTtlMs = 0, uint64_t allocSize = 0)
         : size_(size), gva_(gva), rank_(rank), mediaType_(mediaType), state_(state),
-          leaseTimeoutTtlMs_(leaseTimeoutTtlMs)
+          leaseTimeoutTtlMs_(leaseTimeoutTtlMs), allocSize_(allocSize)
     {}
 
     friend bool operator==(const MmcMemBlobDesc &lhs, const MmcMemBlobDesc &rhs)
@@ -53,8 +54,8 @@ struct MmcMemBlobDesc {
     friend std::ostream &operator<<(std::ostream &os, const MmcMemBlobDesc &blob)
     {
         os << "blob{size=" << blob.size_ << ",gva=" << blob.gva_ << ",rank=" << blob.rank_
-           << ",media=" << blob.mediaType_ << ",leaseTimeoutTtlMs=" << blob.leaseTimeoutTtlMs_
-           << ",state=" << blob.state_ << "}";
+           << ",media=" << blob.mediaType_ << ",allocSize=" << blob.allocSize_
+           << ",leaseTimeoutTtlMs=" << blob.leaseTimeoutTtlMs_ << ",state=" << blob.state_ << "}";
         return os;
     }
 };

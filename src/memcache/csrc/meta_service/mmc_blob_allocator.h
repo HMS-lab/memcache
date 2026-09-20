@@ -12,6 +12,8 @@
 #ifndef MEM_FABRIC_MMC_BLOB_ALLOCATOR_H
 #define MEM_FABRIC_MMC_BLOB_ALLOCATOR_H
 
+#include <atomic>
+
 #include "nlohmann/json.hpp"
 
 #include "mmc_mem_blob.h"
@@ -41,8 +43,10 @@ struct RangeSizeFirst {
 
 class MmcBlobAllocator : public MmcReferable {
 public:
-    MmcBlobAllocator(const uint32_t rank, const MediaType mediaType, const uint64_t bmAddr, const uint64_t capacity)
-        : rank_(rank), mediaType_(mediaType), bmAddr_(bmAddr), capacity_(capacity)
+    MmcBlobAllocator(const uint32_t rank, const MediaType mediaType, const uint64_t bmAddr, const uint64_t capacity,
+                     bool enableMaxValueMode, std::atomic<uint64_t> *maxAlignedSize)
+        : rank_(rank), mediaType_(mediaType), bmAddr_(bmAddr), capacity_(capacity),
+          enableMaxValueMode_(enableMaxValueMode), maxAlignedSize_(maxAlignedSize)
     {
         started_ = false;
         addressTree_[0] = capacity;
@@ -50,7 +54,8 @@ public:
     }
     ~MmcBlobAllocator() override = default;
 
-    static MmcRef<MmcBlobAllocator> Create(const MmcLocation &loc, const MmcLocalMemlInitInfo &info);
+    static MmcRef<MmcBlobAllocator> Create(const MmcLocation &loc, const MmcLocalMemlInitInfo &info,
+                                           bool enableMaxValueMode, std::atomic<uint64_t> *maxAlignedSize);
 
     virtual bool CanAlloc(uint64_t blobSize);
     virtual MmcMemBlobPtr Alloc(uint64_t blobSize);
@@ -91,7 +96,7 @@ public:
 
 protected:
     static uint64_t AllocSizeAlignUp(uint64_t size);
-    Result ValidateAndAddAllocation(uint64_t offset, uint64_t size);
+    Result ValidateAndAddAllocation(uint64_t offset, uint64_t size, uint64_t allocSize = 0);
 
 protected:
     const uint32_t rank_;       /* rank id of the space */
@@ -104,13 +109,17 @@ protected:
 
     volatile bool started_ = false;
     uint64_t allocatedSize_ = 0;
+    bool enableMaxValueMode_ = false;
+    std::atomic<uint64_t> *maxAlignedSize_; // 指向 GlobalAllocator 的全局 maxAlignedSize_
 
     Spinlock spinlock_;
 };
 
-inline MmcRef<MmcBlobAllocator> MmcBlobAllocator::Create(const MmcLocation &loc, const MmcLocalMemlInitInfo &info)
+inline MmcRef<MmcBlobAllocator> MmcBlobAllocator::Create(const MmcLocation &loc, const MmcLocalMemlInitInfo &info,
+                                                         bool enableMaxValueMode, std::atomic<uint64_t> *maxAlignedSize)
 {
-    return MmcMakeRef<MmcBlobAllocator>(loc.rank_, loc.mediaType_, info.bmAddr_, info.capacity_);
+    return MmcMakeRef<MmcBlobAllocator>(loc.rank_, loc.mediaType_, info.bmAddr_, info.capacity_, enableMaxValueMode,
+                                        maxAlignedSize);
 }
 
 using MmcBlobAllocatorPtr = MmcRef<MmcBlobAllocator>;

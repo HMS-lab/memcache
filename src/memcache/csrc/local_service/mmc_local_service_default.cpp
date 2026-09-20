@@ -354,6 +354,7 @@ static size_t AppendRebuildBlobs(const std::string &key, std::vector<MmcMemBlobD
         MmcMemBlobDesc ssdDesc = descs.front();
         ssdDesc.gva_ = 0;
         ssdDesc.mediaType_ = MEDIA_SSD;
+        ssdDesc.allocSize_ = 0; // SSD 副本不走 allocator 释放，无切块语义
         request.blobList_.push_back({key, ssdDesc});
     }
     return removedCount;
@@ -367,6 +368,7 @@ Result MmcLocalServiceDefault::RegisterBm()
     req.rank_ = options_.rankId;
     req.backendId_ = ResolveBackendId();
     req.storageEnabled_ = options_.storageEnabled;
+    req.enableMaxValueMode_ = options_.enableMaxValueMode;
     for (MediaType type = MEDIA_HBM; type != MEDIA_NONE;) {
         uint64_t gva = bmProxyPtr_->GetGva(type);
         uint64_t capacity = bmProxyPtr_->GetCapacity(type);
@@ -604,6 +606,7 @@ size_t MmcLocalServiceDefault::ExecuteFlushBatch(BatchIoParams &params, const st
             MmcMemBlobDesc ssdDesc = blobs[params.validIdx[i]];
             ssdDesc.mediaType_ = MEDIA_SSD;
             ssdDesc.gva_ = 0;
+            ssdDesc.allocSize_ = 0; // SSD 副本不走 allocator 释放，无切块语义
             // 刷盘成功并写入 blobMap 后才返回成功，保证 keyResults 反映完整结果
             {
                 std::lock_guard<std::mutex> guard(blobMutex_);

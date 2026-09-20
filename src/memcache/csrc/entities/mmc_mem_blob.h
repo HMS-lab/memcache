@@ -85,8 +85,9 @@ public:
     static constexpr uint32_t kRewarmFlag = 1U << 0;
     MmcMemBlob() = delete;
     MmcMemBlob(const uint32_t &rank, const uint64_t &gva, const uint64_t &size, const MediaType &mediaType,
-               const BlobState &state, uint64_t defaultTtlMs = MMC_DATA_TTL_MS)
-        : rank_(rank), gva_(gva), size_(size), mediaType_(mediaType), state_(state), metaLeaseManager_(defaultTtlMs)
+               const BlobState &state, uint64_t allocSize, uint64_t defaultTtlMs = MMC_DATA_TTL_MS)
+        : rank_(rank), gva_(gva), size_(size), mediaType_(mediaType), state_(state), allocSize_(allocSize),
+          metaLeaseManager_(defaultTtlMs)
     {}
     ~MmcMemBlob() override = default;
 
@@ -130,6 +131,12 @@ public:
      * @return blob size
      */
     uint64_t Size() const;
+
+    /**
+     * @brief Get the actual allocated size of the blob (aligned)
+     * @return allocated size
+     */
+    uint64_t AllocSize() const;
 
     /**
      * @brief Get the media type of blob located, dram or xx
@@ -221,6 +228,7 @@ private:
     const uint32_t rank_;              /* rank id of the blob located */
     const uint64_t gva_;               /* global virtual address */
     const uint64_t size_;              /* data size of the blob */
+    const uint64_t allocSize_;         /* actual allocated size (aligned, may differ from size_) */
     const enum MediaType mediaType_;   /* media type where blob located */
     BlobState state_{BlobState::NONE}; /* state of the blob */
     uint16_t prot_{0};                 /* prot, i.e. access */
@@ -242,6 +250,11 @@ inline uint64_t MmcMemBlob::Gva() const
 inline uint64_t MmcMemBlob::Size() const
 {
     return size_;
+}
+
+inline uint64_t MmcMemBlob::AllocSize() const
+{
+    return allocSize_;
 }
 
 inline uint16_t MmcMemBlob::Type() const
@@ -282,7 +295,7 @@ inline bool MmcMemBlob::MatchFilter(const MmcBlobFilterPtr &filter) const
 
 inline MmcMemBlobDesc MmcMemBlob::GetDesc() const
 {
-    return MmcMemBlobDesc{rank_, gva_, size_, mediaType_, state_, LeaseTimeoutTtlMs()};
+    return MmcMemBlobDesc{rank_, gva_, size_, mediaType_, state_, LeaseTimeoutTtlMs(), allocSize_};
 }
 
 Result MmcMemBlob::ExtendLease(const uint32_t id, const uint32_t requestId, uint64_t ttl)

@@ -114,6 +114,7 @@ typedef struct {
     uint64_t localHBMSize;
     uint64_t localMaxHBMSize;
     bool storageEnabled;
+    bool enableMaxValueMode;
     uint32_t flags;
     mmc_tls_config accTlsConfig;
     int32_t logLevel;

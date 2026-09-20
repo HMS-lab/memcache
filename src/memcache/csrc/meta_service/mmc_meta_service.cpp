@@ -199,7 +199,7 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
 Result MmcMetaService::BmRegister(uint32_t rank, std::vector<uint16_t> mediaType, std::vector<uint64_t> bm,
                                   std::vector<uint64_t> capacity,
                                   std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList, bool storageEnabled,
-                                  const std::string &backendId)
+                                  const std::string &backendId, bool enableMaxValueMode)
 {
     std::lock_guard<std::mutex> guard(mutex_);
     if (!started_) {
@@ -224,7 +224,7 @@ Result MmcMetaService::BmRegister(uint32_t rank, std::vector<uint16_t> mediaType
     MMC_ASSERT_LOG_AND_RETURN(metaBackUpMgrPtr_ != nullptr, "metaBackUpMgrPtr_ is nullptr", MMC_MALLOC_FAILED);
     MMC_ASSERT_LOG_AND_RETURN(metaMgrProxy_ != nullptr, "metaMgrProxy_ is nullptr", MMC_MALLOC_FAILED);
     MMC_RETURN_ERROR(metaBackUpMgrPtr_->Load(blobList), "Mount loc { " << rank << " } load backup failed");
-    MMC_RETURN_ERROR(metaMgrProxy_->Mount(locs, infos, blobList, storageEnabled),
+    MMC_RETURN_ERROR(metaMgrProxy_->Mount(locs, infos, blobList, storageEnabled, enableMaxValueMode),
                      "Mount loc { " << rank << " } failed");
     MMC_LOG_TRACE("Mount loc {rank:" << rank << ", rebuild size:" << blobList.size() << ", mediaNum:" << typeNum
                                      << "} finish");

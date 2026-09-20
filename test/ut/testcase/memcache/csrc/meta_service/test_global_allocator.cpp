@@ -523,6 +523,63 @@ TEST_F(TestMmcGlobalAllocator, ReBuild)
     }
 }
 
+TEST_F(TestMmcGlobalAllocator, ReBuildUnalignedSizeWithoutAllocSize)
+{
+    // 覆盖旧格式数据恢复：desc.allocSize_ 为 0 且 size_ 非 4KB 对齐时，
+    // 恢复应按对齐后占用记账并回填 desc，释放后账目归零
+    constexpr uint64_t unalignedSize = 5000U;           // 非 4KB 对齐的用户数据大小
+    constexpr uint64_t alignedOccupied = SIZE_32K / 4U; // alignUp(5000) = 8192，真实切块占用
+    constexpr uint64_t blobCount = 3U;
+
+    MmcGlobalAllocatorPtr allocator = MmcMakeRef<MmcGlobalAllocator>();
+    uint64_t capacity = SIZE_32K * 10U;
+
+    MmcLocation loc;
+    MmcLocalMemlInitInfo info;
+    loc.mediaType_ = MEDIA_DRAM;
+    loc.rank_ = 0;
+    info.bmAddr_ = 0;
+    info.capacity_ = capacity;
+    allocator->Mount(loc, info);
+
+    // 模拟旧格式备份：无 allocSize 字段（=0），gva 按旧版本真实切块间隔 8192 排布
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    blobMap.push_back({"0", MmcMemBlobDesc(0, 0U, unalignedSize, MEDIA_DRAM)});
+    blobMap.push_back({"1", MmcMemBlobDesc(0, alignedOccupied, unalignedSize, MEDIA_DRAM)});
+    blobMap.push_back({"2", MmcMemBlobDesc(0, alignedOccupied * 2U, unalignedSize, MEDIA_DRAM)});
+
+    Result ret = allocator->BuildFromBlobs(loc, blobMap);
+    EXPECT_EQ(ret, MMC_OK);
+
+    // 回填断言：恢复后 desc.allocSize_ 被修正为对齐后的实际占用，旧数据自愈
+    for (auto &entry : blobMap) {
+        EXPECT_EQ(entry.second.allocSize_, alignedOccupied);
+    }
+
+    // 账目断言：恢复占用 = 数量 * 对齐占用
+    uint64_t totalSize[MEDIA_NONE] = {0};
+    uint64_t usedSize[MEDIA_NONE] = {0};
+    allocator->GetUsedInfo(totalSize, usedSize);
+    EXPECT_EQ(usedSize[MEDIA_DRAM], blobCount * alignedOccupied);
+
+    allocator->Start(loc);
+
+    // 模拟 RebuildMeta 用回填后的 desc 构造 blob，逐个释放
+    for (auto &entry : blobMap) {
+        auto &desc = entry.second;
+        MmcMemBlobPtr blob = MmcMakeRef<MmcMemBlob>(
+            desc.rank_, desc.gva_, desc.size_, static_cast<MediaType>(desc.mediaType_), ALLOCATED, desc.allocSize_);
+        ret = allocator->Free(blob);
+        EXPECT_EQ(ret, MMC_OK);
+    }
+
+    // 全部释放后账目归零（GetUsedInfo 对入参数组是累加语义，复查须用清零后的新数组）
+    uint64_t totalSizeAfter[MEDIA_NONE] = {0};
+    uint64_t usedSizeAfter[MEDIA_NONE] = {0};
+    allocator->GetUsedInfo(totalSizeAfter, usedSizeAfter);
+    EXPECT_EQ(usedSizeAfter[MEDIA_DRAM], 0U);
+}
+
 TEST_F(TestMmcGlobalAllocator, AllocForce)
 {
     MmcGlobalAllocatorPtr allocator = MmcMakeRef<MmcGlobalAllocator>();
@@ -685,7 +742,7 @@ TEST_F(TestMmcGlobalAllocator, FreeSsdThroughGlobal)
     allocator->Start(loc);
 
     // Free of SSD blob via GlobalAllocator is a no-op (UBS IO managed)
-    auto ssdBlob = MmcMakeRef<MmcMemBlob>(0, 0, SIZE_32K, MEDIA_SSD, ALLOCATED);
+    auto ssdBlob = MmcMakeRef<MmcMemBlob>(0, 0, SIZE_32K, MEDIA_SSD, ALLOCATED, 0);
     ASSERT_NE(ssdBlob, nullptr);
     auto ret = allocator->Free(ssdBlob);
     EXPECT_EQ(ret, MMC_OK);
