@@ -41,6 +41,9 @@ public:
     // without restart. Validates and pushes to MmcMetaMgrProxy; options_ is updated only on success.
     Result UpdateConfig(const mmc_meta_service_config_t &options);
 
+    // Hot-reload the defrag eviction waste percent threshold independently of the evict watermarks.
+    Result UpdateDefragEvictThreshold(uint16_t defragEvictThreshold);
+
     void Stop();
 
     Result BmRegister(uint32_t rank, std::vector<uint16_t> mediaType, std::vector<uint64_t> bm,

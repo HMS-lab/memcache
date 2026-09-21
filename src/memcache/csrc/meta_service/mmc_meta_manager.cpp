@@ -14,14 +14,20 @@
 
 #include <algorithm>
 #include <chrono>
+#include <map>
 #include <memory>
 #include <random>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
 
 #include "mmc_logger.h"
 #include "mmc_meta_metric_manager.h"
 #include "mmc_msg_client_meta.h"
 #include "mmc_types.h"
 #include "mmc_ptracer.h"
+#include "mmc_defrag_evict.h"
+#include "mmc_config_const.h"
 
 namespace ock {
 namespace mmc {
@@ -34,6 +40,19 @@ constexpr size_t kSingleBlobCount = 1U;
 constexpr size_t kSsdRewarmBlobCount = 2U;
 constexpr uint32_t K_BACKUP_LEASE_RANK_ID = UINT32_MAX;
 thread_local std::mt19937 g_storageRankRng{std::random_device{}()};
+
+/* 强制淘汰策略：从 LRU 尾部直接强制释放 5% 的 key，有租约等不可释放的 key 跳过后向后延伸一次 */
+constexpr uint64_t FORCE_EVICT_RELEASE_PERCENT = 5U;
+constexpr uint64_t FORCE_EVICT_PERCENT_DENOM = 100U;
+/* 候选取数倍率：目标数量外预留一倍余量，用于租约跳过后的一次向后延伸 */
+constexpr uint64_t FORCE_EVICT_FETCH_MULTIPLIER = 2U;
+
+/* 碎片整理释放策略：单次释放上限 5% */
+constexpr uint64_t DEFRAG_EVICT_RELEASE_PERCENT = 5U;
+constexpr uint64_t DEFRAG_EVICT_CANDIDATE_PERCENT = 20U;
+/* 单次分配调用内强制淘汰的最大重试次数：首次失败后最多再重试一次，仍失败则终止，
+   避免逐轮清空整个介质缓存造成无意义的数据丢失（如超过任一 rank 的总容量） */
+constexpr uint64_t FORCE_EVICT_MAX_RETRY_COUNT = 1U;
 
 bool IsGvaReadableMedia(MediaType mediaType)
 {
@@ -927,6 +946,7 @@ void MmcMetaManager::CheckAndEvict(MediaType media, uint64_t wantAllocSize)
         return;
     }
     bool expected = false;
+    // 与碎片强制淘汰（AllocWithForceEvict）互斥：共用 evictCheck_ 单飞行，强制淘汰进行中时跳过本轮
     if (!evictCheck_.compare_exchange_strong(expected, true)) {
         return;
     }
@@ -952,6 +972,375 @@ void MmcMetaManager::CheckAndEvict(MediaType media, uint64_t wantAllocSize)
     }
 }
 
+Result MmcMetaManager::AllocWithForceEvict(const AllocOptions &allocOpt, MediaType media,
+                                           const std::vector<uint32_t> &fragmentedRanks, Result originRet,
+                                           std::vector<MmcMemBlobPtr> &blobs)
+{
+    // 与 CheckAndEvict 互斥（共用 evictCheck_ 单飞行）：同一时刻仅一个淘汰在执行，
+    // 常规淘汰进行中时本次直接返回原始失败，调用方重试即可
+    bool expected = false;
+    if (!evictCheck_.compare_exchange_strong(expected, true)) {
+        return originRet;
+    }
+    // RAII 保证任何退出路径（含异常）都恢复单飞行标志，避免标志卡死后所有淘汰失效
+    struct EvictFlagGuard {
+        std::atomic<bool> &flag_;
+        ~EvictFlagGuard()
+        {
+            flag_.store(false);
+        }
+    } flagGuard{evictCheck_};
+
+    Result ret = originRet;
+    // 同步强制淘汰后重试分配：失败后最多再重试一次，仍失败则终止，
+    // 避免逐轮清空整个介质缓存造成无意义的数据丢失（如超过任一 rank 的总容量）
+    for (uint64_t retry = 0; retry <= FORCE_EVICT_MAX_RETRY_COUNT; ++retry) {
+        // 同步 force evict 释放耗时：从上一次分配失败到本次释放结束（下一次分配开始前）
+        TP_TRACE_BEGIN(TP_MMC_META_FORCE_EVICT_RELEASE);
+        const size_t releasedCount = ForceEvictForFragmentation(media, fragmentedRanks, allocOpt.blobSize_);
+        TP_TRACE_END(TP_MMC_META_FORCE_EVICT_RELEASE, MMC_OK);
+        // 无可释放的 key 时终止重试
+        if (releasedCount == 0) {
+            break;
+        }
+        ret = globalAllocator_->Alloc(allocOpt, blobs);
+        if (ret == MMC_OK) {
+            break;
+        }
+        MMC_LOG_WARN("AllocWithForceEvict times" << retry << ", media: " << media
+                                                 << ", blobSize: " << allocOpt.blobSize_);
+    }
+    return ret;
+}
+
+size_t MmcMetaManager::ForceEvictForFragmentation(MediaType media, const std::vector<uint32_t> &fragmentedRanks,
+                                                  uint64_t wantAllocSize)
+{
+    if (media == MEDIA_NONE || media == MEDIA_SSD) {
+        MMC_LOG_WARN("ForceEvictForFragmentation skip, invalid media: " << media);
+        return 0;
+    }
+    if (fragmentedRanks.empty()) {
+        MMC_LOG_WARN("ForceEvictForFragmentation skip, no fragmented rank on media: " << media);
+        return 0;
+    }
+
+    size_t totalKeys = metaContainer_->GetKeyCount(media);
+    if (totalKeys == 0) {
+        MMC_LOG_WARN("ForceEvictForFragmentation skip, no keys on media: " << media);
+        return 0;
+    }
+    const size_t releaseTarget =
+        std::max(totalKeys * FORCE_EVICT_RELEASE_PERCENT / FORCE_EVICT_PERCENT_DENOM, static_cast<size_t>(1));
+
+    // 从 LRU 尾部直接强制释放 5% 的 key；有活跃租约等不可释放的 key 跳过后，
+    // 向后延伸一次补足目标（候选预留一倍余量），遍历完候选即结束，不再继续延伸
+    const size_t fetchCount = std::min(releaseTarget * FORCE_EVICT_FETCH_MULTIPLIER, totalKeys);
+    const auto candidateKeys = metaContainer_->GetEvictCandidateKeys(media, fetchCount);
+
+    size_t releasedCount = 0;
+    for (const auto &key : candidateKeys) {
+        if (releasedCount >= releaseTarget) {
+            break;
+        }
+        // 同步释放：move-down 或直接删除，跳过有活跃租约的 key；仅释放碎片化 rank 上的 blob在 ForceReleaseKey 内部完成
+        if (ForceReleaseKey(key, media, fragmentedRanks)) {
+            ++releasedCount;
+        }
+    }
+
+    MMC_LOG_INFO("ForceEvictForFragmentation media: " << media << ", wantAllocSize: " << wantAllocSize
+                                                      << ", totalKeys: " << totalKeys << ", releaseTarget: "
+                                                      << releaseTarget << ", released: " << releasedCount
+                                                      << ", fragmentedRanks.size: " << fragmentedRanks.size());
+    return releasedCount;
+}
+
+bool MmcMetaManager::ForceReleaseKey(const std::string &key, MediaType media, const std::vector<uint32_t> &targetRanks)
+{
+    // 与 EvictCallBackFunction 同构但同步执行：双写已保证数据在目标层有副本，
+    // 直接同步删除源层 blob 无需 move-down；有活跃租约时跳过（LRU 不动）。
+    MmcMemObjMetaPtr objMeta;
+    if (metaContainer_->Get(key, objMeta) != MMC_OK || objMeta == nullptr) {
+        return false;
+    }
+
+    MmcBlobFilterPtr mediaFilter = MmcMakeRef<MmcBlobFilter>(UINT32_MAX, media, READABLE);
+    if (mediaFilter == nullptr) {
+        MMC_LOG_ERROR("ForceReleaseKey create filter failed, key=" << key);
+        return false;
+    }
+
+    bool shouldErase = false;
+    bool hasSameMediaBlob = false;
+    {
+        std::unique_lock<std::mutex> guard(objMeta->Mutex());
+        // 选取首个命中 targetRanks 的 READABLE blob
+        std::vector<MmcMemBlobDesc> evictBlobs;
+        objMeta->GetBlobsDesc(evictBlobs, mediaFilter);
+        uint32_t evictRank = UINT32_MAX;
+        for (const auto &desc : evictBlobs) {
+            if (std::find(targetRanks.begin(), targetRanks.end(), desc.rank_) != targetRanks.end()) {
+                evictRank = desc.rank_;
+                break;
+            }
+        }
+        // 目标 rank 无可释放的 READABLE blob，LRU 不动
+        if (evictRank == UINT32_MAX) {
+            return false;
+        }
+        MmcBlobFilterPtr srcFilter = MmcMakeRef<MmcBlobFilter>(evictRank, media, READABLE);
+        if (srcFilter == nullptr) {
+            MMC_LOG_ERROR("ForceReleaseKey create src filter failed, key=" << key);
+            return false;
+        }
+        if (CheckActiveLease(key, objMeta, srcFilter)) {
+            return false;
+        }
+        MmcMetaMetricManager::GetInstance().IncrementEvictCounter(evictRank);
+        // 同步删除：DetachBlobs + FinalizeBlobs，内存立即归还分配器
+        DoRemoveBlobs(key, objMeta, srcFilter, false);
+        shouldErase = (objMeta->NumBlobs() == 0);
+        if (!shouldErase) {
+            MmcBlobFilterPtr anyStateFilter = MmcMakeRef<MmcBlobFilter>(UINT32_MAX, media, NONE);
+            hasSameMediaBlob = (anyStateFilter != nullptr) && !objMeta->GetBlobs(anyStateFilter).empty();
+        }
+    }
+    // 重新判空（锁序：容器锁 → objMeta 锁，与 EvictDefragTargets 一致）
+    if (shouldErase) {
+        metaContainer_->EraseIfEmpty(key, [](const MmcMemObjMetaPtr &meta) {
+            std::unique_lock<std::mutex> guard(meta->Mutex());
+            return meta->NumBlobs() == 0;
+        });
+    } else if (!hasSameMediaBlob) {
+        metaContainer_->InsertLru(key, MEDIA_NONE);
+    }
+    return true;
+}
+
+void MmcMetaManager::DefragEvict()
+{
+    // defragCheck_ 防止碎片整理定时任务自身并发
+    bool expected = false;
+    if (!defragCheck_.compare_exchange_strong(expected, true)) {
+        MMC_LOG_WARN("DefragEvict skip: previous defrag task still running");
+        return;
+    }
+    MMC_LOG_INFO("DefragEvict begin: regular/force eviction in progress");
+    // 投递异步任务前同步检测：仅当存在碎片化（多段空闲且不可用空闲占比超阈值）的
+    // (media, loc) 时才执行异步整理，无碎片时不空转线程池
+    std::vector<std::pair<MediaType, std::vector<MmcLocation>>> defragLocs = DetectDefragLocs();
+    if (defragLocs.empty()) {
+        MMC_LOG_INFO("DefragEvict skip: no fragmented address space");
+        defragCheck_.store(false);
+        return;
+    }
+
+    // 实际释放前与水位淘汰（CheckAndEvict）/强制淘汰（AllocWithForceEvict）互斥：
+    // 共用 evictCheck_ 单飞行；检测阶段仅读全局分配器无需互斥，进入释放环节才争用
+    bool evictExpected = false;
+    if (!evictCheck_.compare_exchange_strong(evictExpected, true)) {
+        MMC_LOG_WARN("DefragEvict skip: regular/force eviction in progress");
+        defragCheck_.store(false);
+        return;
+    }
+
+    size_t totalFragmentedLocs = 0;
+    for (const auto &defragLoc : defragLocs) {
+        totalFragmentedLocs += defragLoc.second.size();
+    }
+    MMC_LOG_INFO("DefragEvict start: fragmented media groups: " << defragLocs.size()
+                                                                << ", fragmented locs: " << totalFragmentedLocs);
+
+    auto future = threadPool_->Enqueue([this, defragLocs = std::move(defragLocs)]() {
+        // 碎片化的 (media, loc) 已同步检测得出，media 与 loc 作为入参逐组整理
+        for (const auto &defragLoc : defragLocs) {
+            DefragEvictForMedia(defragLoc.first, defragLoc.second);
+        }
+        defragCheck_.store(false);
+        evictCheck_.store(false);
+    });
+    if (!future.valid()) {
+        MMC_LOG_ERROR("submit defrag evict task failed");
+        defragCheck_.store(false);
+        evictCheck_.store(false);
+    }
+}
+
+std::vector<std::pair<MediaType, std::vector<MmcLocation>>> MmcMetaManager::DetectDefragLocs()
+{
+    // 同步碎片检测：逐介质枚举已挂载 location，取空闲段快照按碎片浪费率判断
+    // （不可用空闲占比超阈值且至少两段空闲才值得整理），结果按介质分组，无碎片时为空
+    const uint64_t maxAlignedSize = globalAllocator_->GetMaxAlignedSize();
+    const uint64_t minUsableBlockSize = maxAlignedSize != 0 ? maxAlignedSize : DEFRAG_EVICT_MIN_USABLE_BLOCK_SIZE;
+    MMC_LOG_INFO("DetectDefragLocs: maxAlignedSize: " << maxAlignedSize
+                                                      << ", minUsableBlockSize: " << minUsableBlockSize);
+    std::vector<std::pair<MediaType, std::vector<MmcLocation>>> defragLocs;
+    for (MediaType media = MEDIA_HBM; media != MEDIA_NONE; media = MoveDown(media)) {
+        if (media == MEDIA_SSD) {
+            continue;
+        }
+        std::vector<MmcLocation> fragmentedLocs;
+        for (const auto &loc : globalAllocator_->GetMediaLocations(media)) {
+            const auto freeSegments = globalAllocator_->GetFreeSegments(loc);
+            uint64_t fragmentedRate = 0;
+            if (IsDefragWorthy(freeSegments, fragmentedRate, defragEvictThreshold_.load(std::memory_order_relaxed),
+                               minUsableBlockSize)) {
+                fragmentedLocs.push_back(loc);
+            }
+            MMC_LOG_INFO("DetectDefragLocs: fragmented loc, media: " << media << ", rank: " << loc.rank_
+                                                                     << ", freeSegments: " << freeSegments.size()
+                                                                     << ", fragmentedRate: " << fragmentedRate << "%");
+        }
+        if (!fragmentedLocs.empty()) {
+            defragLocs.emplace_back(media, std::move(fragmentedLocs));
+        }
+    }
+    return defragLocs;
+}
+
+void MmcMetaManager::DefragEvictForMedia(MediaType media, const std::vector<MmcLocation> &locs)
+{
+    if (media == MEDIA_NONE || media == MEDIA_SSD) {
+        return;
+    }
+
+    // 冷 key 候选池与 5% 释放目标按介质计算（rank 循环外只取一次），复用容器现有 LRU 原语
+    std::unordered_set<std::string> coldKeys;
+    size_t releaseTarget = 0;
+    if (!GetDefragColdKeys(media, coldKeys, releaseTarget)) {
+        return;
+    }
+
+    MMC_LOG_INFO("DefragEvictForMedia start: media: " << media << ", fragmented locs: " << locs.size() << ", coldKeys: "
+                                                      << coldKeys.size() << ", releaseTarget: " << releaseTarget);
+
+    // 逐 (rank, media) 分配器整理：不同 rank 的 gva 地址空间独立，不可跨 rank 归并。
+    // locs 为同步检测判碎片化的地址空间
+    for (const auto &loc : locs) {
+        DefragEvictForRank(media, loc, coldKeys, releaseTarget);
+    }
+}
+
+bool MmcMetaManager::GetDefragColdKeys(MediaType media, std::unordered_set<std::string> &coldKeys,
+                                       size_t &releaseTarget)
+{
+    const size_t totalKeys = metaContainer_->GetKeyCount(media);
+    const size_t coldCount =
+        std::max(totalKeys * DEFRAG_EVICT_CANDIDATE_PERCENT / DEFRAG_EVICT_PERCENT_DENOM, static_cast<size_t>(1));
+    const auto coldKeyVec = metaContainer_->GetEvictCandidateKeys(media, coldCount);
+    coldKeys.insert(coldKeyVec.begin(), coldKeyVec.end());
+    if (coldKeys.empty()) {
+        MMC_LOG_DEBUG("DefragEvictForMedia skip: no cold key, media: " << media);
+        return false;
+    }
+    releaseTarget =
+        std::max(totalKeys * DEFRAG_EVICT_RELEASE_PERCENT / DEFRAG_EVICT_PERCENT_DENOM, static_cast<size_t>(1));
+    MMC_LOG_INFO("GetDefragColdKeys media: " << media << ", totalKeys: " << totalKeys << ", coldCount: " << coldCount
+                                             << ", releaseTarget: " << releaseTarget);
+    return true;
+}
+
+bool MmcMetaManager::BuildDefragBlobIndex(MediaType media, uint32_t rank,
+                                          const std::unordered_set<std::string> &coldKeys,
+                                          std::vector<DefragBlobEntry> &blobIdx,
+                                          std::unordered_map<uint32_t, std::string> &coldKeyCopies)
+{
+    // 冷 key 须在读锁内拷贝到 coldKeyCopies——IterateIf 返回后锁已释放，解引用 map 内 key 指针会悬垂
+    std::map<std::string, MmcMemObjMetaPtr> matched;
+    uint32_t keyCount = 0;
+    metaContainer_->IterateIf(
+        [&](const std::string &key, const MmcMemObjMetaPtr &objMeta) -> bool {
+            // 仅收集属于该 (media, rank) 地址空间的 blob，coldKeys 集合用于标记可释放
+            if (objMeta == nullptr) {
+                return false;
+            }
+            const uint32_t idx = keyCount++;
+            const bool isCold = coldKeys.count(key) > 0;
+            if (isCold) {
+                coldKeyCopies.emplace(idx, key);
+            }
+            std::lock_guard<std::mutex> objGuard(objMeta->Mutex());
+            for (const auto &blob : objMeta->GetBlobs()) {
+                if (blob != nullptr && static_cast<MediaType>(blob->Type()) == media && blob->Rank() == rank) {
+                    blobIdx.push_back({blob->Gva(), MmcBlobAllocator::AllocSizeAlignUp(blob->Size()), idx,
+                                       isCold && blob->State() == READABLE});
+                }
+            }
+            return false; // 不收集到 matchedValues，只借 IterateIf 的读锁遍历
+        },
+        matched);
+    // metaMap_ 为 unordered_map，遍历序任意：PickDefragWindow 契约要求 blobIdx 按 gva 升序
+    std::sort(blobIdx.begin(), blobIdx.end(),
+              [](const DefragBlobEntry &l, const DefragBlobEntry &r) { return l.gva_ < r.gva_; });
+    if (blobIdx.empty()) {
+        MMC_LOG_DEBUG("DefragEvictForMedia skip: no blob in address space, media: " << media << ", rank: " << rank);
+        return false;
+    }
+    return true;
+}
+
+void MmcMetaManager::DefragEvictForRank(MediaType media, MmcLocation loc,
+                                        const std::unordered_set<std::string> &coldKeys, size_t releaseTarget)
+{
+    // 检测与投递之间存在时滞，重新预判碎片状态：已消除（单段连续或不可用空闲
+    // 占比已降至阈值以下）则跳过该地址空间
+    // 可用块阈值优先取分配器历史上出现过的最大对齐分配块（字节），无历史记录（0）时回退默认 3MB
+    const uint64_t maxAlignedSize = globalAllocator_->GetMaxAlignedSize();
+    const uint64_t minUsableBlockSize = maxAlignedSize != 0 ? maxAlignedSize : DEFRAG_EVICT_MIN_USABLE_BLOCK_SIZE;
+    MMC_LOG_INFO("DefragEvictForRank: media: " << media << ", rank: " << loc.rank_ << ", maxAlignedSize: "
+                                               << maxAlignedSize << ", minUsableBlockSize: " << minUsableBlockSize);
+    const auto freeSegments = globalAllocator_->GetFreeSegments(loc);
+    uint64_t beforeFragmentedRate = 0;
+    if (!IsDefragWorthy(freeSegments, beforeFragmentedRate, defragEvictThreshold_.load(std::memory_order_relaxed),
+                        minUsableBlockSize)) {
+        MMC_LOG_DEBUG("DefragEvictForRank skip: no longer fragmented, media: " << media << ", rank: " << loc.rank_);
+        return;
+    }
+
+    // blob 索引构建在 manager 层完成（此处 Value=MmcMemObjMetaPtr，可安全解引用 GetBlobs()/Mutex()）
+    std::vector<DefragBlobEntry> blobIdx;
+    std::unordered_map<uint32_t, std::string> coldKeyCopies;
+    if (!BuildDefragBlobIndex(media, loc.rank_, coldKeys, blobIdx, coldKeyCopies)) {
+        return;
+    }
+
+    const auto bestKeyIdx = PickDefragWindow(freeSegments, blobIdx, releaseTarget);
+    if (bestKeyIdx.empty()) {
+        MMC_LOG_DEBUG("DefragEvictForMedia: no releasable consecutive window, media: "
+                      << media << ", rank: " << loc.rank_ << ", coldKeys: " << coldKeys.size()
+                      << ", blobs: " << blobIdx.size());
+        return;
+    }
+
+    std::vector<std::string> targets;
+    targets.reserve(bestKeyIdx.size());
+    // 同一 key 的多个 blob 可能落入不同窗口而被选中两次，拷贝而非 move 避免二次取出为空串；
+    // 重复 target 由 EvictDefragTargets 锁内 find 兜底（首次 REMOVE 后二次未命中跳过）
+    for (const uint32_t idx : bestKeyIdx) {
+        targets.push_back(coldKeyCopies.at(idx));
+    }
+
+    MMC_LOG_INFO("DefragEvict media: " << media << ", rank: " << loc.rank_ << ", freeSegments: " << freeSegments.size()
+                                       << ", fragmentedRate: " << beforeFragmentedRate << "%"
+                                       << ", coldKeys: " << coldKeys.size() << ", blobs: " << blobIdx.size()
+                                       << ", releaseTarget: " << releaseTarget
+                                       << ", selected consecutive keys: " << targets.size());
+
+    // 与 CheckAndEvict 同构：复用 EvictCallBackFunction 做 move-down
+    auto moveFunc = [this](const std::string &key, const MmcMemObjMetaPtr &objMeta,
+                           MediaType srcMediaType) -> EvictResult {
+        return this->EvictCallBackFunction(key, objMeta, srcMediaType);
+    };
+    const size_t evicted =
+        metaContainer_->EvictDefragTargets(targets, moveFunc, media, evictYieldInterval_, evictYieldDurationUs_);
+    const auto freeSegmentsAfter = globalAllocator_->GetFreeSegments(loc);
+    const uint64_t afterFragmentedRate = GetDefragWastePercent(freeSegmentsAfter, minUsableBlockSize);
+    MMC_LOG_INFO("DefragEvict done: media: " << media << ", rank: " << loc.rank_ << ", targets: " << targets.size()
+                                             << ", evicted: " << evicted << ", fragmentedRate: " << afterFragmentedRate
+                                             << "%");
+}
+
 Result MmcMetaManager::Alloc(const std::string &key, const AllocOptions &allocOpt, uint64_t operateId,
                              uint64_t leaseTtlMs, MmcMemMetaDesc &objMeta)
 {
@@ -965,8 +1354,31 @@ Result MmcMetaManager::Alloc(const std::string &key, const AllocOptions &allocOp
     Result ret = globalAllocator_->Alloc(allocOpt, blobs);
     if (ret != MMC_OK) {
         globalAllocator_->Free(blobs);
-        MMC_LOG_ERROR("Alloc " << allocOpt.blobSize_ << " failed, ret:" << ret);
-        return ret;
+        // 内存碎片场景：水位线正常，但申请大小超过当前系统中最大的单个连续空闲块，
+        // 同步执行强制淘汰并在本次调用内重试分配，确保清理完成后即可分配成功
+        MediaType media = static_cast<MediaType>(allocOpt.mediaType_);
+        if (media == MEDIA_NONE) {
+            media = globalAllocator_->GetTopLayerMediumType();
+        }
+        if (media != MEDIA_NONE && media != MEDIA_SSD && globalAllocator_->IsFragmentation(media, allocOpt.blobSize_)) {
+            // 逐 rank 检测碎片：Alloc 经 ArrangeLocality/RandomAssign 可能在任意 rank 上失败，
+            // preferredRank_ 不能反映实际失败的 rank，须检查该介质所有已挂载 rank
+            auto fragmentedRanks = globalAllocator_->GetFragmentedRanks(media, allocOpt.blobSize_);
+            if (!fragmentedRanks.empty()) {
+                MMC_LOG_WARN("Alloc failed by fragmentation, media: "
+                             << media << ", wantSize: " << allocOpt.blobSize_
+                             << ", maxContiguousFree: " << globalAllocator_->GetMaxContiguousFreeSize(media)
+                             << ", fragmentedRanks: " << fragmentedRanks.size() << ", trigger force evict");
+                ret = AllocWithForceEvict(allocOpt, media, fragmentedRanks, ret, blobs);
+                if (ret == MMC_OK) {
+                    MMC_LOG_INFO("Alloc succeed after force evict, key=" << key);
+                }
+            }
+        }
+        if (ret != MMC_OK) {
+            MMC_LOG_ERROR("Alloc " << allocOpt.blobSize_ << " failed, ret:" << ret);
+            return ret;
+        }
     }
 
     const uint64_t actualLeaseTtlMs = leaseTtlMs == 0 ? defaultTtlMs_.load(std::memory_order_relaxed) : leaseTtlMs;
@@ -2212,6 +2624,22 @@ Result MmcMetaManager::UpdateConfig(uint64_t leaseTtlMs, uint16_t evictThreshold
         MMC_LOG_TRACE("meta evictThresholdLow hot-reloaded from " << evictThresholdLow_.load(std::memory_order_relaxed)
                                                                   << " to " << evictThresholdLow);
         evictThresholdLow_.store(evictThresholdLow, std::memory_order_relaxed);
+    }
+    return MMC_OK;
+}
+
+Result MmcMetaManager::UpdateDefragEvictThreshold(uint16_t defragEvictThreshold)
+{
+    if (defragEvictThreshold < MIN_DEFRAG_EVICT_THRESHOLD || defragEvictThreshold > MAX_DEFRAG_EVICT_THRESHOLD) {
+        MMC_LOG_ERROR("invalid defrag evict waste percent threshold, value=" << defragEvictThreshold << ", must be in ["
+                                                                             << MIN_DEFRAG_EVICT_THRESHOLD << ", "
+                                                                             << MAX_DEFRAG_EVICT_THRESHOLD << "]");
+        return MMC_INVALID_PARAM;
+    }
+    if (defragEvictThreshold_.load(std::memory_order_relaxed) != defragEvictThreshold) {
+        MMC_LOG_TRACE("meta defragEvictThreshold hot-reloaded from "
+                      << defragEvictThreshold_.load(std::memory_order_relaxed) << " to " << defragEvictThreshold);
+        defragEvictThreshold_.store(defragEvictThreshold, std::memory_order_relaxed);
     }
     return MMC_OK;
 }

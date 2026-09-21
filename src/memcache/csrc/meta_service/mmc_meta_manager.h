@@ -12,6 +12,7 @@
 #ifndef MEM_FABRIC_MMC_META_MANAGER_H
 #define MEM_FABRIC_MMC_META_MANAGER_H
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -19,9 +20,12 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
+#include "mmc_defrag_evict.h"
 #include "mmc_global_allocator.h"
 #include "mmc_storage_mode.h"
 #include "mmc_mem_obj_meta.h"
@@ -150,6 +154,10 @@ public:
     // the values actually differ. Validation mirrors MmcMetaService::Start. Returns
     // MMC_INVALID_PARAM and keeps current values on failure.
     Result UpdateConfig(uint64_t leaseTtlMs, uint16_t evictThresholdHigh, uint16_t evictThresholdLow);
+
+    // Hot-reload the defrag eviction waste percent threshold independently of the evict watermarks.
+    // Returns MMC_INVALID_PARAM and keeps the current value on failure.
+    Result UpdateDefragEvictThreshold(uint16_t defragEvictThreshold);
 
     Result Start()
     {
@@ -393,6 +401,26 @@ public:
      */
     void CheckAndEvict(MediaType media, uint64_t wantAllocSize);
 
+    /**
+     * @brief 碎片整理式异步淘汰（周期任务入口，紧随 CheckAndEvict 之后执行）：
+     *        1. 投递异步任务前同步检测所有 (media, loc)，收集碎片化地址空间
+     *           （多段空闲且最大连续空闲块不足 1000MB，大块 put 无法直接满足）
+     *        2. 容器读锁内全量构建 blob 与 gva 的关系（冷 key 拷贝池 + (gva, keyIdx) 索引）
+     *        3. 索引与分配器 addressTree 记录的空闲地址段归并扫描，构造全量段图
+     *        4. 窗口贪心选出段图上地址连续最长的冷 key 序列（LRU 尾部 20%）
+     *        5. 对这些 key 进行异步释放，与相邻空闲段合并出更大的连续空闲块
+     *        无碎片化地址空间时不投递异步任务
+     */
+    void DefragEvict();
+
+    /**
+     * @brief 同步碎片检测：逐介质枚举已挂载 location，按（总空闲, 最大连续空闲块）
+     *        O(1) 判断碎片化（多段空闲且最大连续空闲块不足 1000MB），
+     *        收集需整理的地址空间
+     * @return (media, 碎片化 loc 列表) 按介质分组，无碎片时为空
+     */
+    std::vector<std::pair<MediaType, std::vector<MmcLocation>>> DetectDefragLocs();
+
     bool IsEvictRunning() const noexcept
     {
         return evictCheck_.load(std::memory_order_relaxed);
@@ -563,6 +591,93 @@ private:
 
     EvictResult EvictCallBackFunction(const std::string &key, const MmcMemObjMetaPtr &objMeta, MediaType srcMediaType);
 
+    /**
+     * @brief 内存碎片场景的强制淘汰（同步执行）：从 LRU 尾部直接强制释放 5% 的 key；
+     *        有活跃租约等不可释放的 key 跳过后向后延伸一次补足目标（候选预留一倍余量），遍历完候选仍未达到目标即结束。
+     *        仅释放 fragmentedRanks 中 rank 的 blob，避免跨 rank 释放错空间
+     * @param media            [in] 介质类型
+     * @param fragmentedRanks  [in] 碎片化 rank 列表，仅释放这些 rank 上的 blob
+     * @param wantAllocSize    [in] 触发淘汰的申请大小，仅用于日志
+     * @return 本次实际释放的 key 个数，0 表示无可释放的 key
+     */
+    size_t ForceEvictForFragmentation(MediaType media, const std::vector<uint32_t> &fragmentedRanks,
+                                      uint64_t wantAllocSize);
+
+    /**
+     * @brief 同步强制释放 key 在指定介质上目标 rank 的 blob（与 EvictCallBackFunction 同构但同步执行）：
+     *        持锁选取首个命中 targetRanks 的 READABLE blob，目标层有空间时同步 move-down 该 rank 的 blob，
+     *        否则同步删除；该 blob 有活跃租约时直接跳过。key 在同介质其他 rank 的副本及其他介质
+     *        （如 SSD）的 blob 均保留，避免跨 rank 释放错空间、无谓丢数据
+     * @param key         [in] 待释放的 key
+     * @param media       [in] 源介质类型
+     * @param targetRanks [in] 目标 rank 列表（碎片化 rank），仅释放这些 rank 上的 blob
+     * @return true 表示已成功释放；key 不存在、目标 rank 无可释放 READABLE blob 或有活跃租约时返回 false
+     */
+    bool ForceReleaseKey(const std::string &key, MediaType media, const std::vector<uint32_t> &targetRanks);
+
+    /**
+     * @brief 单个介质上的碎片整理式淘汰（异步任务内执行）：对同步检测传入的
+     *        碎片化 loc 列表，由容器在锁内全量构建 blob 索引并与空闲段归并出
+     *        全量段图，窗口贪心选出地址连续最长的冷 key 序列（LRU 尾部 20%）
+     *        后调 EvictDefragTargets 逐个 move-down 释放（与 CheckAndEvict 同构）
+     * @param media [in] 目标介质类型
+     * @param locs  [in] 同步检测判碎片化的地址空间列表
+     */
+    void DefragEvictForMedia(MediaType media, const std::vector<MmcLocation> &locs);
+
+    /**
+     * @brief 碎片整理冷 key 候选池与释放目标计算：LRU 尾部 20%（最久未使用）为候选，
+     *        释放目标为该介质 LRU 总量 5%，均按介质整体计算一次（rank 循环外复用）
+     * @param media         [in]  目标介质类型
+     * @param coldKeys      [out] 冷 key 候选集合
+     * @param releaseTarget [out] 单次释放目标数量（最少 1）
+     * @return false 表示无冷 key 候选，应跳过该介质
+     */
+    bool GetDefragColdKeys(MediaType media, std::unordered_set<std::string> &coldKeys, size_t &releaseTarget);
+
+    /**
+     * @brief 碎片整理 blob 地址索引构建：metaLock 读锁内遍历 metaMap，收集属于
+     *        (media, rank) 地址空间的 blob 记录 (gva, 4K 对齐大小, keyIdx, 可释放)，
+     *        冷 key 同时拷贝入 coldKeyCopies——锁释放后 metaMap 内 key 指针不可解引用。
+     *        索引按 gva 升序返回（PickDefragWindow 契约）
+     * @param media         [in]  目标介质类型
+     * @param rank          [in]  目标 rank（gva 地址空间隔离单位）
+     * @param coldKeys      [in]  冷 key 候选集合（标记可释放）
+     * @param blobIdx       [out] 按 gva 升序的 blob 索引
+     * @param coldKeyCopies [out] keyIdx 到冷 key 字符串的锁内拷贝（防悬垂）
+     * @return false 表示该 (media, rank) 上无任何 blob，应跳过
+     */
+    bool BuildDefragBlobIndex(MediaType media, uint32_t rank, const std::unordered_set<std::string> &coldKeys,
+                              std::vector<DefragBlobEntry> &blobIdx,
+                              std::unordered_map<uint32_t, std::string> &coldKeyCopies);
+
+    /**
+     * @brief 单个 (rank, media) 地址空间上的碎片整理：空闲段快照预判碎片化
+     *        （多段空闲且最大连续空闲块不足 1000MB，大块 put 无法直接满足）后，
+     *        构建 blob 索引、窗口贪心选中连续冷 key（凑够 5% 目标），
+     *        调 EvictDefragTargets 持写锁逐 key move-down 释放
+     * @param media         [in] 目标介质类型
+     * @param loc           [in] 目标分配器位置
+     * @param coldKeys      [in] 冷 key 候选集合
+     * @param releaseTarget [in] 单次释放目标数量
+     */
+    void DefragEvictForRank(MediaType media, MmcLocation loc, const std::unordered_set<std::string> &coldKeys,
+                            size_t releaseTarget);
+
+    /**
+     * @brief 内存碎片场景下的同步分配：循环执行强制淘汰并重试分配，
+     *        直到分配成功或强制淘汰已无可释放的 key，保证一次 Alloc 调用内完成清理与分配
+     * @param allocOpt         [in]  分配请求
+     * @param media            [in]  发生分配失败的介质类型
+     * @param fragmentedRanks  [in]  碎片化 rank 列表，强制淘汰仅释放这些 rank 上的 blob
+     * @param originRet        [in]  原始分配失败错误码（无进展或单飞行冲突时原样返回）
+     * @param blobs            [out] 分配成功的 blob 列表
+     * @return 分配结果，MMC_OK 表示清理后分配成功
+     */
+    Result AllocWithForceEvict(const AllocOptions &allocOpt, MediaType media,
+                               const std::vector<uint32_t> &fragmentedRanks, Result originRet,
+                               std::vector<MmcMemBlobPtr> &blobs);
+
     EvictResult EvictRemoveSrc(const std::string &key, const MmcMemObjMetaPtr &objMeta,
                                const MmcBlobFilterPtr &srcFilter, MediaType dstMedium);
     EvictResult EvictRemoveSrc(const std::string &key, const MmcMemObjMetaPtr &objMeta, MediaType srcMediaType,
@@ -695,7 +810,9 @@ private:
 private:
     std::mutex mutex_;
     bool started_ = false;
-    std::atomic<bool> evictCheck_{false}; /* if the worker started */
+    // 常规淘汰（CheckAndEvict）与碎片强制淘汰（ForceEvictForFragmentation）共用单飞行标志：
+    // 同一时刻最多一个淘汰在执行，避免两者并发重复释放 key
+    std::atomic<bool> evictCheck_{false}; /* if any evict worker (check-and-evict or force evict) is running */
 
     MmcRef<MmcMetaContainer<std::string, MmcMemObjMetaPtr>> metaContainer_;
     MmcGlobalAllocatorPtr globalAllocator_;
@@ -705,11 +822,16 @@ private:
     std::atomic<uint64_t> defaultTtlMs_; /* default ttl in milliseconds */
     std::atomic<uint16_t> evictThresholdHigh_;
     std::atomic<uint16_t> evictThresholdLow_;
+    std::atomic<uint16_t> defragEvictThreshold_{static_cast<uint16_t>(DEFRAG_EVICT_WASTE_PERCENT_THRESHOLD)};
     MmcMetaExtConfig extConfig_;
     uint32_t evictYieldInterval_;   /* GC eviction yield interval (0=disabled) */
     uint32_t evictYieldDurationUs_; /* GC eviction yield sleep duration in microseconds */
     uint32_t lruShardCount_;
     MetaLruType lruType_;
+    // 碎片整理式异步淘汰的单飞行标志：与 evictCheck_ 独立，
+    // 避免周期任务内 CheckAndEvict 异步未完成时碎片整理始终被跳过；
+    // 与其他淘汰并发释放同一 key 时由 objMeta 锁内 GetBlobs 空检查兜底
+    std::atomic<bool> defragCheck_{false};
     MetaNetServerPtr metaNetServer_;
     MmcThreadPoolPtr threadPool_;
 

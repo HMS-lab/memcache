@@ -66,6 +66,15 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
     MMC_VALIDATE_RETURN(options.evictThresholdHigh > options.evictThresholdLow,
                         "invalid param, evictThresholdHigh must large than evictThresholdLow", MMC_INVALID_PARAM);
     options_.leaseTtlMs = options.leaseTtlMs == 0 ? MMC_DATA_TTL_MS : options.leaseTtlMs;
+    if (options_.defragEvictThreshold == 0) {
+        options_.defragEvictThreshold = static_cast<uint16_t>(DEFRAG_EVICT_WASTE_PERCENT_THRESHOLD);
+    }
+    MMC_VALIDATE_RETURN(options_.defragEvictThreshold >= MIN_DEFRAG_EVICT_THRESHOLD &&
+                            options_.defragEvictThreshold <= MAX_DEFRAG_EVICT_THRESHOLD,
+                        "invalid param, defragEvictThreshold must be in range [" +
+                            std::to_string(MIN_DEFRAG_EVICT_THRESHOLD) + ", " +
+                            std::to_string(MAX_DEFRAG_EVICT_THRESHOLD) + "]",
+                        MMC_INVALID_PARAM);
     MMC_VALIDATE_RETURN(options.asyncFlushIntervalMs >= MIN_FLUSH_INTERVAL_MS &&
                             options.asyncFlushIntervalMs <= MAX_FLUSH_INTERVAL_MS,
                         "invalid param, asyncFlushIntervalMs must be in range [" +
@@ -102,6 +111,8 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
                                           extConfig, options.evictYieldInterval, options.evictYieldDurationUs,
                                           options_.lruShardCount, static_cast<MetaLruType>(options_.lruType)),
                      "Failed to start meta mgr proxy of meta service " << name_);
+    MMC_RETURN_ERROR(metaMgrProxy_->UpdateDefragEvictThreshold(options_.defragEvictThreshold),
+                     "Failed to apply defrag evict waste percent threshold of meta service " << name_);
     // 模式由 MetaService 启动配置统一确定，不能再由任一 rank 的注册请求改变。
     metaMgrProxy_->GetMetaManager()->SetSsdMetadataMode(static_cast<SsdMetadataMode>(options_.ssdMetadataMode));
 
@@ -199,6 +210,9 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
                 return;
             }
             metaManagerPtr->CheckAndEvict(MEDIA_NONE, 0);
+            // 碎片整理式异步淘汰：水位淘汰后释放与空闲地址段相邻的 LRU 冷数据，合并出更大的连续空闲块，缓解内存碎片
+            // DefragEvict 内部逐 (rank, media) 判断：仅多段空闲且最大连续空闲块不足 1000MB（存在碎片）时才释放
+            metaManagerPtr->DefragEvict();
         });
         if (periodicEvictRet != MMC_OK) {
             MMC_LOG_ERROR("Failed to start periodic eviction check task, ret: " << periodicEvictRet);
@@ -416,6 +430,28 @@ Result MmcMetaService::UpdateConfig(const mmc_meta_service_config_t &options)
     MMC_LOG_TRACE("Meta service config hot-reloaded, leaseTtlMs="
                   << options_.leaseTtlMs << ", evictThresholdHigh=" << options_.evictThresholdHigh
                   << ", evictThresholdLow=" << options_.evictThresholdLow);
+    return MMC_OK;
+}
+
+Result MmcMetaService::UpdateDefragEvictThreshold(uint16_t defragEvictThreshold)
+{
+    std::lock_guard<std::mutex> guard(mutex_);
+    if (!started_) {
+        MMC_LOG_WARN("MmcMetaService not started, cannot update defrag evict waste percent threshold");
+        return MMC_NOT_STARTED;
+    }
+    if (metaMgrProxy_ == nullptr) {
+        MMC_LOG_WARN("Meta mgr proxy not initialized, cannot update defrag evict waste percent threshold");
+        return MMC_NOT_INITIALIZED;
+    }
+    Result ret = metaMgrProxy_->UpdateDefragEvictThreshold(defragEvictThreshold);
+    if (ret != MMC_OK) {
+        MMC_LOG_WARN("Failed to update defrag evict waste percent threshold, ret=" << ret);
+        return ret;
+    }
+    options_.defragEvictThreshold = defragEvictThreshold;
+    MMC_LOG_TRACE("Meta service defrag evict waste percent threshold hot-reloaded to "
+                  << options_.defragEvictThreshold);
     return MMC_OK;
 }
 

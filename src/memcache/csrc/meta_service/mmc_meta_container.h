@@ -14,6 +14,7 @@
 
 #include <memory>
 
+#include "mmc_blob_allocator.h"
 #include "mmc_def.h"
 #include "mmc_ref.h"
 
@@ -33,6 +34,7 @@ public:
     virtual Result Get(const Key &key, Value &value) = 0;
     virtual Result Erase(const Key &key) = 0;
     virtual Result Erase(const Key &key, Value &value) = 0;
+    virtual Result EraseIfEmpty(const Key &key, std::function<bool(const Value &)> isEmptyFunc) = 0;
     virtual Result EraseAll(std::function<void(const Key &, const Value &)> removeFunc) = 0;
     virtual void EraseIf(std::function<bool(const Key &, const Value &)> matchFunc) = 0;
     virtual void IterateIf(std::function<bool(const Key &, const Value &)> matchFunc,
@@ -45,6 +47,7 @@ public:
     virtual MediaType GetMediaType(const Key &key) = 0;
     virtual Result InsertLru(const Key &key, MediaType type) = 0;
     virtual Result RemoveFromLru(const Key &key, MediaType type) = 0;
+
     virtual void MultiLevelElimination(const std::vector<std::pair<uint16_t, uint16_t>> &evictWatermarks,
                                        const std::vector<MediaType> &needEvictList,
                                        const std::vector<uint16_t> &nowMemoryThresholds,
@@ -52,6 +55,23 @@ public:
                                        uint32_t yieldInterval = 0, uint32_t yieldDurationUs = 0) = 0;
     // yieldInterval: evict this many objects then sleep yieldDurationUs microseconds to release
     //                the write lock, allowing blocked requests to acquire the lock. 0 disables yield.
+
+    /**
+     * @brief 碎片整理目标释放：对 DefragEvictForMedia 选中的 key 列表逐个执行 move-down
+     *        释放，与 EvictOneLeastRecentlyUsed 同构——持容器写锁调 moveFunc，锁内做
+     *        Erase（REMOVE）或 LRU 摘除（MOVE_DOWN），消除 ABA 窗口。每 yieldInterval 个
+     *        key 后 yield 一次，让被阻塞的 Get/Put/Exist 有窗口获取 metaLock_
+     * @param keys           [in] DefragEvictForMedia 返回的目标 key 列表
+     * @param moveFunc       [in] 释放回调（EvictCallBackFunction，执行 move-down 或纯释放）
+     * @param mediaType      [in] 源介质类型
+     * @param yieldInterval  [in] 每 N 个 key yield 一次（0=禁用）
+     * @param yieldDurationUs [in] 每次 yield 睡眠微秒数
+     * @return 实际释放（REMOVE + MOVE_DOWN）的 key 个数
+     */
+    virtual size_t EvictDefragTargets(const std::vector<Key> &keys,
+                                      std::function<EvictResult(const Key &, const Value &, MediaType)> moveFunc,
+                                      MediaType mediaType, uint32_t yieldInterval = 0,
+                                      uint32_t yieldDurationUs = 0) = 0;
 };
 
 template<typename Key, typename Value>

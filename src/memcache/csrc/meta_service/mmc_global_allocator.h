@@ -285,6 +285,163 @@ public:
         return totalSize[type] - usedSize[type];
     }
 
+    /**
+     * @brief 查询指定介质在所有 rank 上最大的单个连续空闲块大小
+     * @param type    [in] 介质类型，MEDIA_NONE 表示最顶层介质
+     * @return 最大连续空闲块大小，无可用分配器时为 0
+     */
+    uint64_t GetMaxContiguousFreeSize(MediaType type)
+    {
+        if (type == MEDIA_NONE) {
+            type = GetTopLayerMediumType();
+        }
+        if (type == MEDIA_NONE || type == MEDIA_SSD) {
+            return 0;
+        }
+        globalAllocLock_.LockRead();
+        uint64_t maxFreeSize = 0;
+        for (const auto &[loc, allocator] : allocators_) {
+            if (loc.mediaType_ != type || allocator == nullptr) {
+                continue;
+            }
+            maxFreeSize = std::max(maxFreeSize, allocator->GetMaxContiguousFreeSize());
+        }
+        globalAllocLock_.UnlockRead();
+        return maxFreeSize;
+    }
+
+    /**
+     * @brief 查询指定 location 的空闲空间概要：总空闲大小与最大连续空闲块大小
+     * @param loc    [in] 位置（rank + 介质）
+     * @return (总空闲大小, 最大连续空闲块大小)，location 不存在时为 (0, 0)
+     */
+    std::pair<uint64_t, uint64_t> GetLocFreeSummary(const MmcLocation &loc)
+    {
+        if (loc.mediaType_ == MEDIA_NONE || loc.mediaType_ == MEDIA_SSD) {
+            return {0, 0};
+        }
+        globalAllocLock_.LockRead();
+        std::pair<uint64_t, uint64_t> freeSummary{0, 0};
+        const auto iter = allocators_.find(loc);
+        if (iter != allocators_.end() && iter->second != nullptr) {
+            const auto usage = iter->second->GetUsageInfo();
+            freeSummary.first = usage.first - usage.second;
+            freeSummary.second = iter->second->GetMaxContiguousFreeSize();
+        }
+        globalAllocLock_.UnlockRead();
+        return freeSummary;
+    }
+
+    /**
+     * @brief 获取指定 location 分配器 addressTree 中的空闲地址段快照（gva 绝对地址）
+     * @param loc    [in] 位置（rank + 介质）
+     * @return 空闲地址段列表，location 不存在时为空
+     */
+    std::vector<SpaceRange> GetFreeSegments(const MmcLocation &loc)
+    {
+        if (loc.mediaType_ == MEDIA_NONE || loc.mediaType_ == MEDIA_SSD) {
+            return {};
+        }
+        globalAllocLock_.LockRead();
+        std::vector<SpaceRange> segments;
+        const auto iter = allocators_.find(loc);
+        if (iter != allocators_.end() && iter->second != nullptr) {
+            segments = iter->second->GetFreeSegments();
+        }
+        globalAllocLock_.UnlockRead();
+        return segments;
+    }
+
+    /**
+     * @brief 枚举指定介质已挂载的所有 location（rank + 介质），按 map 序（rank 升序）
+     * @param type    [in] 介质类型
+     * @return location 列表，无挂载分配器时为空
+     */
+    std::vector<MmcLocation> GetMediaLocations(MediaType type)
+    {
+        std::vector<MmcLocation> locations;
+        if (type == MEDIA_NONE || type == MEDIA_SSD) {
+            return locations;
+        }
+        globalAllocLock_.LockRead();
+        for (const auto &[loc, allocator] : allocators_) {
+            if (loc.mediaType_ == type && allocator != nullptr) {
+                locations.push_back(loc);
+            }
+        }
+        globalAllocLock_.UnlockRead();
+        return locations;
+    }
+
+    /**
+     * @brief 判断一次分配失败是否由内存碎片导致：总空闲足够（非容量耗尽），但申请大小超过系统中最大的单个连续空闲块
+     * @param media       [in] 介质类型，MEDIA_NONE 表示最顶层介质
+     * @param wantSize    [in] 申请的 blob 数据大小
+     * @return true 表示属于碎片场景，可通过强制淘汰整理出满足申请的连续内存
+     */
+    bool IsFragmentation(MediaType media, uint64_t wantSize)
+    {
+        if (media == MEDIA_NONE) {
+            media = GetTopLayerMediumType();
+        }
+        if (media == MEDIA_NONE || media == MEDIA_SSD) {
+            return false;
+        }
+        auto alignedSize = MmcBlobAllocator::AllocSizeAlignUp(wantSize);
+        // 总空闲不足属于容量耗尽而非碎片：应由常规水位淘汰（可搬移到低层介质）处理，
+        // 强制淘汰直接丢弃数据，不应在容量不足时触发
+        if (GetFreeSpace(media) < alignedSize) {
+            return false;
+        }
+        return GetMaxContiguousFreeSize(media) < alignedSize;
+    }
+
+    /**
+     * @brief 获取指定介质上因碎片化无法满足申请大小的 rank 列表，用于限定强制淘汰的目标 rank。
+     *        不同 rank 的 gva 地址空间独立，跨 rank 释放无法为失败 rank 整理出连续内存。
+     *        Alloc 经 ArrangeLocality/RandomAssign 可能在任意 rank 上失败，须检查所有已挂载 rank
+     * @param media          [in] 介质类型，MEDIA_NONE 表示最顶层介质
+     * @param wantSize       [in] 申请的 blob 数据大小
+     * @return 碎片化 rank 列表（总空闲 ≥ 申请但最大连续空闲块 < 申请），无碎片化 rank 时为空
+     */
+    std::vector<uint32_t> GetFragmentedRanks(MediaType media, uint64_t wantSize)
+    {
+        if (media == MEDIA_NONE) {
+            media = GetTopLayerMediumType();
+        }
+        if (media == MEDIA_NONE || media == MEDIA_SSD) {
+            return {};
+        }
+        auto alignedSize = MmcBlobAllocator::AllocSizeAlignUp(wantSize);
+        std::vector<uint32_t> ranks;
+        globalAllocLock_.LockRead();
+        for (const auto &[loc, allocator] : allocators_) {
+            if (loc.mediaType_ != media || allocator == nullptr) {
+                continue;
+            }
+            auto [total, used] = allocator->GetUsageInfo();
+            uint64_t freeSpace = total - used;
+            // 总空闲不足属于容量耗尽：淘汰少量 key 无法补足，跳过
+            if (freeSpace >= alignedSize && allocator->GetMaxContiguousFreeSize() < alignedSize) {
+                ranks.push_back(loc.rank_);
+            }
+        }
+        globalAllocLock_.UnlockRead();
+        return ranks;
+    }
+
+    MediaType GetTopLayerMediumType()
+    {
+        MediaType result = MEDIA_NONE;
+        globalAllocLock_.LockRead();
+        for (const auto &[location, allocator] : allocators_) {
+            result = location.mediaType_;
+            break;
+        }
+        globalAllocLock_.UnlockRead();
+        return result;
+    }
+
     bool IsAboveUsageRatio(MediaType type, uint16_t watermark)
     {
         if (type == MEDIA_NONE || type == MEDIA_SSD || watermark == 0) {
@@ -402,18 +559,6 @@ private:
                 break;
         }
         return ret;
-    }
-
-    MediaType GetTopLayerMediumType()
-    {
-        MediaType result = MEDIA_NONE;
-        globalAllocLock_.LockRead();
-        for (const auto &[location, allocator] : allocators_) {
-            result = location.mediaType_;
-            break;
-        }
-        globalAllocLock_.UnlockRead();
-        return result;
     }
 
     // maxAlignedSize_ 声明在 allocators_ 之前，确保析构时 blob allocator 先销毁（它们持有此指针）

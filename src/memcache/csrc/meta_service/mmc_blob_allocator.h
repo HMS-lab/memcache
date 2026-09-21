@@ -61,6 +61,20 @@ public:
     virtual MmcMemBlobPtr Alloc(uint64_t blobSize);
     virtual Result Release(const MmcMemBlobPtr &blob);
     virtual Result BuildFromBlobs(std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList);
+
+    /**
+     * @brief 查询当前最大的单个连续空闲块大小
+     * @return 最大连续空闲块大小，无空闲时为 0
+     */
+    virtual uint64_t GetMaxContiguousFreeSize();
+
+    /**
+     * @brief 获取 addressTree 中记录的空闲地址段快照（gva 绝对地址）
+     * @return 空闲地址段列表，按地址升序排列
+     */
+    virtual std::vector<SpaceRange> GetFreeSegments();
+
+    static uint64_t AllocSizeAlignUp(uint64_t size);
     void Start()
     {
         spinlock_.lock();
@@ -95,7 +109,6 @@ public:
     }
 
 protected:
-    static uint64_t AllocSizeAlignUp(uint64_t size);
     Result ValidateAndAddAllocation(uint64_t offset, uint64_t size, uint64_t allocSize = 0);
 
 protected:

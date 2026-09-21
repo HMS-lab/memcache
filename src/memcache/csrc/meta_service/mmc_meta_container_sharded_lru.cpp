@@ -63,6 +63,11 @@ public:
         return ShardOf(key).Erase(key, value);
     }
 
+    Result EraseIfEmpty(const Key &key, std::function<bool(const Value &)> isEmptyFunc) override
+    {
+        return ShardOf(key).EraseIfEmpty(key, isEmptyFunc);
+    }
+
     Result EraseAll(std::function<void(const Key &, const Value &)> removeFunc) override
     {
         for (size_t i = 0; i < shards_.size(); ++i) {
@@ -298,6 +303,33 @@ public:
             MMC_LOG_INFO("Evicted " << evicted << " keys from " << mediaType << ". Candidate count: " << candidateCount
                                     << ".");
         }
+    }
+
+    size_t EvictDefragTargets(const std::vector<Key> &keys,
+                              std::function<EvictResult(const Key &, const Value &, MediaType)> moveFunc,
+                              MediaType mediaType, uint32_t yieldInterval = 0, uint32_t yieldDurationUs = 0) override
+    {
+        std::vector<std::vector<Key>> shardKeys(shards_.size());
+        for (const auto &key : keys) {
+            const uint64_t hash = static_cast<uint64_t>(std::hash<Key>{}(key));
+            shardKeys[hash >> shardSelectShift_].push_back(key);
+        }
+
+        size_t evicted = 0;
+        for (size_t shard = 0; shard < shards_.size(); ++shard) {
+            if (shardKeys[shard].empty()) {
+                continue;
+            }
+            const size_t shardEvicted = shards_[shard]->EvictDefragTargets(shardKeys[shard], moveFunc, mediaType,
+                                                                           yieldInterval, yieldDurationUs);
+            evicted += shardEvicted;
+            MMC_LOG_DEBUG("EvictDefragTargets shard " << shard << ", media: " << mediaType << ", keys: "
+                                                      << shardKeys[shard].size() << ", evicted: " << shardEvicted);
+        }
+
+        MMC_LOG_INFO("EvictDefragTargets done, media: " << mediaType << ", shards: " << shards_.size()
+                                                        << ", keys: " << keys.size() << ", evicted: " << evicted);
+        return evicted;
     }
 
 private:

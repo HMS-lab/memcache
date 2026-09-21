@@ -47,6 +47,17 @@ protected:
     {
         return mgr->rewarmThreadPool_;
     }
+    // 桥接调用私有方法 ForceEvictForFragmentation（同步执行，返回释放的 key 个数）
+    static size_t ForceEvictForFragmentation(MmcRef<MmcMetaManager> &mgr, MediaType media,
+                                             const std::vector<uint32_t> &fragmentedRanks, uint64_t wantAllocSize)
+    {
+        return mgr->ForceEvictForFragmentation(media, fragmentedRanks, wantAllocSize);
+    }
+    // 桥接读取碎片整理单飞行标志（TestMmcMetaManager 是 friend），用于测试等待异步整理完成
+    static bool DefragIdle(MmcRef<MmcMetaManager> &mgr)
+    {
+        return !mgr->defragCheck_.load(std::memory_order_relaxed);
+    }
 };
 TestMmcMetaManager::TestMmcMetaManager() {}
 
@@ -445,6 +456,215 @@ TEST_F(TestMmcMetaManager, LRU)
     }
     ASSERT_TRUE(metaMng->ExistKey(keys[0]) == MMC_UNMATCHED_KEY);
     ASSERT_TRUE(metaMng->ExistKey(keys[numKeys - 1]) == MMC_UNMATCHED_KEY);
+    metaMng->Stop();
+}
+
+TEST_F(TestMmcMetaManager, DefragEvictReleasesConsecutiveColdKeys)
+{
+    // 场景：k0 用 256K 大块、其余 59 个用 32K 顺序分配，抬升分配器 maxAlignedSize 为 256K
+    // （即碎片判断的可用块阈值）；再每隔 3 个释放 1 个（k1/k4/.../k58 共 20 个），
+    // 产生互不相邻的 32K 空洞，低于可用块阈值而计为碎片。剩余 40 key，LRU 尾部 20% = 8 个冷 key
+    // （k0/k2/k3/k5/k6/k8/k9/k11），地址连续被空洞串联成同一窗口。
+    // 5% 释放下限 = 2，选中窗口内所有连续冷 key 整体释放（8 个），非冷 key 不受影响
+    constexpr int kTotalKeys = 60;
+    constexpr int kHoleStart = 1; // 从 k1 开始每隔 3 个挖一个空洞
+    constexpr int kHoleInterval = 3;
+    // 容量按总分配量精确收紧，避免尾部大块空闲稀释碎片浪费率
+    constexpr uint64_t kBigBlobSize = SIZE_32K * 8;
+    constexpr uint64_t kDramCapacity = kBigBlobSize + (kTotalKeys - 1) * SIZE_32K;
+    constexpr auto kWaitTimeout = std::chrono::seconds(5);
+
+    MmcLocation loc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo locInfo{0, kDramCapacity};
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(2000, 70U, 60U);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    metaMng->Mount(loc, locInfo, blobMap, false);
+
+    std::vector<std::string> keys;
+    keys.reserve(kTotalKeys);
+    AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+    for (int i = 0; i < kTotalKeys; ++i) {
+        std::string key = "defragKey" + std::to_string(i);
+        allocReq.blobSize_ = (i == 0) ? kBigBlobSize : SIZE_32K;
+        MmcMemMetaDesc objMeta;
+        ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
+        ASSERT_EQ(metaMng->UpdateState(key, loc, MMC_WRITE_OK, 1), MMC_OK);
+        keys.push_back(key);
+    }
+    for (int i = kHoleStart; i < kTotalKeys; i += kHoleInterval) {
+        ASSERT_EQ(metaMng->Remove(keys[i]), MMC_OK);
+    }
+
+    metaMng->DefragEvict();
+
+    // 先等碎片整理主任务结束（此时释放任务已全部投递到线程池）
+    const auto idleDeadline = std::chrono::steady_clock::now() + kWaitTimeout;
+    while (!DefragIdle(metaMng) && std::chrono::steady_clock::now() < idleDeadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT_TRUE(DefragIdle(metaMng));
+
+    // 再等异步释放生效：窗口内 8 个连续冷 key 全部释放（k0/k2/k3/k5/k6/k8/k9/k11）
+    const auto deadline = std::chrono::steady_clock::now() + kWaitTimeout;
+    bool released = false;
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (metaMng->ExistKey(keys[0]) != MMC_OK && metaMng->ExistKey(keys[2]) != MMC_OK &&
+            metaMng->ExistKey(keys[3]) != MMC_OK && metaMng->ExistKey(keys[5]) != MMC_OK) {
+            released = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT_TRUE(released);
+    // 窗口内所有连续冷 key 均被释放
+    EXPECT_EQ(metaMng->ExistKey(keys[3]), MMC_UNMATCHED_KEY);
+    EXPECT_EQ(metaMng->ExistKey(keys[5]), MMC_UNMATCHED_KEY);
+    // 非冷 key 不在选中窗口内，不受影响
+    EXPECT_EQ(metaMng->ExistKey(keys[12]), MMC_OK);
+    metaMng->Stop();
+}
+
+TEST_F(TestMmcMetaManager, DefragEvictKeepsSsdBlobOfDualMediaKey)
+{
+    // 场景：碎片整理选中"DRAM + SSD 共存"的 key（Get 回温后的稳态）时仅释放 DRAM blob，
+    // SSD 持久副本与其容器条目保留（等价 MOVE_DOWN 完成后的降级驻留状态）；
+    // 仅持有 DRAM blob 的 key 照常整 key 删除（仅持选中介质时先容器 Erase 再释放）
+    constexpr int kTotalKeys = 60;
+    constexpr int kHoleStart = 1; // 从 k1 开始每隔 3 个挖一个空洞
+    constexpr int kHoleInterval = 3;
+    constexpr int kDualMediaIdx = 0; // k0 附加 SSD 副本，模拟回温后共存稳态
+    constexpr int kDramOnlyIdx = 2;  // k2 仅 DRAM，被整 key 删除
+    // k0 用 256K 大块抬升分配器 maxAlignedSize（可用块阈值），使 32K 空洞计为碎片；
+    // 容量按总分配量精确收紧，避免尾部大块空闲稀释碎片浪费率
+    constexpr uint64_t kBigBlobSize = SIZE_32K * 8;
+    constexpr uint64_t kDramCapacity = kBigBlobSize + (kTotalKeys - 1) * SIZE_32K;
+    constexpr auto kWaitTimeout = std::chrono::seconds(5);
+
+    MmcLocation loc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo locInfo{0, kDramCapacity};
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(2000, 70U, 60U);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    metaMng->Mount(loc, locInfo, blobMap, false);
+
+    std::vector<std::string> keys;
+    keys.reserve(kTotalKeys);
+    AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+    for (int i = 0; i < kTotalKeys; ++i) {
+        std::string key = "defragSsdKey" + std::to_string(i);
+        allocReq.blobSize_ = (i == kDualMediaIdx) ? kBigBlobSize : SIZE_32K;
+        MmcMemMetaDesc objMeta;
+        ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
+        ASSERT_EQ(metaMng->UpdateState(key, loc, MMC_WRITE_OK, 1), MMC_OK);
+        keys.push_back(key);
+    }
+    for (int i = kHoleStart; i < kTotalKeys; i += kHoleInterval) {
+        ASSERT_EQ(metaMng->Remove(keys[i]), MMC_OK);
+    }
+
+    // k0 附加 SSD 持久副本（gva=0 为 SSD blob 惯例）
+    MmcMemObjMetaPtr dualMeta;
+    ASSERT_EQ(MetaContainer(metaMng)->Get(keys[kDualMediaIdx], dualMeta), MMC_OK);
+    {
+        std::lock_guard<std::mutex> guard(dualMeta->Mutex());
+        MmcMemBlobPtr ssdBlob = MmcMakeRef<MmcMemBlob>(0, 0, kBigBlobSize, MEDIA_SSD, READABLE, kBigBlobSize);
+        ASSERT_NE(ssdBlob, nullptr);
+        ASSERT_EQ(dualMeta->AddBlob(ssdBlob), MMC_OK);
+    }
+    const size_t lruCountBefore = MetaContainer(metaMng)->GetKeyCount(MEDIA_DRAM);
+    ASSERT_EQ(lruCountBefore, static_cast<size_t>(kTotalKeys - kTotalKeys / kHoleInterval));
+
+    metaMng->DefragEvict();
+
+    // 先等碎片整理主任务结束（此时释放任务已全部投递到线程池）
+    const auto idleDeadline = std::chrono::steady_clock::now() + kWaitTimeout;
+    while (!DefragIdle(metaMng) && std::chrono::steady_clock::now() < idleDeadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    ASSERT_TRUE(DefragIdle(metaMng));
+
+    // 仅 DRAM 的冷 key（k2 等）被整 key 删除，此处以 k2 为代表等待删除生效
+    const auto removeDeadline = std::chrono::steady_clock::now() + kWaitTimeout;
+    bool k2Removed = false;
+    while (std::chrono::steady_clock::now() < removeDeadline) {
+        if (metaMng->ExistKey(keys[kDramOnlyIdx]) != MMC_OK) {
+            k2Removed = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    ASSERT_TRUE(k2Removed);
+
+    // k0 仅释放 DRAM blob：容器条目保留，最终只剩 SSD 持久副本
+    const auto ssdOnlyDeadline = std::chrono::steady_clock::now() + kWaitTimeout;
+    bool ssdOnly = false;
+    while (std::chrono::steady_clock::now() < ssdOnlyDeadline) {
+        MmcMemObjMetaPtr objMeta;
+        if (MetaContainer(metaMng)->Get(keys[kDualMediaIdx], objMeta) == MMC_OK) {
+            std::lock_guard<std::mutex> guard(objMeta->Mutex());
+            const auto blobs = objMeta->GetBlobs();
+            if (blobs.size() == 1 && static_cast<MediaType>(blobs[0]->Type()) == MEDIA_SSD) {
+                ssdOnly = true;
+                break;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT_TRUE(ssdOnly);
+
+    // k0 已从 DRAM LRU 摘除（降级为 SSD 驻留，不在任何 LRU），窗口内其余 7 个仅 DRAM 冷 key 随容器删除
+    EXPECT_EQ(MetaContainer(metaMng)->GetKeyCount(MEDIA_DRAM), lruCountBefore - 8);
+    metaMng->Stop();
+}
+
+TEST_F(TestMmcMetaManager, DefragEvictSkipsWhenMaxContiguousFreeSufficient)
+{
+    // 场景：1.5G DRAM 容量仅分配 60 个 32K blob 并挖出 32K 空洞（多段空闲），
+    // 但尾部空闲段约 1.5G，最大连续空闲块 ≥ 1000MB，大块 put 可直接满足，
+    // 碎片判断跳过该 rank，原本会被优先释放的窗口内冷 key 均保留
+    constexpr int kTotalKeys = 60;
+    constexpr int kHoleStart = 1; // 从 k1 开始每隔 3 个挖一个空洞
+    constexpr int kHoleInterval = 3;
+    constexpr uint64_t kDramCapacity = 1500ULL * 1024 * 1024; // 1500MB，大于 1000MB 碎片判断阈值
+    constexpr auto kWaitTimeout = std::chrono::seconds(5);
+
+    MmcLocation loc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo locInfo{0, kDramCapacity};
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(2000, 70U, 60U);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    metaMng->Mount(loc, locInfo, blobMap, false);
+
+    std::vector<std::string> keys;
+    keys.reserve(kTotalKeys);
+    AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+    for (int i = 0; i < kTotalKeys; ++i) {
+        std::string key = "defragSkipKey" + std::to_string(i);
+        MmcMemMetaDesc objMeta;
+        ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
+        ASSERT_EQ(metaMng->UpdateState(key, loc, MMC_WRITE_OK, 1), MMC_OK);
+        keys.push_back(key);
+    }
+    for (int i = kHoleStart; i < kTotalKeys; i += kHoleInterval) {
+        ASSERT_EQ(metaMng->Remove(keys[i]), MMC_OK);
+    }
+    const size_t lruCountBefore = MetaContainer(metaMng)->GetKeyCount(MEDIA_DRAM);
+
+    metaMng->DefragEvict();
+
+    // 等碎片整理主任务结束后断言：最大连续空闲块 ≥ 1000MB，无 key 被释放
+    const auto idleDeadline = std::chrono::steady_clock::now() + kWaitTimeout;
+    while (!DefragIdle(metaMng) && std::chrono::steady_clock::now() < idleDeadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    ASSERT_TRUE(DefragIdle(metaMng));
+
+    EXPECT_EQ(MetaContainer(metaMng)->GetKeyCount(MEDIA_DRAM), lruCountBefore);
+    // 有碎片（最大连续空闲块 < 1000MB）时会被优先释放（gva 最低）的 k0 与 k2 均保留
+    EXPECT_EQ(metaMng->ExistKey(keys[0]), MMC_OK);
+    EXPECT_EQ(metaMng->ExistKey(keys[2]), MMC_OK);
+    EXPECT_EQ(metaMng->ExistKey(keys[3]), MMC_OK);
     metaMng->Stop();
 }
 
@@ -1695,6 +1915,44 @@ TEST_F(TestMmcMetaManager, Query_WithLayerWiseFlag_SkipsNonReadableBlobs)
     metaMng->Stop();
 }
 
+// 内存碎片强制淘汰：直接从 LRU 尾部强制释放 5% 的 key，无需相邻空闲条件
+// 布局：key_i 位于偏移 i*32K，Remove key_1 后在 [32K,64K) 留下空洞，
+// LRU 尾部 key_0 被直接释放，释放后与空洞合并为 64K 连续块
+TEST_F(TestMmcMetaManager, ForceEvict_ReleasesLruTailKey)
+{
+    MmcLocation loc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo locInfo{0, SIZE_32K * 11};
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(2000, 70U, 60U);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    ASSERT_EQ(metaMng->Mount(loc, locInfo, blobMap, false), MMC_OK);
+
+    const int numKeys = 10;
+    for (int i = 0; i < numKeys; ++i) {
+        AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+        MmcMemMetaDesc objMeta;
+        ASSERT_EQ(metaMng->Alloc("frag_key_" + std::to_string(i), allocReq, 1, 0, objMeta), MMC_OK);
+        ASSERT_EQ(metaMng->UpdateState("frag_key_" + std::to_string(i), loc, MMC_WRITE_OK, 1), MMC_OK);
+    }
+    // 挖洞：key_1 位于 [32K,64K)，删除后在 key_0 上方留下空闲块
+    ASSERT_EQ(metaMng->Remove("frag_key_1"), MMC_OK);
+    usleep(200000U); // 等待异步释放完成，空洞就位
+
+    // LRU 尾部即 frag_key_0，直接强制释放即完成 1 个 key 的目标（5% 向下取整为 1）；
+    // 同步淘汰：返回后内存已归还分配器，无需等待
+    EXPECT_EQ(TestMmcMetaManager::ForceEvictForFragmentation(metaMng, MEDIA_DRAM, {0U}, SIZE_32K * 2), 1U);
+
+    EXPECT_EQ(metaMng->ExistKey("frag_key_0"), MMC_UNMATCHED_KEY);
+    EXPECT_EQ(metaMng->ExistKey("frag_key_2"), MMC_OK);
+
+    // key_0 的 blob 释放后与 [32K,64K) 空洞合并为 64K 连续空闲块，64K 分配应成功
+    AllocOptions bigReq{SIZE_32K * 2, 1, MEDIA_DRAM, {0}, 0};
+    MmcMemMetaDesc bigMeta;
+    EXPECT_EQ(metaMng->Alloc("frag_big_key", bigReq, 1, 0, bigMeta), MMC_OK);
+
+    metaMng->Stop();
+}
+
 // Query with layer-wise flag returns READABLE DRAM blobs
 TEST_F(TestMmcMetaManager, Query_WithLayerWiseFlag_ReturnsReadableDramBlobs)
 {
@@ -1733,6 +1991,33 @@ TEST_F(TestMmcMetaManager, Query_WithLayerWiseFlag_ReturnsReadableDramBlobs)
     metaMng->Stop();
 }
 
+// 内存碎片强制淘汰：尾部 key 上下均被占用（无相邻空闲块）时同样直接释放
+TEST_F(TestMmcMetaManager, ForceEvict_ReleasesTailWithoutAdjacentFree)
+{
+    MmcLocation loc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo locInfo{0, SIZE_32K * 11};
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(2000, 70U, 60U);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    ASSERT_EQ(metaMng->Mount(loc, locInfo, blobMap, false), MMC_OK);
+
+    const int numKeys = 10;
+    for (int i = 0; i < numKeys; ++i) {
+        AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+        MmcMemMetaDesc objMeta;
+        ASSERT_EQ(metaMng->Alloc("fill_key_" + std::to_string(i), allocReq, 1, 0, objMeta), MMC_OK);
+        ASSERT_EQ(metaMng->UpdateState("fill_key_" + std::to_string(i), loc, MMC_WRITE_OK, 1), MMC_OK);
+    }
+    // 不挖洞：10 个 key 连续填充 [0,320K)，尾部 key_0 的上下邻居均被占用
+    // 释放目标 = max(10 * 5%, 1) = 1，直接强制释放 LRU 尾部的 key_0
+    EXPECT_EQ(TestMmcMetaManager::ForceEvictForFragmentation(metaMng, MEDIA_DRAM, {0U}, SIZE_32K * 2), 1U);
+
+    EXPECT_EQ(metaMng->ExistKey("fill_key_0"), MMC_UNMATCHED_KEY);
+    EXPECT_EQ(metaMng->ExistKey("fill_key_1"), MMC_OK);
+
+    metaMng->Stop();
+}
+
 // Query without layer-wise flag returns all blobs regardless of state
 TEST_F(TestMmcMetaManager, Query_WithoutLayerWiseFlag_ReturnsAllBlobs)
 {
@@ -1760,6 +2045,75 @@ TEST_F(TestMmcMetaManager, Query_WithoutLayerWiseFlag_ReturnsAllBlobs)
     EXPECT_EQ(queryInfo.blobs_.size(), 1U);
     EXPECT_TRUE(queryInfo.valid_);
     EXPECT_EQ(queryInfo.size_, SIZE_32K);
+
+    metaMng->Stop();
+}
+
+// 有活跃租约的 key 不强制释放：跳过后向后延伸，释放下一个可释放的 key 补足 5% 目标
+TEST_F(TestMmcMetaManager, ForceEvict_SkipsKeyWithActiveLease)
+{
+    MmcLocation loc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo locInfo{0, SIZE_32K * 11};
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(2000, 70U, 60U);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    ASSERT_EQ(metaMng->Mount(loc, locInfo, blobMap, false), MMC_OK);
+
+    const int numKeys = 10;
+    for (int i = 0; i < numKeys; ++i) {
+        AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+        MmcMemMetaDesc objMeta;
+        ASSERT_EQ(metaMng->Alloc("lease_key_" + std::to_string(i), allocReq, 1, 0, objMeta), MMC_OK);
+        ASSERT_EQ(metaMng->UpdateState("lease_key_" + std::to_string(i), loc, MMC_WRITE_OK, 1), MMC_OK);
+    }
+
+    // LRU 尾部 key_0 持有读租约：被跳过不释放，向后延伸释放 key_1 补足 1 个 key 的目标
+    MemObjQueryInfo queryInfo;
+    ASSERT_EQ(metaMng->AddLease("lease_key_0", 2, 0, queryInfo), MMC_OK);
+    EXPECT_EQ(TestMmcMetaManager::ForceEvictForFragmentation(metaMng, MEDIA_DRAM, {0U}, SIZE_32K * 2), 1U);
+    // 有租约的 key_0 保留，延伸释放的是 key_1
+    EXPECT_EQ(metaMng->ExistKey("lease_key_0"), MMC_OK);
+    EXPECT_EQ(metaMng->ExistKey("lease_key_1"), MMC_UNMATCHED_KEY);
+
+    metaMng->Stop();
+}
+
+// 延伸仅一次：候选 = 目标×2（目标 1 个时取尾部 2 个），候选内 key 均不可释放时
+// 遍历完即结束，不继续向后延伸释放更深的 key。
+// AddLease 会 Promote key 至 LRU 头部，须在加租约后将无租约 key 逐一 Promote 回头部，
+// 使有租约的 ext_key_0/ext_key_1 滑回 LRU 尾部成为候选
+TEST_F(TestMmcMetaManager, ForceEvict_ExtendsOnlyOnceWhenTailKeysHaveLease)
+{
+    MmcLocation loc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo locInfo{0, SIZE_32K * 11};
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(2000, 70U, 60U);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    ASSERT_EQ(metaMng->Mount(loc, locInfo, blobMap, false), MMC_OK);
+
+    const int numKeys = 10;
+    for (int i = 0; i < numKeys; ++i) {
+        AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+        MmcMemMetaDesc objMeta;
+        ASSERT_EQ(metaMng->Alloc("ext_key_" + std::to_string(i), allocReq, 1, 0, objMeta), MMC_OK);
+        ASSERT_EQ(metaMng->UpdateState("ext_key_" + std::to_string(i), loc, MMC_WRITE_OK, 1), MMC_OK);
+    }
+
+    // AddLease 会 Promote key 至 LRU 头部：加完租约后把无租约的 key_2~key_9 逐一 ExistKey 提升回头部，
+    // 使有活跃租约的 ext_key_0/ext_key_1 滑回 LRU 尾部成为候选
+    MemObjQueryInfo queryInfo;
+    ASSERT_EQ(metaMng->AddLease("ext_key_0", 2, 0, queryInfo), MMC_OK);
+    ASSERT_EQ(metaMng->AddLease("ext_key_1", 3, 0, queryInfo), MMC_OK);
+    for (int i = 2; i < numKeys; ++i) {
+        ASSERT_EQ(metaMng->ExistKey("ext_key_" + std::to_string(i)), MMC_OK);
+    }
+    // 尾部 key_0/key_1 均持有读租约：候选（目标 1×2 = 2 个）全部不可释放，
+    // 遍历完即结束，本次释放数为 0
+    EXPECT_EQ(TestMmcMetaManager::ForceEvictForFragmentation(metaMng, MEDIA_DRAM, {0U}, SIZE_32K * 2), 0U);
+    // 不继续延伸：候选之外的 key 保持不动
+    EXPECT_EQ(metaMng->ExistKey("ext_key_0"), MMC_OK);
+    EXPECT_EQ(metaMng->ExistKey("ext_key_1"), MMC_OK);
+    EXPECT_EQ(metaMng->ExistKey("ext_key_2"), MMC_OK);
 
     metaMng->Stop();
 }
@@ -1796,6 +2150,137 @@ TEST_F(TestMmcMetaManager, Query_WithLayerWiseFlag_SkipsSsdBlobs)
     EXPECT_EQ(metaMng->Query(key, testOperateId, 0, queryAll), MMC_OK);
     EXPECT_EQ(queryAll.blobs_.size(), 1U);
     EXPECT_TRUE(queryAll.valid_);
+
+    metaMng->Stop();
+}
+
+// Alloc 因碎片失败（申请大小 > 最大连续空闲块）自动触发同步强制淘汰：
+// 首次淘汰释放尾部 key_0（与空洞合并为 64K 仍不足）→ 循环再次淘汰释放 key_2
+// （与 [0,64K) 合并为 96K）→ 本次 Alloc 调用内重试分配成功
+TEST_F(TestMmcMetaManager, AllocFragmentationFailure_TriggerForceEvict)
+{
+    MmcLocation loc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo locInfo{0, SIZE_32K * 12};
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(2000, 70U, 60U);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    ASSERT_EQ(metaMng->Mount(loc, locInfo, blobMap, false), MMC_OK);
+
+    const int numKeys = 10;
+    for (int i = 0; i < numKeys; ++i) {
+        AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+        MmcMemMetaDesc objMeta;
+        ASSERT_EQ(metaMng->Alloc("trig_key_" + std::to_string(i), allocReq, 1, 0, objMeta), MMC_OK);
+        ASSERT_EQ(metaMng->UpdateState("trig_key_" + std::to_string(i), loc, MMC_WRITE_OK, 1), MMC_OK);
+    }
+    // 挖洞 [32K,64K)：10 个 key 用 320K，尾部空闲 64K，最大连续空闲块 = 64K < 96K
+    ASSERT_EQ(metaMng->Remove("trig_key_1"), MMC_OK);
+    usleep(200000U); // 等待 Remove 异步释放完成，空洞就位
+
+    AllocOptions bigReq{SIZE_32K * 3, 1, MEDIA_DRAM, {0}, 0};
+    MmcMemMetaDesc bigMeta;
+    // 首次分配失败触发同步强制淘汰，清理后在本次调用内重试成功
+    EXPECT_EQ(metaMng->Alloc("trig_big_key", bigReq, 1, 0, bigMeta), MMC_OK);
+    // 淘汰只从 LRU 尾部进行：非尾部 key 应保留
+    EXPECT_EQ(metaMng->ExistKey("trig_key_9"), MMC_OK);
+    // 尾部被淘汰的 key 已删除
+    EXPECT_EQ(metaMng->ExistKey("trig_key_0"), MMC_UNMATCHED_KEY);
+    EXPECT_EQ(metaMng->ExistKey("trig_key_2"), MMC_UNMATCHED_KEY);
+
+    metaMng->Stop();
+}
+
+// 多 rank 场景：强制淘汰仅释放碎片化 rank 的 blob，不误删健康 rank 的数据。
+// 布局：rank0 分配 10 个 32K key（rank0_0..rank0_9），rank1 分配 1 个 32K key（rank1_0，最先分配位于 LRU 尾部）。
+// 挖洞：删除 rank0_1 在 rank0 上留下 [32K,64K) 空洞；rank0 最大连续空闲 = 32K < 64K。
+// 调用 ForceEvictForFragmentation 限定 fragmentedRanks={0}：候选首位 rank1_0 无 rank0 blob → 跳过，
+// 候选第二位 rank0_0 有 rank0 blob → 释放成功。rank1_0 保留不丢数据。
+TEST_F(TestMmcMetaManager, ForceEvict_MultiRankOnlyReleasesFragmentedRank)
+{
+    MmcLocation loc0{0, MEDIA_DRAM};
+    MmcLocation loc1{1, MEDIA_DRAM};
+    MmcLocalMemlInitInfo locInfo0{0, SIZE_32K * 11};
+    MmcLocalMemlInitInfo locInfo1{SIZE_32K * 11, SIZE_32K * 11};
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(2000, 70U, 60U);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    ASSERT_EQ(metaMng->Mount(loc0, locInfo0, blobMap, false), MMC_OK);
+    ASSERT_EQ(metaMng->Mount(loc1, locInfo1, blobMap, false), MMC_OK);
+
+    // rank1_0 最先分配 → 位于 LRU 尾部（最久未使用）
+    AllocOptions rank1Req{SIZE_32K, 1, MEDIA_DRAM, {1}, 0};
+    MmcMemMetaDesc rank1Meta;
+    ASSERT_EQ(metaMng->Alloc("rank1_0", rank1Req, 1, 0, rank1Meta), MMC_OK);
+    ASSERT_EQ(metaMng->UpdateState("rank1_0", loc1, MMC_WRITE_OK, 1), MMC_OK);
+
+    // rank0_0..rank0_9 随后分配 → 位于 rank1_0 之前（靠近 LRU 头部）
+    const int numRank0Keys = 10;
+    for (int i = 0; i < numRank0Keys; ++i) {
+        AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+        MmcMemMetaDesc objMeta;
+        ASSERT_EQ(metaMng->Alloc("rank0_" + std::to_string(i), allocReq, 1, 0, objMeta), MMC_OK);
+        ASSERT_EQ(metaMng->UpdateState("rank0_" + std::to_string(i), loc0, MMC_WRITE_OK, 1), MMC_OK);
+    }
+    // 挖洞：删除 rank0_1 在 rank0 上留下 [32K,64K) 空洞
+    ASSERT_EQ(metaMng->Remove("rank0_1"), MMC_OK);
+    usleep(200000U); // 等待异步释放完成，空洞就位
+
+    // 限定 fragmentedRanks={0}：LRU 尾部候选 = [rank1_0, rank0_0]
+    // rank1_0 无 rank0 blob → ForceReleaseKey 返回 false 跳过
+    // rank0_0 有 rank0 blob → 释放成功，releasedCount=1 达到目标
+    EXPECT_EQ(TestMmcMetaManager::ForceEvictForFragmentation(metaMng, MEDIA_DRAM, {0U}, SIZE_32K * 2), 1U);
+
+    // rank1 的 key 未被淘汰：健康 rank 数据无丢失
+    EXPECT_EQ(metaMng->ExistKey("rank1_0"), MMC_OK);
+    // rank0 尾部 key 已释放
+    EXPECT_EQ(metaMng->ExistKey("rank0_0"), MMC_UNMATCHED_KEY);
+    // rank0 非尾部 key 保留
+    EXPECT_EQ(metaMng->ExistKey("rank0_2"), MMC_OK);
+
+    metaMng->Stop();
+}
+
+// 多副本多 rank 场景：key 在 rank0（碎片化）与 rank1（健康）各持有一个 DRAM blob，
+// 强制淘汰仅释放 rank0 的 blob：key 条目保留（rank1 副本未丢）且回插 DRAM LRU 保持可淘汰。
+TEST_F(TestMmcMetaManager, ForceEvict_MultiReplicaReleasesOnlyTargetRankBlob)
+{
+    MmcLocation loc0{0, MEDIA_DRAM};
+    MmcLocation loc1{1, MEDIA_DRAM};
+    MmcLocalMemlInitInfo locInfo0{0, SIZE_32K * 11};
+    MmcLocalMemlInitInfo locInfo1{SIZE_32K * 11, SIZE_32K * 11};
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(2000, 70U, 60U);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    ASSERT_EQ(metaMng->Mount(loc0, locInfo0, blobMap, false), MMC_OK);
+    ASSERT_EQ(metaMng->Mount(loc1, locInfo1, blobMap, false), MMC_OK);
+
+    // 双副本：preferredRank={0} 在 rank0 分配 1 个，剩余 1 个副本经 RandomAssign 排除 rank0 后落到 rank1
+    const std::string key = "replica_key";
+    AllocOptions allocReq{SIZE_32K, 2, MEDIA_DRAM, {0}, 0};
+    MmcMemMetaDesc objMeta;
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->UpdateState(key, loc0, MMC_WRITE_OK, 1), MMC_OK);
+    ASSERT_EQ(metaMng->UpdateState(key, loc1, MMC_WRITE_OK, 1), MMC_OK);
+
+    // 限定 fragmentedRanks={0}：仅释放 rank0 的 blob，key 计入释放数
+    EXPECT_EQ(TestMmcMetaManager::ForceEvictForFragmentation(metaMng, MEDIA_DRAM, {0U}, SIZE_32K * 2), 1U);
+
+    // key 条目保留（rank1 副本未丢）且回插 DRAM LRU 保持可淘汰
+    EXPECT_EQ(metaMng->ExistKey(key), MMC_OK);
+    EXPECT_EQ(MetaContainer(metaMng)->GetKeyCount(MEDIA_DRAM), 1U);
+
+    // rank0 blob 已释放，rank1 blob 保留
+    MmcMemObjMetaPtr metaObj;
+    ASSERT_EQ(MetaContainer(metaMng)->Get(key, metaObj), MMC_OK);
+    MmcBlobFilterPtr rank0Filter = MmcMakeRef<MmcBlobFilter>(0, MEDIA_DRAM, NONE);
+    MmcBlobFilterPtr rank1Filter = MmcMakeRef<MmcBlobFilter>(1, MEDIA_DRAM, NONE);
+    ASSERT_NE(rank0Filter, nullptr);
+    ASSERT_NE(rank1Filter, nullptr);
+    {
+        std::lock_guard<std::mutex> guard(metaObj->Mutex());
+        EXPECT_EQ(metaObj->GetBlobs(rank0Filter).size(), 0U);
+        EXPECT_EQ(metaObj->GetBlobs(rank1Filter).size(), 1U);
+    }
 
     metaMng->Stop();
 }

@@ -760,3 +760,58 @@ TEST_F(TestMmcGlobalAllocator, SsdCanUnmountWhenEmpty)
     auto ret = allocator->Unmount(loc);
     EXPECT_EQ(ret, MMC_OK);
 }
+
+// 最大连续空闲块查询 / 碎片场景判定
+TEST_F(TestMmcGlobalAllocator, MaxContiguousFreeSizeAndFragmentation)
+{
+    MmcGlobalAllocatorPtr allocator = MmcMakeRef<MmcGlobalAllocator>();
+    MmcLocation loc{0, MEDIA_DRAM};
+    const uint64_t capacity = SIZE_32K * 10;
+    MmcLocalMemlInitInfo info{0, capacity};
+    allocator->Mount(loc, info);
+    allocator->Start(loc);
+
+    EXPECT_EQ(allocator->GetMaxContiguousFreeSize(MEDIA_DRAM), capacity);
+
+    // 分配 9 个 32K blob 填充 [0, 288K)，尾部空闲 [288K, 320K) = 32K
+    std::vector<MmcMemBlobPtr> blobs;
+    for (int i = 0; i < 9; ++i) {
+        AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, ALLOC_FORCE_BY_RANK};
+        std::vector<MmcMemBlobPtr> oneBlob;
+        ASSERT_EQ(allocator->Alloc(allocReq, oneBlob), MMC_OK);
+        ASSERT_EQ(oneBlob.size(), 1U);
+        blobs.push_back(oneBlob[0]);
+    }
+    EXPECT_EQ(allocator->GetMaxContiguousFreeSize(MEDIA_DRAM), SIZE_32K);
+
+    // 释放中间 blob 制造空洞 [128K, 160K)：总空闲 64K，最大连续空闲仍为 32K
+    ASSERT_EQ(allocator->Free(blobs[4]), MMC_OK);
+    EXPECT_EQ(allocator->GetMaxContiguousFreeSize(MEDIA_DRAM), SIZE_32K);
+
+    // 碎片判定：总空闲 64K 足够，申请 32K 不属于碎片，申请 64K 属于碎片；
+    // 申请 128K 超过总空闲属于容量耗尽而非碎片，不触发强制淘汰
+    EXPECT_FALSE(allocator->IsFragmentation(MEDIA_DRAM, SIZE_32K));
+    EXPECT_TRUE(allocator->IsFragmentation(MEDIA_DRAM, SIZE_32K * 2));
+    EXPECT_FALSE(allocator->IsFragmentation(MEDIA_DRAM, SIZE_32K * 4));
+    EXPECT_FALSE(allocator->IsFragmentation(MEDIA_SSD, SIZE_32K));
+
+    // 释放相邻 blob 后空洞合并为 [96K, 160K) = 64K
+    ASSERT_EQ(allocator->Free(blobs[3]), MMC_OK);
+    EXPECT_EQ(allocator->GetMaxContiguousFreeSize(MEDIA_DRAM), SIZE_32K * 2);
+    EXPECT_FALSE(allocator->IsFragmentation(MEDIA_DRAM, SIZE_32K * 2));
+}
+
+// MmcBlobAllocator 直接测试：最大连续空闲块查询
+TEST_F(TestMmcGlobalAllocator, BlobAllocatorMaxContiguousFreeSize)
+{
+    // 非 max 模式：切块粒度取对齐值，maxAlignedSize 传本地计数以满足构造契约
+    std::atomic<uint64_t> maxAlignedSize{0};
+    MmcBlobAllocator blobAllocator(0, MEDIA_DRAM, 0, SIZE_32K * 4, false, &maxAlignedSize);
+    blobAllocator.Start();
+    auto blob = blobAllocator.Alloc(SIZE_32K);
+    ASSERT_NE(blob, nullptr);
+    // blob 位于 [0, 32K)，尾部空闲 [32K, 128K) 为最大连续空闲块
+    EXPECT_EQ(blobAllocator.GetMaxContiguousFreeSize(), SIZE_32K * 3);
+    EXPECT_EQ(blobAllocator.Release(blob), MMC_OK);
+    EXPECT_EQ(blobAllocator.GetMaxContiguousFreeSize(), SIZE_32K * 4);
+}

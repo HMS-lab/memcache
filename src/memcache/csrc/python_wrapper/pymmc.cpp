@@ -456,6 +456,10 @@ void DefineMmcStructModule(py::module_ &m)
                            R"pbdoc(
                     Eviction low threshold in percentage.
                 )pbdoc")
+            .def_readwrite("defrag_evict_threshold", &mmc_meta_service_config_t::defragEvictThreshold,
+                           R"pbdoc(
+                    Defrag eviction threshold in percentage.
+                )pbdoc")
             .def_readwrite("evict_check_interval_seconds", &mmc_meta_service_config_t::evictCheckIntervalSeconds,
                            R"pbdoc(
                     Periodic eviction check interval in seconds. Set to 0 to disable.

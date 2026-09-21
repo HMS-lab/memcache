@@ -13,6 +13,7 @@
 #ifndef MF_HYBRID_MMC_META_CONTAINER_LRU_H
 #define MF_HYBRID_MMC_META_CONTAINER_LRU_H
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <list>
@@ -54,6 +55,32 @@ private:
     std::function<MediaType(const Value &)> getTypeFunc_;
     // 所有 ShardedLRU 模板实例共用一个全局、单调递增的访问序号
     inline static std::atomic<uint64_t> nextAccessSequence_{0};
+
+    // 在 metaLock_ + lruLock_ 已持有的前提下，对 mapIter 指向的条目执行 moveFunc 并按结果做容器操作：
+    bool ApplyEvictResult(const Key &key, typename std::unordered_map<Key, ValueLruItem>::iterator &mapIter,
+                          const std::function<EvictResult(const Key &, const Value &, MediaType)> &moveFunc,
+                          MediaType mediaType)
+    {
+        Value &value = mapIter->second.value_;
+        MediaType storedType = mapIter->second.mediaType_;
+        auto lruIter = mapIter->second.lruIter_;
+        EvictResult res = moveFunc(key, value, mediaType);
+        if (res == EvictResult::REMOVE) {
+            if (storedType != MEDIA_NONE) {
+                lruLists_[storedType].erase(lruIter);
+            }
+            metaMap_.erase(mapIter);
+            return true;
+        }
+        if (res == EvictResult::MOVE_DOWN) {
+            if (storedType != MEDIA_NONE) {
+                lruLists_[storedType].erase(lruIter);
+                mapIter->second.mediaType_ = MEDIA_NONE;
+            }
+            return true;
+        }
+        return false;
+    }
 
 public:
     Result Insert(const Key &key, const Value &value) override
@@ -123,6 +150,28 @@ public:
         if (valueItem.mediaType_ != MEDIA_NONE) {
             MmcWriteGuard lruLockGuard(lruLock_);
             lruLists_[valueItem.mediaType_].erase(valueItem.lruIter_);
+        }
+        return MMC_OK;
+    }
+
+    Result EraseIfEmpty(const Key &key, std::function<bool(const Value &)> isEmptyFunc) override
+    {
+        MmcWriteGuard lockGuard(metaLock_);
+        auto iter = metaMap_.find(key);
+        if (iter == metaMap_.end()) {
+            MMC_LOG_DEBUG("Key " << key << " not found in MmcMetaContainer. ErrCode: " << MMC_UNMATCHED_KEY);
+            return MMC_UNMATCHED_KEY;
+        }
+        // 判空与删除在容器写锁内原子完成，消除锁外判空的 ABA 窗口
+        if (!isEmptyFunc(iter->second.value_)) {
+            return MMC_ERROR;
+        }
+        auto mediaType = iter->second.mediaType_;
+        auto lruIter = iter->second.lruIter_;
+        metaMap_.erase(iter);
+        if (mediaType != MEDIA_NONE) {
+            MmcWriteGuard lruLockGuard(lruLock_);
+            lruLists_[mediaType].erase(lruIter);
         }
         return MMC_OK;
     }
@@ -299,23 +348,8 @@ public:
             return true;
         }
 
-        // 2、删除map和lru
-        Value &value = mapIter->second.value_;
-
-        // 3、回调处理key，value
-        EvictResult res = moveFunc(key, value, mediaType);
-        if (res == EvictResult::REMOVE) {
-            metaMap_.erase(mapIter);
-            lruLists_[mediaType].erase(iter);
-            return true;
-        }
-        if (res == EvictResult::MOVE_DOWN) {
-            // 从当前level的lru删去，标记type为NONE，待move完成，再更新回来
-            lruLists_[mediaType].erase(iter);
-            mapIter->second.mediaType_ = MEDIA_NONE;
-            return true;
-        }
-        return false;
+        // 2、回调处理并按结果做容器操作（REMOVE/MOVE_DOWN/SKIP）
+        return ApplyEvictResult(key, mapIter, moveFunc, mediaType);
     }
 
     void CollectEvictionCandidates(const MediaType mediaType, const uint64_t cutoff, const bool olderOrEqual,
@@ -454,6 +488,38 @@ public:
             MMC_LOG_INFO("Evicted " << numEvictObjs << " keys from " << mediaType << ". Number of keys: " << oriNum
                                     << " => " << (oriNum - numEvictObjs) << ".");
         }
+    }
+
+    /**
+     * @brief 与 EvictOneLeastRecentlyUsed 同构，但按指定 key 列表逐个释放（非 LRU 尾部）。
+     */
+    size_t EvictDefragTargets(const std::vector<Key> &keys,
+                              std::function<EvictResult(const Key &, const Value &, MediaType)> moveFunc,
+                              MediaType mediaType, uint32_t yieldInterval = 0, uint32_t yieldDurationUs = 0) override
+    {
+        size_t evicted = 0;
+        for (size_t i = 0; i < keys.size(); ++i) {
+            const auto &key = keys[i];
+            {
+                MmcWriteGuard lockGuard(metaLock_);
+                auto mapIter = metaMap_.find(key);
+                if (mapIter == metaMap_.end()) {
+                    continue; // 已被并发路径删除
+                }
+
+                MmcWriteGuard lruLockGuard(lruLock_);
+                if (ApplyEvictResult(key, mapIter, moveFunc, mediaType)) {
+                    evicted++;
+                }
+            }
+            // Yield: periodically sleep to extend the lock-free window between evictions,
+            // giving blocked Put/Get/Exist threads enough time (~5us kernel scheduling)
+            // to wake up and acquire metaLock_ during the ~100us sleep window.
+            if (yieldInterval > 0 && yieldDurationUs > 0 && (i + 1) % yieldInterval == 0) {
+                std::this_thread::sleep_for(std::chrono::microseconds(yieldDurationUs));
+            }
+        }
+        return evicted;
     }
 
 private:

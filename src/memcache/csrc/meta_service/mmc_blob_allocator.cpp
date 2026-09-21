@@ -156,6 +156,28 @@ Result MmcBlobAllocator::Release(const MmcMemBlobPtr &blob)
     return MMC_OK;
 }
 
+uint64_t MmcBlobAllocator::GetMaxContiguousFreeSize()
+{
+    spinlock_.lock();
+    // sizeTree_ 按空闲块大小升序排列，最后一个元素即最大连续空闲块
+    uint64_t maxFreeSize = sizeTree_.empty() ? 0 : sizeTree_.rbegin()->size_;
+    spinlock_.unlock();
+    return maxFreeSize;
+}
+
+std::vector<SpaceRange> MmcBlobAllocator::GetFreeSegments()
+{
+    std::vector<SpaceRange> segments;
+    spinlock_.lock();
+    segments.reserve(addressTree_.size());
+    // addressTree_ 以 offset 为 key 有序，转换回 gva 绝对地址后仍按地址升序
+    for (const auto &[offset, size] : addressTree_) {
+        segments.emplace_back(bmAddr_ + offset, size);
+    }
+    spinlock_.unlock();
+    return segments;
+}
+
 Result MmcBlobAllocator::BuildFromBlobs(std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList)
 {
     spinlock_.lock();

@@ -77,6 +77,18 @@ static void ApplyEvictThresholds(KVParser &kvParser, mmc_meta_service_config_t &
     }
 }
 
+// 碎片浪费率阈值独立解析：与 evict 高低水位完全解耦，单独校验、单独生效
+static void ApplyDefragEvictThreshold(KVParser &kvParser, mmc_meta_service_config_t &newMetaConfig)
+{
+    int32_t defragThreshold = 0;
+    auto validator = VIntRange::Create(ConfConstant::OKC_MMC_DEFRAG_EVICT_THRESHOLD.first, MIN_DEFRAG_EVICT_THRESHOLD,
+                                       MAX_DEFRAG_EVICT_THRESHOLD);
+    if (GetValidatedInt(ConfConstant::OKC_MMC_DEFRAG_EVICT_THRESHOLD.first, kvParser, validator, defragThreshold) ==
+        FieldStatus::OK) {
+        newMetaConfig.defragEvictThreshold = static_cast<uint16_t>(defragThreshold);
+    }
+}
+
 bool ReloadMetaConfigFromFile(const std::string &configFilePath, time_t &lastConfigMtime, MmcMetaService *metaService)
 {
     if (metaService == nullptr) {
@@ -120,17 +132,27 @@ bool ReloadMetaConfigFromFile(const std::string &configFilePath, time_t &lastCon
     }
 
     ApplyEvictThresholds(kvParser, newMetaConfig);
+    ApplyDefragEvictThreshold(kvParser, newMetaConfig);
 
     const bool logLevelApplied = logLevelSet && ApplyMetaLogLevelFromConfig(newMetaConfig.logLevel);
 
     const bool paramsChanged = newMetaConfig.leaseTtlMs != current.leaseTtlMs ||
                                newMetaConfig.evictThresholdHigh != current.evictThresholdHigh ||
                                newMetaConfig.evictThresholdLow != current.evictThresholdLow;
+    bool paramsApplied = paramsChanged;
     if (paramsChanged && metaService->UpdateConfig(newMetaConfig) != MMC_OK) {
         MMC_LOG_WARN("Failed to apply meta config hot-reload");
-        return logLevelApplied;
+        paramsApplied = false;
     }
-    return logLevelApplied || paramsChanged;
+
+    const bool defragChanged = newMetaConfig.defragEvictThreshold != current.defragEvictThreshold;
+    bool defragApplied = defragChanged;
+    if (defragChanged && metaService->UpdateDefragEvictThreshold(newMetaConfig.defragEvictThreshold) != MMC_OK) {
+        MMC_LOG_WARN("Failed to apply defrag evict waste percent threshold hot-reload");
+        defragApplied = false;
+    }
+
+    return logLevelApplied || paramsApplied || defragApplied;
 }
 
 } // namespace mmc

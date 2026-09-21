@@ -66,6 +66,16 @@ public:
         return metaMangerPtr_->UpdateConfig(leaseTtlMs, evictThresholdHigh, evictThresholdLow);
     }
 
+    Result UpdateDefragEvictThreshold(uint16_t defragEvictThreshold)
+    {
+        std::lock_guard<std::mutex> guard(mutex_);
+        if (!started_) {
+            MMC_LOG_WARN("MmcMetaMgrProxy not started, cannot update defrag evict waste percent threshold");
+            return MMC_NOT_STARTED;
+        }
+        return metaMangerPtr_->UpdateDefragEvictThreshold(defragEvictThreshold);
+    }
+
     void Stop()
     {
         std::lock_guard<std::mutex> guard(mutex_);

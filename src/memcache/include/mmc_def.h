@@ -85,6 +85,7 @@ typedef struct {
     int32_t logOutputTarget; /* 0=screen, 1=file, 2=both */
     uint16_t evictThresholdHigh;
     uint16_t evictThresholdLow;
+    uint16_t defragEvictThreshold;
     uint64_t leaseTtlMs;
     uint32_t evictYieldInterval;   /* GC eviction yield: evict this many objects then sleep, 0=disabled */
     uint32_t evictYieldDurationUs; /* GC eviction yield: sleep duration in microseconds per yield */

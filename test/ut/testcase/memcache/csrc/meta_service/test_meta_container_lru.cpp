@@ -77,6 +77,32 @@ TEST_F(TestMmcMetaContainerLRU, GetMediaKeyCountAndEvictCandidateKeys)
     EXPECT_EQ(keys[1], "key2");
 }
 
+TEST_F(TestMmcMetaContainerLRU, EraseIfEmpty)
+{
+    constexpr int nonEmptyValue = 100;
+    EXPECT_EQ(container->Insert("key1", nonEmptyValue), MMC_OK);
+    EXPECT_EQ(container->Insert("key2", 0), MMC_OK);
+
+    auto isEmpty = [](const int &value) { return value == 0; };
+
+    // 不存在的 key 返回 MMC_UNMATCHED_KEY
+    EXPECT_EQ(container->EraseIfEmpty("key3", isEmpty), MMC_UNMATCHED_KEY);
+
+    // 判空为假（value != 0）：保留条目，返回 MMC_ERROR
+    EXPECT_EQ(container->EraseIfEmpty("key1", isEmpty), MMC_ERROR);
+    int value = 0;
+    EXPECT_EQ(container->Get("key1", value), MMC_OK);
+    EXPECT_EQ(value, nonEmptyValue);
+
+    // 判空为真（value == 0）：删除条目并摘除 LRU，返回 MMC_OK
+    EXPECT_EQ(container->EraseIfEmpty("key2", isEmpty), MMC_OK);
+    EXPECT_EQ(container->Get("key2", value), MMC_UNMATCHED_KEY);
+    EXPECT_EQ(container->GetKeyCount(MEDIA_DRAM), 1U);
+    auto tailKeys = container->GetEvictCandidateKeys(MEDIA_DRAM, 10U);
+    ASSERT_EQ(tailKeys.size(), 1U);
+    EXPECT_EQ(tailKeys[0], "key1");
+}
+
 class TestEvictYield : public TestMmcMetaContainerLRU {
 protected:
     void SetUp() override
@@ -250,4 +276,67 @@ TEST_F(TestMmcMetaContainerLRU, GetKeyCount)
 
     EXPECT_EQ(container->EraseAll([](const std::string &, const int &) {}), MMC_OK);
     EXPECT_EQ(container->GetKeyCount(), 0);
+}
+
+// Promote on non-existent key returns MMC_UNMATCHED_KEY
+TEST_F(TestMmcMetaContainerLRU, PromoteNonExistentKeyReturnsUnmatched)
+{
+    EXPECT_EQ(container->Promote("non_existent"), MMC_UNMATCHED_KEY);
+}
+
+// Promote on existing key returns MMC_OK
+TEST_F(TestMmcMetaContainerLRU, PromoteExistingKeyReturnsOk)
+{
+    constexpr int testValue = 100;
+    EXPECT_EQ(container->Insert("key1", testValue), MMC_OK);
+    EXPECT_EQ(container->Promote("key1"), MMC_OK);
+}
+
+// Promote on key with MEDIA_NONE type returns OK without moving LRU
+TEST_F(TestMmcMetaContainerLRU, PromoteNoneMediaTypeReturnsOk)
+{
+    constexpr int testValue = 100;
+    EXPECT_EQ(container->Insert("key1", testValue), MMC_OK);
+    EXPECT_EQ(container->InsertLru("key1", MEDIA_NONE), MMC_OK);
+    EXPECT_EQ(container->Promote("key1"), MMC_OK);
+}
+
+TEST_F(TestMmcMetaContainerLRU, GetKeyCountAndEvictCandidateKeys)
+{
+    for (int i = 1; i <= 10; ++i) {
+        EXPECT_EQ(container->Insert("key" + std::to_string(i), i * 100), MMC_OK);
+    }
+    EXPECT_EQ(container->GetKeyCount(MEDIA_DRAM), 10U);
+    EXPECT_EQ(container->GetKeyCount(MEDIA_NONE), 0U);
+    EXPECT_EQ(container->GetKeyCount(MEDIA_HBM), 0U);
+
+    // LRU 尾部即最久未使用端，key1 最早插入
+    auto tailKeys = container->GetEvictCandidateKeys(MEDIA_DRAM, 3U);
+    ASSERT_EQ(tailKeys.size(), 3U);
+    EXPECT_EQ(tailKeys[0], "key1");
+    EXPECT_EQ(tailKeys[1], "key2");
+    EXPECT_EQ(tailKeys[2], "key3");
+
+    // 请求数量超过 LRU 长度时返回全部 key
+    auto allKeys = container->GetEvictCandidateKeys(MEDIA_DRAM, 100U);
+    ASSERT_EQ(allKeys.size(), 10U);
+    EXPECT_EQ(allKeys.back(), "key10");
+
+    // 请求数量为 0 时返回空
+    EXPECT_TRUE(container->GetEvictCandidateKeys(MEDIA_DRAM, 0U).empty());
+
+    // Promote 后尾部顺序更新
+    ASSERT_EQ(container->Promote("key1"), MMC_OK);
+    auto promotedTail = container->GetEvictCandidateKeys(MEDIA_DRAM, 1U);
+    ASSERT_EQ(promotedTail.size(), 1U);
+    EXPECT_EQ(promotedTail[0], "key2");
+}
+
+TEST_F(TestMmcMetaContainerLRU, GetEvictCandidateKeysForSsdReturnsEmpty)
+{
+    auto ssdContainer = std::make_unique<Container>([](const int &) -> MediaType { return MEDIA_SSD; });
+    EXPECT_EQ(ssdContainer->Insert("ssdKey", 1), MMC_OK);
+    // SSD 类型不进入 LRU 管理
+    EXPECT_EQ(ssdContainer->GetKeyCount(MEDIA_SSD), 0U);
+    EXPECT_TRUE(ssdContainer->GetEvictCandidateKeys(MEDIA_SSD, 5U).empty());
 }

@@ -35,6 +35,7 @@ constexpr auto OCK_MMC_META_SERVICE_STORAGE_METADATA_MODE =
     std::make_pair("ock.mmc.meta_service.storage.metadata_mode", "aggregated");
 constexpr auto OKC_MMC_EVICT_THRESHOLD_HIGH = std::make_pair("ock.mmc.evict_threshold_high", 90);
 constexpr auto OKC_MMC_EVICT_THRESHOLD_LOW = std::make_pair("ock.mmc.evict_threshold_low", 80);
+constexpr auto OKC_MMC_DEFRAG_EVICT_THRESHOLD = std::make_pair("ock.mmc.defrag_evict_threshold", 70);
 constexpr auto OCK_MMC_EVICT_CHECK_INTERVAL_SECONDS = std::make_pair("ock.mmc.evict_check_interval_seconds", 5);
 constexpr auto OCK_MMC_META_LEASE_TTL_MS = std::make_pair("ock.mmc.meta.lease_ttl_ms", 10000);
 constexpr auto OCK_MMC_META_LRU_SHARD_COUNT =
@@ -156,6 +157,8 @@ constexpr int MAX_WORLD_SIZE = 1024;
 
 constexpr int MIN_EVICT_THRESHOLD = 1;
 constexpr int MAX_EVICT_THRESHOLD = 99;
+constexpr int MIN_DEFRAG_EVICT_THRESHOLD = 1;
+constexpr int MAX_DEFRAG_EVICT_THRESHOLD = 99;
 constexpr int MIN_LEASE_TTL_MS = 1;
 constexpr int MAX_LEASE_TTL_MS = 2147483647;
 constexpr int MIN_META_LRU_SHARD_COUNT = 1;

@@ -232,6 +232,10 @@ public:
         AddIntConf(OKC_MMC_EVICT_THRESHOLD_LOW,
                    VIntRange::Create(OKC_MMC_EVICT_THRESHOLD_LOW.first, MIN_EVICT_THRESHOLD, MAX_EVICT_THRESHOLD - 1),
                    0);
+        AddIntConf(OKC_MMC_DEFRAG_EVICT_THRESHOLD,
+                   VIntRange::Create(OKC_MMC_DEFRAG_EVICT_THRESHOLD.first, MIN_DEFRAG_EVICT_THRESHOLD,
+                                     MAX_DEFRAG_EVICT_THRESHOLD),
+                   0);
         AddBoolConf(OCK_MMC_PREFETCH_ENABLED, VStrEnum::Create(OCK_MMC_PREFETCH_ENABLED.first, BOOL_ENUM_STR), 0);
         AddIntConf(
             OCK_MMC_ASYNC_FLUSH_INTERVAL_MS,
@@ -335,6 +339,7 @@ public:
 
         config.evictThresholdHigh = GetInt(ConfConstant::OKC_MMC_EVICT_THRESHOLD_HIGH);
         config.evictThresholdLow = GetInt(ConfConstant::OKC_MMC_EVICT_THRESHOLD_LOW);
+        config.defragEvictThreshold = static_cast<uint16_t>(GetInt(ConfConstant::OKC_MMC_DEFRAG_EVICT_THRESHOLD));
         config.prefetchEnabled = GetBool(ConfConstant::OCK_MMC_PREFETCH_ENABLED);
         config.asyncFlushIntervalMs = static_cast<uint32_t>(GetInt(ConfConstant::OCK_MMC_ASYNC_FLUSH_INTERVAL_MS));
         config.asyncFlushBatchLimit = static_cast<uint32_t>(GetInt(ConfConstant::OCK_MMC_ASYNC_FLUSH_BATCH_LIMIT));
