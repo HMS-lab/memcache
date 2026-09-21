@@ -53,18 +53,18 @@ Result MmcMetaLeaseManager::Extend(uint64_t ttl)
     return MMC_OK;
 }
 
-void MmcMetaLeaseManager::Wait()
+Result MmcMetaLeaseManager::Wait()
 {
     const uint64_t waitIntervalMs =
         std::min<uint64_t>(std::max<uint64_t>(1, defaultTtlMs_ / 10ULL), MMC_DATA_TTL_MS / 10ULL);
     while (!useClient.empty()) {
         if ((ock::dagger::Monotonic::TimeUs() / 1000ULL) >= lease_) {
-            MMC_LOG_DEBUG("MmcMetaLeaseManager Wait " << " ttl " << waitIntervalMs);
             TP_TRACE_RECORD(TP_MMC_META_LEASE_TIMEOUT_COUNT, defaultTtlMs_ * 1000ULL, 0);
-            return;
+            return MMC_TIMEOUT;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(waitIntervalMs));
     }
+    return MMC_OK;
 }
 } // namespace mmc
 } // namespace ock

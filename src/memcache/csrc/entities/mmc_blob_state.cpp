@@ -39,8 +39,7 @@ Result LeaseWait(MmcMetaLeaseManager &leaseMgr, uint32_t rankId, uint32_t reques
     if (leaseMgr.UseCount() == 0) {
         return MMC_OK;
     }
-    leaseMgr.Wait();
-    return MMC_OK;
+    return leaseMgr.Wait();
 }
 
 Result LeaseExtend(MmcMetaLeaseManager &leaseMgr, uint32_t rankId, uint32_t requestId)

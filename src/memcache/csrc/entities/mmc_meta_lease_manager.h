@@ -34,7 +34,7 @@ public:
     Result Add(uint32_t id, uint32_t requestId, uint64_t ttl);
     Result Remove(uint32_t id, uint32_t requestId);
     Result Extend(uint64_t ttl);
-    void Wait();
+    Result Wait();
     inline uint64_t RemainingLeaseTtlMs() const;
     inline uint32_t UseCount() const;
     inline bool HasLease(uint32_t rankId, uint32_t requestId) const;

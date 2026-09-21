@@ -47,8 +47,13 @@ Result MmcMemBlob::UpdateState(const std::string &key, uint32_t rankId, uint32_t
     auto oldState = state_;
     state_ = retIter->second.state_;
     if (retIter->second.action_) {
+        const uint64_t leaseWaitStartMs = ock::dagger::Monotonic::TimeUs() / 1000U;
         auto res = retIter->second.action_(metaLeaseManager_, rankId, operateId);
-        if (res != MMC_OK) {
+        if (res == MMC_TIMEOUT) {
+            MMC_LOG_WARN("Lease wait timeout on removal, key:"
+                         << key << ", gva=" << gva_ << ", type=" << mediaType_
+                         << ", waitedMs=" << ock::dagger::Monotonic::TimeUs() / 1000U - leaseWaitStartMs);
+        } else if (res != MMC_OK) {
             MMC_LOG_ERROR("Blob update current state is " << std::to_string(state_) << " by ret(" << std::to_string(ret)
                                                           << ") failed! key=" << key << ", gva=" << gva_
                                                           << ", type=" << mediaType_ << ", res=" << res);
