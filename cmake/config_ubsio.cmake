@@ -32,7 +32,7 @@ if (BUILD_UBSIO)
         FetchContent_Declare(
             ubs-io
             GIT_REPOSITORY https://gitcode.com/openeuler/ubs-io.git
-            GIT_TAG openEuler-24.03-LTS-SP4
+            GIT_TAG develop
         )
     endif()
 
