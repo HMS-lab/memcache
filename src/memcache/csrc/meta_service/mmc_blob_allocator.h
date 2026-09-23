@@ -97,6 +97,15 @@ public:
         return std::make_pair(capacity_, allocatedSize_);
     }
 
+    // 实时内部碎片 = 已切块总量 (含对齐/max模式放大) - 活跃blob逻辑请求字节之和
+    uint64_t GetFragmentationBytes() const
+    {
+        spinlock_.lock();
+        uint64_t internalFragBytes = allocatedSize_ - requestedSize_;
+        spinlock_.unlock();
+        return internalFragBytes;
+    }
+
     nlohmann::json GetInfo() const
     {
         nlohmann::json info;
@@ -105,6 +114,7 @@ public:
         info["bmAddr"] = bmAddr_;
         info["capacity"] = capacity_;
         info["allocatedSize"] = allocatedSize_;
+        info["fragmentationBytes"] = GetFragmentationBytes();
         return info;
     }
 
@@ -122,10 +132,11 @@ protected:
 
     volatile bool started_ = false;
     uint64_t allocatedSize_ = 0;
+    uint64_t requestedSize_ = 0; // 活跃blob逻辑请求字节之和 (Alloc增/Release减/恢复回填)，用于实时内部碎片统计
     bool enableMaxValueMode_ = false;
     std::atomic<uint64_t> *maxAlignedSize_; // 指向 GlobalAllocator 的全局 maxAlignedSize_
 
-    Spinlock spinlock_;
+    mutable Spinlock spinlock_; // mutable：const 查询接口 (GetInfo/GetFragmentationBytes) 内部加锁
 };
 
 inline MmcRef<MmcBlobAllocator> MmcBlobAllocator::Create(const MmcLocation &loc, const MmcLocalMemlInitInfo &info,

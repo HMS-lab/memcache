@@ -15,6 +15,8 @@
 #include <cstdint>
 #include <limits>
 
+#include "mmc_ptracer.h"
+
 namespace ock {
 namespace mmc {
 bool MmcBlobAllocator::CanAlloc(uint64_t blobSize)
@@ -89,7 +91,15 @@ MmcMemBlobPtr MmcBlobAllocator::Alloc(uint64_t blobSize)
     while (alignedSize > currentMax &&
            !maxAlignedSize_->compare_exchange_weak(currentMax, alignedSize, std::memory_order_relaxed)) {}
     allocatedSize_ += allocSize;
+    requestedSize_ += blobSize;
     spinlock_.unlock();
+
+    // 内部碎片打点：切块大小 (对齐/max模式放大后的最终切块值) 与请求大小的差值，
+    // 锁外打点不延长临界区；携带值复用时间差槽位，tracer 侧聚合出次数/avg/max 分布
+    uint64_t internalFragBytes = allocSize - blobSize;
+    if (internalFragBytes > 0) {
+        TP_TRACE_RECORD(TP_MMC_ALLOC_FRAG, internalFragBytes, 0);
+    }
 
     MMC_LOG_DEBUG("Alloc rank=" << rank_ << ", type=" << mediaType_ << " allocated=" << blobSize
                                 << " total=" << allocatedSize_ << "/" << capacity_);
@@ -105,6 +115,8 @@ Result MmcBlobAllocator::Release(const MmcMemBlobPtr &blob)
     auto alignedSize = AllocSizeAlignUp(blob->AllocSize());
     MMC_ASSERT_LOG_AND_RETURN(allocatedSize_ >= alignedSize,
                               "allocatedSize_ = " << allocatedSize_ << ", alignedSize = " << alignedSize, MMC_ERROR);
+    MMC_ASSERT_LOG_AND_RETURN(requestedSize_ >= blob->Size(),
+                              "requestedSize_ = " << requestedSize_ << ", blobSize = " << blob->Size(), MMC_ERROR);
     auto blobAddr = blob->Gva();
     if (blobAddr < bmAddr_ || blobAddr + alignedSize > bmAddr_ + capacity_) {
         MMC_LOG_ERROR("blob address not in allocator");
@@ -149,6 +161,7 @@ Result MmcBlobAllocator::Release(const MmcMemBlobPtr &blob)
     sizeTree_.emplace(SpaceRange{finalOffset, finalSize});
 
     allocatedSize_ -= alignedSize;
+    requestedSize_ -= blob->Size();
 
     spinlock_.unlock();
     MMC_LOG_DEBUG("Release rank=" << rank_ << ", type=" << mediaType_ << " released=" << blob->Size()
@@ -213,6 +226,8 @@ Result MmcBlobAllocator::BuildFromBlobs(std::vector<std::pair<std::string, MmcMe
             it = blobList.erase(it);
             continue;
         }
+        // 恢复路径同步回填逻辑请求字节，保证重启后实时内部碎片口径连续
+        requestedSize_ += size;
         // 按恢复数据重建历史最大对齐尺寸，避免重启后 max 模式从 0 重新爬升导致切块粒度漂移。
         // recorded 与 ValidateAndAddAllocation 的切块值严格一致，回填给 desc 作为单一真相源：
         // RebuildMeta 重建 Blob、Release 归还、后续 GetDesc 传播均使用该值，旧数据（allocSize_=0）自愈

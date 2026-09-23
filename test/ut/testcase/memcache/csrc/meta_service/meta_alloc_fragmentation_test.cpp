@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "gtest/gtest.h"
+#include "mmc_blob_allocator.h"
 #include "mmc_ref.h"
 
 using namespace std;
@@ -30,6 +31,7 @@ constexpr uint64_t SMALL_PAGES = 13; // 奇数页小档（DS flash 混合 value 
 constexpr uint64_t LARGE_PAGES = 17; // 奇数页大档
 constexpr uint64_t ARENA_PAGES = 11006;
 constexpr uint32_t RANK_ID = 0;
+constexpr uint64_t UNALIGNED_SIZE = 100; // 非对齐请求字节，用于触发碎片
 
 constexpr uint64_t SmallBytes()
 {
@@ -156,4 +158,67 @@ TEST_F(TestAllocFragmentation, MaxValueModeResolvesOddStrideCheckerboard)
         // padded footprint 按记录值精确归还，无泄漏、无多还
         EXPECT_EQ(UsedBytes(board), 0UL);
     }
+}
+
+// 碎片率 gauge 守恒：Alloc 增 / Release 减，单块非对齐请求碎片 = 对齐切块 - 请求字节
+TEST_F(TestAllocFragmentation, FragmentationGaugeConservation)
+{
+    constexpr uint64_t expectedFrag = PAGE_SIZE_BYTES - UNALIGNED_SIZE;
+    std::atomic<uint64_t> maxAlignedSize{0};
+    MmcBlobAllocator allocator(RANK_ID, MEDIA_DRAM, 0, ARENA_PAGES * PAGE_SIZE_BYTES, false, &maxAlignedSize);
+    allocator.Start();
+
+    EXPECT_EQ(allocator.GetFragmentationBytes(), 0UL);
+
+    MmcMemBlobPtr blob = allocator.Alloc(UNALIGNED_SIZE);
+    ASSERT_NE(blob, nullptr);
+    EXPECT_EQ(allocator.GetFragmentationBytes(), expectedFrag);
+
+    EXPECT_EQ(allocator.Release(blob), MMC_OK);
+    EXPECT_EQ(allocator.GetFragmentationBytes(), 0UL);
+}
+
+// max-value 模式：小请求被放大到全局 max，碎片 = max - 请求字节
+TEST_F(TestAllocFragmentation, FragmentationGaugeMaxValueMode)
+{
+    constexpr uint64_t presetMax = SmallBytes();
+    constexpr uint64_t expectedFrag = presetMax - UNALIGNED_SIZE;
+    std::atomic<uint64_t> maxAlignedSize{presetMax};
+    MmcBlobAllocator allocator(RANK_ID, MEDIA_DRAM, 0, ARENA_PAGES * PAGE_SIZE_BYTES, true, &maxAlignedSize);
+    allocator.Start();
+
+    EXPECT_EQ(allocator.GetFragmentationBytes(), 0UL);
+
+    MmcMemBlobPtr blob = allocator.Alloc(UNALIGNED_SIZE);
+    ASSERT_NE(blob, nullptr);
+    EXPECT_EQ(allocator.GetFragmentationBytes(), expectedFrag);
+
+    EXPECT_EQ(allocator.Release(blob), MMC_OK);
+    EXPECT_EQ(allocator.GetFragmentationBytes(), 0UL);
+}
+
+// BuildFromBlobs 恢复路径：requestedSize_ 按 size 回填，重启后碎片口径与 Alloc 路径一致
+TEST_F(TestAllocFragmentation, FragmentationGaugeBuildFromBlobs)
+{
+    constexpr uint64_t expectedFrag = PAGE_SIZE_BYTES - UNALIGNED_SIZE;
+    std::atomic<uint64_t> maxAlignedSize{0};
+    MmcBlobAllocator allocator(RANK_ID, MEDIA_DRAM, 0, ARENA_PAGES * PAGE_SIZE_BYTES, false, &maxAlignedSize);
+    allocator.Start();
+    MmcMemBlobPtr blob = allocator.Alloc(UNALIGNED_SIZE);
+    ASSERT_NE(blob, nullptr);
+    EXPECT_EQ(allocator.GetFragmentationBytes(), expectedFrag);
+
+    // 构造恢复用 blobList，allocSize_ 取 Alloc 返回的实际切块值
+    MmcMemBlobDesc desc(RANK_ID, blob->Gva(), UNALIGNED_SIZE, MEDIA_DRAM, NONE, 0, blob->AllocSize());
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobList;
+    blobList.emplace_back("key1", desc);
+
+    // 新 allocator (未 Start) 走 BuildFromBlobs 恢复路径
+    allocator.Stop();
+    std::atomic<uint64_t> maxAlignedSize2{0};
+    MmcBlobAllocator allocator2(RANK_ID, MEDIA_DRAM, 0, ARENA_PAGES * PAGE_SIZE_BYTES, false, &maxAlignedSize2);
+    ASSERT_EQ(allocator2.BuildFromBlobs(blobList), MMC_OK);
+
+    // 恢复后碎片应与 Alloc 路径一致
+    EXPECT_EQ(allocator2.GetFragmentationBytes(), expectedFrag);
 }

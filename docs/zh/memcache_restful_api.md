@@ -265,6 +265,9 @@ memcache_segment_capacity_bytes{segment="rank-0-hbm"} 5368709120
 # HELP memcache_segment_allocated_bytes Segment allocated bytes
 # TYPE memcache_segment_allocated_bytes gauge
 memcache_segment_allocated_bytes{segment="rank-0-hbm"} 368640
+# HELP memcache_segment_fragmentation_bytes Segment internal fragmentation bytes (chunked minus requested)
+# TYPE memcache_segment_fragmentation_bytes gauge
+memcache_segment_fragmentation_bytes{segment="rank-0-hbm"} 4096
 # HELP memcache_total_capacity_bytes Total capacity by medium in bytes
 # TYPE memcache_total_capacity_bytes gauge
 memcache_total_capacity_bytes{medium="hbm"} 5368709120
@@ -414,6 +417,7 @@ memcache_ubs_io_disk_total_bandwidth_bytes_per_sec{rank="0",disk_path="/data/dis
 |---|---|---|---|---|
 | `memcache_segment_capacity_bytes` | gauge | `segment` | `RestSegmentSnapshot::totalBytes` | segment 总容量 |
 | `memcache_segment_allocated_bytes` | gauge | `segment` | `RestSegmentSnapshot::usedBytes` | segment 已分配容量 |
+| `memcache_segment_fragmentation_bytes` | gauge | `segment` | `RestSegmentSnapshot::fragmentationBytes` | segment 内部碎片（切块总量减活跃 blob 逻辑请求字节之和，含对齐与 max 模式放大） |
 | `memcache_total_capacity_bytes` | gauge | `medium`=`hbm`\|`dram`\|`ssd` | `RestUsageSnapshot::totalBytes` | 按介质汇总总容量；`ssd` 仅在容量或已用量非 0 时输出 |
 | `memcache_allocated_bytes` | gauge | `medium`=`hbm`\|`dram`\|`ssd` | `RestUsageSnapshot::usedBytes` | 按介质汇总已分配容量；`ssd` 同上 |
 | `memcache_<op>_requests_total` | counter | — | `MmcMetaMetricSnapshot::<op>RequestCount` | `<op>` 接口调用总次数；`<op>` ∈ {alloc, batch_alloc, get, batch_get, remove, batch_remove, remove_all, update_state, batch_update_state, query, batch_query, get_all_keys, exist_key, batch_exist_key, mount, unmount}；支持 per-rank（开启 `IsPerRankEnabled()` 时另输出同名 `{rank}` 标签明细） |
@@ -1192,6 +1196,7 @@ curl "http://127.0.0.1:8000/query_segment?segment=rank-0-hbm"
   "total_bytes": 5368709120,
   "used_bytes": 368640,
   "remaining_bytes": 5368340480,
+  "fragmentation_bytes": 4096,
   "remaining_ratio": 0.9999313354
 }
 ```
@@ -1205,6 +1210,7 @@ curl "http://127.0.0.1:8000/query_segment?segment=rank-0-hbm"
 | `total_bytes` | segment 总容量，单位 `bytes` | segment 信息 |
 | `used_bytes` | 已使用容量，单位 `bytes` | segment 信息 |
 | `remaining_bytes` | 剩余容量，单位 `bytes` | 由总量与已用量计算 |
+| `fragmentation_bytes` | 内部碎片，单位 `bytes`（切块总量减活跃 blob 逻辑请求字节之和） | segment 信息 |
 | `remaining_ratio` | 剩余比例，范围 `[0,1]` | 由容量计算 |
 
 ### 错误示例
@@ -1515,6 +1521,7 @@ curl "http://127.0.0.1:8000/api/v1/capacity/segment_remaining"
       "total_bytes": 0,
       "used_bytes": 0,
       "remaining_bytes": 0,
+      "fragmentation_bytes": 0,
       "remaining_ratio": 0
     }
   ]
@@ -1530,7 +1537,7 @@ curl "http://127.0.0.1:8000/api/v1/capacity/segment_remaining"
 | `degraded` | 当前是否为降级返回 | 统计接口降级规则 |
 | `segments` | segment 剩余容量列表 | 接口成功返回约定 |
 | `segment_name` | segment 名称，格式 `rank-<rank>-<medium-lower>` | 全局字段规则 |
-| `total_bytes` / `used_bytes` / `remaining_bytes` | 容量字段单位均为 `bytes` | 全局单位规则 |
+| `total_bytes` / `used_bytes` / `remaining_bytes` / `fragmentation_bytes` | 容量字段单位均为 `bytes` | 全局单位规则 |
 | `remaining_ratio` | 剩余比例，范围 `[0,1]` | 全局单位规则 |
 
 ### 错误示例

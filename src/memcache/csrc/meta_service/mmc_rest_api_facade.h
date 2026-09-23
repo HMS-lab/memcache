@@ -48,6 +48,7 @@ struct RestSegmentSnapshot {
     uint64_t totalBytes{0};
     uint64_t usedBytes{0};
     uint64_t remainingBytes{0};
+    uint64_t fragmentationBytes{0};
     double remainingRatio{0.0};
 };
 

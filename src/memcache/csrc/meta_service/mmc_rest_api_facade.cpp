@@ -463,6 +463,7 @@ Result MmcRestApiFacade::GetAllSegmentSnapshots(std::vector<RestSegmentSnapshot>
         const uint64_t totalBytes = item.value("capacity", static_cast<uint64_t>(0));
         const uint64_t usedBytes = item.value("allocatedSize", static_cast<uint64_t>(0));
         const uint64_t remainingBytes = totalBytes >= usedBytes ? (totalBytes - usedBytes) : 0;
+        const uint64_t fragmentationBytes = item.value("fragmentationBytes", static_cast<uint64_t>(0));
         const double remainingRatio = totalBytes == 0 ? 0.0 : static_cast<double>(remainingBytes) / totalBytes;
 
         RestSegmentSnapshot snapshot;
@@ -471,6 +472,7 @@ Result MmcRestApiFacade::GetAllSegmentSnapshots(std::vector<RestSegmentSnapshot>
         snapshot.totalBytes = totalBytes;
         snapshot.usedBytes = usedBytes;
         snapshot.remainingBytes = remainingBytes;
+        snapshot.fragmentationBytes = fragmentationBytes;
         snapshot.remainingRatio = remainingRatio;
         segments.push_back(snapshot);
     }
@@ -528,6 +530,7 @@ Result MmcRestApiFacade::QuerySegment(const std::string &segmentId, RestSegmentS
     segment.totalBytes = segmentInfo.value("capacity", static_cast<uint64_t>(0));
     segment.usedBytes = segmentInfo.value("allocatedSize", static_cast<uint64_t>(0));
     segment.remainingBytes = segment.totalBytes >= segment.usedBytes ? (segment.totalBytes - segment.usedBytes) : 0;
+    segment.fragmentationBytes = segmentInfo.value("fragmentationBytes", static_cast<uint64_t>(0));
     segment.remainingRatio =
         segment.totalBytes == 0 ? 0.0 : static_cast<double>(segment.remainingBytes) / segment.totalBytes;
     return MMC_OK;
@@ -541,6 +544,7 @@ nlohmann::json MmcRestApiFacade::BuildSegment(const RestSegmentSnapshot &segment
     result["total_bytes"] = segment.totalBytes;
     result["used_bytes"] = segment.usedBytes;
     result["remaining_bytes"] = segment.remainingBytes;
+    result["fragmentation_bytes"] = segment.fragmentationBytes;
     result["remaining_ratio"] = segment.remainingRatio;
     return result;
 }
@@ -628,6 +632,7 @@ Result MmcRestApiFacade::BuildSegmentRemaining(nlohmann::json &result) const
         item["total_bytes"] = segments[i].totalBytes;
         item["used_bytes"] = segments[i].usedBytes;
         item["remaining_bytes"] = segments[i].remainingBytes;
+        item["fragmentation_bytes"] = segments[i].fragmentationBytes;
         item["remaining_ratio"] = segments[i].remainingRatio;
         segmentArray.push_back(item);
     }
@@ -820,6 +825,12 @@ Result MmcRestApiFacade::BuildPrometheusMetrics(bool serviceReady, std::string &
     for (size_t i = 0; i < segments.size(); ++i) {
         AppendLabeledMetricValue(oss, "memcache_segment_allocated_bytes", "segment", segments[i].segmentName,
                                  segments[i].usedBytes);
+    }
+    AppendMetricHeader(oss, "memcache_segment_fragmentation_bytes",
+                       "Segment internal fragmentation bytes (chunked minus requested)", "gauge");
+    for (size_t i = 0; i < segments.size(); ++i) {
+        AppendLabeledMetricValue(oss, "memcache_segment_fragmentation_bytes", "segment", segments[i].segmentName,
+                                 segments[i].fragmentationBytes);
     }
     AppendMetricHeader(oss, "memcache_total_capacity_bytes", "Total capacity by medium in bytes", "gauge");
     AppendLabeledMetricValue(oss, "memcache_total_capacity_bytes", "medium", kLowerMediumHbm, hbmUsage.totalBytes);
