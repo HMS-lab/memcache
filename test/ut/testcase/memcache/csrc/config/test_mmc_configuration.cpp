@@ -552,11 +552,19 @@ TEST_F(TestMmcConfiguration, MetaServiceSsdMetadataModeParsesSeparated)
 {
     MetaServiceConfig metaConfig;
     metaConfig.LoadDefault();
-    metaConfig.Set(ConfConstant::OCK_MMC_META_SERVICE_STORAGE_METADATA_MODE.first, std::string("SePaRaTeD"));
+    metaConfig.Set(ConfConstant::OCK_MMC_META_SERVICE_STORAGE_METADATA_MODE.first, std::string("separated"));
     EXPECT_TRUE(metaConfig.ValidateConf().empty());
     mmc_meta_service_config_t config{};
     metaConfig.GetMetaServiceConfig(config);
     EXPECT_EQ(config.ssdMetadataMode, MMC_SSD_METADATA_SEPARATED);
+}
+
+TEST_F(TestMmcConfiguration, MetaServiceSsdMetadataModeRejectsNonLowercaseValue)
+{
+    MetaServiceConfig metaConfig;
+    metaConfig.LoadDefault();
+    metaConfig.Set(ConfConstant::OCK_MMC_META_SERVICE_STORAGE_METADATA_MODE.first, std::string("SePaRaTeD"));
+    EXPECT_FALSE(metaConfig.ValidateConf().empty());
 }
 
 TEST_F(TestMmcConfiguration, MetaServiceSsdMetadataModeRejectsInvalidValue)

@@ -214,7 +214,8 @@ public:
                       0);
         AddBoolConf(OCK_MMC_META_HA_ENABLE, VStrEnum::Create(OCK_MMC_META_HA_ENABLE.first, BOOL_ENUM_STR), 0);
         AddStrConf(OCK_MMC_META_SERVICE_STORAGE_METADATA_MODE,
-                   VStrEnum::Create(OCK_MMC_META_SERVICE_STORAGE_METADATA_MODE.first, SSD_METADATA_MODE_ENUM_STR), 0);
+                   VStrEnum::Create(OCK_MMC_META_SERVICE_STORAGE_METADATA_MODE.first, SSD_METADATA_MODE_ENUM_STR, true),
+                   0);
         AddStrConf(OCK_MMC_LOG_LEVEL, VStrEnum::Create(OCK_MMC_LOG_LEVEL.first, LOG_LEVEL_ENUM_STR), 0);
         AddStrConf(OCK_MMC_LOG_PATH, VStrLength::Create(OCK_MMC_LOG_PATH.first, PATH_MAX_LEN), 0);
         AddIntConf(OCK_MMC_LOG_ROTATION_FILE_SIZE,
@@ -363,10 +364,9 @@ public:
         }
         config.metricsReportIntervalSeconds = GetUInt64(ConfConstant::OCK_MMC_METRICS_REPORT_INTERVAL_SECONDS);
         config.evictCheckIntervalSeconds = GetUInt64(ConfConstant::OCK_MMC_EVICT_CHECK_INTERVAL_SECONDS);
-        std::string ssdMetadataMode = GetString(ConfConstant::OCK_MMC_META_SERVICE_STORAGE_METADATA_MODE);
-        StringToUpper(ssdMetadataMode);
-        config.ssdMetadataMode =
-            ssdMetadataMode == "SEPARATED" ? MMC_SSD_METADATA_SEPARATED : MMC_SSD_METADATA_AGGREGATED;
+        config.ssdMetadataMode = GetString(ConfConstant::OCK_MMC_META_SERVICE_STORAGE_METADATA_MODE) == "separated"
+                                     ? MMC_SSD_METADATA_SEPARATED
+                                     : MMC_SSD_METADATA_AGGREGATED;
         GetAccTlsConfig(config.accTlsConfig);
         GetConfigStoreTlsConfig(config.configStoreTlsConfig);
         config.kvEvents.enable = GetBool(ConfConstant::OCK_MMC_KV_EVENTS_ENABLE);
