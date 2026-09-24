@@ -2025,7 +2025,6 @@ Result MmcMetaManager::PrefetchKeys(const std::vector<std::string> &keys, MediaT
     for (size_t index = 0; index < keys.size(); ++index) {
         if (objMetas[index].numBlobs_ == 0 || objMetas[index].blobs_.empty()) {
             MMC_LOG_WARN("Prefetch did not return a blob, key=" << keys[index]);
-            return MMC_UNMATCHED_KEY;
         }
     }
     return MMC_OK;
