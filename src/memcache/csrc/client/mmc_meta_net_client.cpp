@@ -222,8 +222,6 @@ Result MetaNetClient::ApplyDiscoveredServerUrl(bool &switched)
     }
     MMC_LOG_INFO("switching server from " << ip_ << ":" << port_ << " to " << ip << ":" << port);
     serverUrl_ = newUrl;
-    ip_ = ip;
-    port_ = port;
     switched = true;
     return MMC_OK;
 }
@@ -235,6 +233,11 @@ Result MetaNetClient::HandleServerChangedNotify()
     // 与断链重连一致：无发现函数则无从得知新 leader 地址，不做任何处理
     if (discoverUrlFunc_ == nullptr) {
         MMC_LOG_DEBUG(name_ << " no discover url func, ignore server changed notify");
+        return MMC_OK;
+    }
+    // HandleLinkBroken 一定先于本通知触发，断链重连在处理中则跳过
+    if (reconnecting_.load(std::memory_order_acquire)) {
+        MMC_LOG_DEBUG(name_ << " link broken reconnect in progress, skip server changed notify");
         return MMC_OK;
     }
     for (uint32_t count = 0; count < retryCount_; count++) {
@@ -342,18 +345,22 @@ Result MetaNetClient::HandleLinkBroken(const NetLinkPtr &link)
 {
     MMC_LOG_TRACE(name_ << " link broken");
     MMC_ASSERT_LOG_AND_RETURN(engine_ != nullptr, "engine_ is nullptr", MMC_NOT_INITIALIZED);
+
+    // CAS 抢占重连权，防止并发 HandleLinkBroken 与 HandleServerChangedNotify 竞争 connectMutex_
+    bool expected = false;
+    if (!reconnecting_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+        MMC_LOG_DEBUG(name_ << " reconnection already in progress by another thread");
+        return MMC_OK;
+    }
     for (uint32_t count = 0; count < retryCount_; count++) {
         if (stopping_) {
             MMC_LOG_TRACE(name_ << " stopping, abort reconnect");
+            reconnecting_.store(false, std::memory_order_release);
             return MMC_ERROR;
         }
         if (discoverUrlFunc_) {
-            std::string newUrl = discoverUrlFunc_();
-            if (!newUrl.empty()) {
-                UpdateServerUrl(newUrl);
-            } else {
-                MMC_LOG_DEBUG("discover leader url empty, keep current url");
-            }
+            bool dummy = false;
+            (void)ApplyDiscoveredServerUrl(dummy);
         }
 
         std::string ip;
@@ -370,13 +377,16 @@ Result MetaNetClient::HandleLinkBroken(const NetLinkPtr &link)
             MMC_LOG_ERROR("MetaNetClient reconnect attempt " << count << " failed, ret: " << ret);
         } else {
             if (retryHandler_ != nullptr) {
-                MMC_LOG_TRACE("call retry handler when reconnect to " << ip_ << ", port " << port_);
-                return retryHandler_();
+                Result retryRet = retryHandler_();
+                reconnecting_.store(false, std::memory_order_release);
+                return retryRet;
             }
+            reconnecting_.store(false, std::memory_order_release);
             return MMC_OK;
         }
         sleep(2ULL);
     }
+    reconnecting_.store(false, std::memory_order_release);
     return MMC_ERROR;
 }
 

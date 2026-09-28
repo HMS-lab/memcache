@@ -604,28 +604,28 @@ Result NetEngineAcc::ConnectToPeer(uint32_t peerId, const std::string &peerIp, u
     /* connect to peer with mutex held, in case of multiple threads connect to peer at the same time */
     std::lock_guard<std::mutex> guard(connectMutex_);
     /* double check, in case of other thread already connected */
-    bool result = peerLinkMap_->Find(peerId, linkAcc);
-    if (result) {
-        if (!isForce) {
-            MMC_LOG_INFO("The link to peer " << peerId << " already exists");
-            return MMC_OK;
-        } else {
-            peerLinkMap_->Remove(peerId);
-        }
+    bool hasOld = peerLinkMap_->Find(peerId, linkAcc);
+    if (hasOld && !isForce) {
+        MMC_LOG_INFO("The link to peer " << peerId << " already exists");
+        return MMC_OK;
     }
 
     MMC_LOG_DEBUG("Connecting to " << peerIp << ":" << port << "");
 
-    /* connect */
+    /* connect first, don't remove old link until connect succeeds */
     TcpLinkPtr realLink;
-    Result ret = server_->ConnectToPeerServer(peerIp, port, connReq, realLink);
+    constexpr uint32_t kConnectRetryTimes = 5;
+    Result ret = server_->ConnectToPeerServer(peerIp, port, connReq, kConnectRetryTimes, realLink);
     if (ret != MMC_OK || realLink == nullptr) {
-        MMC_LOG_ERROR("Failed to connection to peerId: " << peerId << ", peerIpPort: " << peerIp << ":" << port);
+        MMC_LOG_ERROR("Failed to connect to peerId: " << peerId << ", peerIpPort: " << peerIp << ":" << port);
         return ret;
     }
     realLink->UpCtx(peerId);
 
-    /* add into peer link map */
+    /* connect succeeded, atomic swap: remove old, add new */
+    if (hasOld) {
+        peerLinkMap_->Remove(peerId);
+    }
     linkAcc = MmcMakeRef<NetLinkAcc>(peerId, realLink);
     MMC_ASSERT_LOG_AND_RETURN(linkAcc != nullptr, "linkAcc is nullptr", MMC_NEW_OBJECT_FAILED);
     peerLinkMap_->Add(peerId, linkAcc);

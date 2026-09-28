@@ -150,6 +150,8 @@ public:
     void Stop();
     int32_t ConnectToPeerServer(const std::string &ip, uint16_t port, const AccConnReq &request,
                                 AccTcpLinkComplexPtr &link);
+    int32_t ConnectToPeerServer(const std::string &ip, uint16_t port, const AccConnReq &request, uint32_t retryTimes,
+                                AccTcpLinkComplexPtr &link);
     void RegisterNewRequestHandler(int16_t type, const AccNewReqHandler &handler);
     void RegisterRequestSentHandler(int16_t type, const AccReqSentHandler &handler);
     void RegisterLinkBrokenHandler(const AccLinkBrokenHandler &handler);

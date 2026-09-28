@@ -240,9 +240,15 @@ void AccTcpServer::Stop()
 int32_t AccTcpServer::ConnectToPeerServer(const std::string &ip, uint16_t port, const AccConnReq &value,
                                           AccTcpLinkComplexPtr &link)
 {
+    return ConnectToPeerServer(ip, port, value, 30, link);
+}
+
+int32_t AccTcpServer::ConnectToPeerServer(const std::string &ip, uint16_t port, const AccConnReq &value,
+                                          uint32_t retryTimes, AccTcpLinkComplexPtr &link)
+{
     smem_acc_connect_request_t request{value.magic, value.version, static_cast<uint8_t>(value.reconnect), value.rankId};
     smem_acc_link_t native = nullptr;
-    int32_t ret = mmc::MFAccApi::ConnectToPeerServer(handle_, ip.c_str(), port, &request, 30, &native);
+    int32_t ret = mmc::MFAccApi::ConnectToPeerServer(handle_, ip.c_str(), port, &request, retryTimes, &native);
     if (ret == ACC_OK) {
         link = mmc::MmcMakeRef<AccTcpLinkComplex>(native, false);
     }

@@ -124,10 +124,13 @@ public:
      * @brief Discover the leader address via discoverUrlFunc_ and apply it to the
      * client state when it differs from the current one.
      *
-     * Single-attempt step of HandleServerChangedNotify's retry loop: discovers the
-     * url, resolves it, compares with the current ip_/port_ and updates
-     * serverUrl_/ip_/port_ when different. Does not touch the connection itself --
-     * reconnection stays the caller's job (ResolveAndConnect).
+     * Shared single-attempt discover step of HandleLinkBroken's and
+     * HandleServerChangedNotify's retry loops: discovers the url, resolves it,
+     * compares with the current ip_/port_ (actual connected address, assigned only
+     * after ResolveAndConnect succeeds) and updates serverUrl_ when different.
+     * Never writes ip_/port_ -- they reflect the actual connection, not the desired
+     * target. Does not touch the connection itself -- reconnection stays the
+     * caller's job (ResolveAndConnect).
      *
      * @param switched    [out] true: state updated to a different address, caller
      *                    should reconnect; false: discovered address equals the
@@ -257,6 +260,8 @@ private:
     std::mutex mutex_;
     bool started_ = false;
     std::atomic<bool> stopping_ = false;
+    // 防止 HandleLinkBroken 与 HandleServerChangedNotify 并发重连
+    std::atomic<bool> reconnecting_{false};
     std::string name_;
 };
 
