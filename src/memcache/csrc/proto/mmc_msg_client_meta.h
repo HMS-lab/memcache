@@ -627,17 +627,17 @@ struct BmRegisterRequest : MsgBase {
 
     Result Deserialize(NetMsgUnpacker &packer) override
     {
-        packer.Deserialize(msgVer);
-        packer.Deserialize(msgId);
-        packer.Deserialize(destRankId);
-        packer.Deserialize(rank_);
-        packer.Deserialize(backendId_);
-        packer.Deserialize(mediaType_);
-        packer.Deserialize(addr_);
-        packer.Deserialize(capacity_);
-        packer.Deserialize(blobList_);
-        packer.Deserialize(storageEnabled_);
-        packer.Deserialize(enableMaxValueMode_);
+        MMC_RETURN_ERROR(packer.Deserialize(msgVer), "deserialize msgVer failed");
+        MMC_RETURN_ERROR(packer.Deserialize(msgId), "deserialize msgId failed");
+        MMC_RETURN_ERROR(packer.Deserialize(destRankId), "deserialize destRankId failed");
+        MMC_RETURN_ERROR(packer.Deserialize(rank_), "deserialize rank failed");
+        MMC_RETURN_ERROR(packer.Deserialize(backendId_), "deserialize backendId failed");
+        MMC_RETURN_ERROR(packer.Deserialize(mediaType_), "deserialize mediaType failed");
+        MMC_RETURN_ERROR(packer.Deserialize(addr_), "deserialize addr failed");
+        MMC_RETURN_ERROR(packer.Deserialize(capacity_), "deserialize capacity failed");
+        MMC_RETURN_ERROR(packer.Deserialize(blobList_), "deserialize blobList failed");
+        MMC_RETURN_ERROR(packer.Deserialize(storageEnabled_), "deserialize storageEnabled failed");
+        MMC_RETURN_ERROR(packer.Deserialize(enableMaxValueMode_), "deserialize enableMaxValueMode failed");
         return MMC_OK;
     }
 };

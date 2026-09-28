@@ -102,12 +102,12 @@ public:
     {
         if (std::is_pod<REQ>::value) {
             std::copy_n(reinterpret_cast<char *>(Data()), DataLen(), reinterpret_cast<char *>(&req));
+            return MMC_OK;
         } else {
             std::string str{(char *)Data(), DataLen()};
             NetMsgUnpacker unpacker(str);
-            req.Deserialize(unpacker);
+            return req.Deserialize(unpacker);
         }
-        return MMC_OK;
     }
 };
 

@@ -122,9 +122,14 @@ public:
      * @param val          [in/out] result data of POD
      */
     template<typename T>
-    void Deserialize(T &val, typename std::enable_if<std::is_trivially_copyable<T>::value, int>::type = 0)
+    Result Deserialize(T &val, typename std::enable_if<std::is_trivially_copyable<T>::value, int>::type = 0)
     {
         inStream_.read(reinterpret_cast<char *>(&val), sizeof(T));
+        if (!inStream_.good()) {
+            MMC_LOG_ERROR("Failed to deserialize POD type, stream error");
+            return MMC_ERROR;
+        }
+        return MMC_OK;
     }
 
     /**
@@ -132,16 +137,21 @@ public:
      *
      * @param val          [in/out] result data of string
      */
-    void Deserialize(std::string &val)
+    Result Deserialize(std::string &val)
     {
         uint32_t size = 0;
         inStream_.read(reinterpret_cast<char *>(&size), sizeof(size));
-        if (size > MAX_CONTAINER_SIZE) {
+        if (!inStream_.good() || size > MAX_CONTAINER_SIZE) {
             MMC_LOG_ERROR("string size: " << size << " exceeds limit: " << MAX_CONTAINER_SIZE);
-            return;
+            return MMC_ERROR;
         }
         val.resize(size);
         inStream_.read(&val[0], size);
+        if (!inStream_.good()) {
+            MMC_LOG_ERROR("Failed to read string data, size: " << size);
+            return MMC_ERROR;
+        }
+        return MMC_OK;
     }
 
     /**
@@ -151,21 +161,25 @@ public:
      * @param container    [in/out] result data of vector
      */
     template<typename V>
-    void Deserialize(std::vector<V> &container)
+    Result Deserialize(std::vector<V> &container)
     {
         std::size_t size = 0;
         inStream_.read(reinterpret_cast<char *>(&size), sizeof(size));
-        if (size > MAX_CONTAINER_SIZE) {
+        if (!inStream_.good() || size > MAX_CONTAINER_SIZE) {
             MMC_LOG_ERROR("container size: " << size << " exceeds limit: " << MAX_CONTAINER_SIZE);
-            return;
+            return MMC_ERROR;
         }
         container.clear();
         container.reserve(size);
         for (std::size_t i = 0; i < size; ++i) {
             V item;
-            Deserialize(item);
+            if (Deserialize(item) != MMC_OK) {
+                MMC_LOG_ERROR("Failed to deserialize vector element at index " << i);
+                return MMC_ERROR;
+            }
             container.emplace_back(std::move(item));
         }
+        return MMC_OK;
     }
 
     /**
@@ -176,22 +190,29 @@ public:
      * @param container    [in/out] result data of map
      */
     template<typename K, typename V>
-    void Deserialize(std::map<K, V> &container)
+    Result Deserialize(std::map<K, V> &container)
     {
         std::size_t size = 0;
         inStream_.read(reinterpret_cast<char *>(&size), sizeof(size));
-        if (size > MAX_CONTAINER_SIZE) {
+        if (!inStream_.good() || size > MAX_CONTAINER_SIZE) {
             MMC_LOG_ERROR("container size: " << size << " exceeds limit: " << MAX_CONTAINER_SIZE);
-            return;
+            return MMC_ERROR;
         }
         container.clear();
         for (std::size_t i = 0; i < size; ++i) {
             K key;
             V value;
-            Deserialize(key);
-            Deserialize(value);
+            if (Deserialize(key) != MMC_OK) {
+                MMC_LOG_ERROR("Failed to deserialize map key at index " << i);
+                return MMC_ERROR;
+            }
+            if (Deserialize(value) != MMC_OK) {
+                MMC_LOG_ERROR("Failed to deserialize map value at index " << i);
+                return MMC_ERROR;
+            }
             container.emplace(std::move(key), std::move(value));
         }
+        return MMC_OK;
     }
 
     /**
@@ -202,10 +223,12 @@ public:
      * @param val          [in/out] result data of pair
      */
     template<typename K, typename V>
-    void Deserialize(std::pair<K, V> &val)
+    Result Deserialize(std::pair<K, V> &val)
     {
-        Deserialize(val.first);
-        Deserialize(val.second);
+        if (Deserialize(val.first) != MMC_OK) {
+            return MMC_ERROR;
+        }
+        return Deserialize(val.second);
     }
 
 private:
