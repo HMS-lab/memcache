@@ -42,7 +42,7 @@ Result MmcMemBlob::UpdateState(const std::string &key, uint32_t rankId, uint32_t
     }
 
     MMC_LOG_DEBUG("update [" << key << "] state from " << state_ << " to " << retIter->second.state_ << ", gva=" << gva_
-                             << ", type=" << mediaType_);
+                             << ", type=" << mediaType_ << ", rankId=" << rankId << ", operateId=" << operateId);
 
     auto oldState = state_;
     state_ = retIter->second.state_;
@@ -67,10 +67,6 @@ Result MmcMemBlob::UpdateState(const std::string &key, uint32_t rankId, uint32_t
             MMC_LOG_WARN("unable to backup " << bakRet << " for key:" << key);
             // 备份失败是可以容忍的，不应该打断update流程
         }
-    }
-
-    if (state_ == READABLE) {
-        NotifyReadable();
     }
 
     return MMC_OK;

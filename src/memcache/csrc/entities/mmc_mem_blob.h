@@ -206,20 +206,6 @@ public:
     static void SsdPreFree(const std::string &key, const MmcMemBlobDesc &desc);
 
     static SsdPreFreeHandler ssdPreFreeHandler_;
-    mutable std::condition_variable cv_; /* P7: 回温完成时唤醒等待中的并发 Get() */
-
-    // P7: 等待 blob 状态变为 READABLE
-    template<typename Rep, typename Period>
-    bool WaitUntilReadable(std::unique_lock<std::mutex> &guard, const std::chrono::duration<Rep, Period> &timeout)
-    {
-        return cv_.wait_for(guard, timeout, [this]() { return state_ == READABLE; });
-    }
-
-    // P7: 通知等待者 blob 已变为 READABLE
-    void NotifyReadable()
-    {
-        cv_.notify_all();
-    }
 
 private:
     /**

@@ -582,6 +582,9 @@ Result MmcClientDefault::BatchGet(const std::vector<std::string> &keys, const st
         if (localLeaseDeadlinesMs[i] != 0 && leaseCheckNowMs > localLeaseDeadlinesMs[i] && batchResult[i] == MMC_OK) {
             batchResult[i] = MMC_LEASE_EXPIRED;
             hasExpiredLease = true;
+            MMC_LOG_WARN("client " << name_ << " batch get lease expired, key=" << keys[i]
+                                   << ", timeoutMs=" << leaseCheckNowMs - localLeaseDeadlinesMs[i]
+                                   << ", rankId=" << rankId_ << ", operateId=" << operateId);
         }
     }
     // update read state

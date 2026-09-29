@@ -39,8 +39,8 @@ static bool HasSsdBlob(const MmcMemMetaDesc &objMeta, const std::string &key, co
 {
     for (const auto &blob : objMeta.blobs_) {
         if (static_cast<MediaType>(blob.mediaType_) == MEDIA_SSD) {
-            MMC_LOG_ERROR(caller << " returned SSD blob for key " << key << ", rank=" << blob.rank_
-                                 << ", gva=" << blob.gva_);
+            MMC_LOG_WARN(caller << " returned SSD blob for key " << key << ", rank=" << blob.rank_
+                                << ", gva=" << blob.gva_);
             return true;
         }
     }

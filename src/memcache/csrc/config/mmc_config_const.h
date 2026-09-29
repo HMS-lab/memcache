@@ -129,7 +129,7 @@ constexpr auto OCK_MMC_ZMQ_ENABLE_CURVE = std::make_pair("ock.mmc.zmq.enable_cur
 constexpr auto OCK_MMC_ZMQ_PUBLIC_KEY = std::make_pair("ock.mmc.zmq.public_key", "");
 constexpr auto OCK_MMC_ZMQ_SECRET_KEY = std::make_pair("ock.mmc.zmq.private_key", "");
 constexpr auto OCK_MMC_PREFETCH_ENABLED = std::make_pair("ock.mmc.storage.prefetch.enabled", false);
-constexpr auto OCK_MMC_PENDING_WAIT_TIMEOUT_MS = std::make_pair("ock.mmc.storage.pending_wait.timeout", 300U);
+constexpr auto OCK_MMC_PENDING_WAIT_TIMEOUT_MS = std::make_pair("ock.mmc.storage.pending_wait.timeout", 5000U);
 constexpr auto OCK_MMC_LOCAL_SERVICE_STORAGE_ENABLED = std::make_pair("ock.mmc.local_service.storage.enabled", false);
 constexpr auto OCK_MMC_LOCAL_SERVICE_ENABLE_MAX_VALUE_MODE =
     std::make_pair("ock.mmc.local_service.alloc.max_value_mode.enabled", false);

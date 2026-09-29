@@ -130,7 +130,7 @@ TEST_F(TestMmcMetaManager, PendingGetDoesNotDependOnRewarmWorkerAvailability)
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
         std::lock_guard<std::mutex> guard(memObj->Mutex());
         pendingBlob->UpdateState(MMC_WRITE_OK);
-        pendingBlob->NotifyReadable();
+        memObj->NotifyReadable();
     });
 
     std::vector<MmcMemMetaDesc> objMetas;
@@ -166,7 +166,7 @@ TEST_F(TestMmcMetaManager, PendingPrefetchDoesNotAddDramReadLease)
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
         std::lock_guard<std::mutex> guard(memObj->Mutex());
         pendingBlob->UpdateState(MMC_WRITE_OK);
-        pendingBlob->NotifyReadable();
+        memObj->NotifyReadable();
     });
 
     std::vector<MmcMemMetaDesc> objMetas;
@@ -198,7 +198,7 @@ TEST_F(TestMmcMetaManager, AsyncPrefetchDoesNotWaitForPendingBlob)
     {
         std::lock_guard<std::mutex> guard(memObj->Mutex());
         pendingBlob->UpdateState(MMC_WRITE_OK);
-        pendingBlob->NotifyReadable();
+        memObj->NotifyReadable();
     }
     EXPECT_EQ(submitStatus, std::future_status::ready);
     EXPECT_EQ(submitFuture.get(), MMC_OK);

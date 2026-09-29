@@ -15,6 +15,8 @@
 #include <vector>
 #include <mutex>
 #include <list>
+#include <chrono>
+#include <condition_variable>
 #include <string>
 
 #include "mmc_mem_blob.h"
@@ -111,6 +113,20 @@ public:
         return mutex_;
     }
 
+    // P7: 等待本 key 满足给定条件（默认等待出现任一 READABLE blob）
+    template<typename Rep, typename Period, typename Predicate>
+    bool WaitUntil(std::unique_lock<std::mutex> &guard, const std::chrono::duration<Rep, Period> &timeout,
+                   Predicate pred)
+    {
+        return cv_.wait_for(guard, timeout, pred);
+    }
+
+    // P7: 通知本 key 的等待者（回温完成、状态 READABLE 等）
+    void NotifyReadable()
+    {
+        cv_.notify_all();
+    }
+
     friend std::ostream &operator<<(std::ostream &os, const MmcMemObjMeta &obj)
     {
         os << "MmcMemObjMeta{numBlobs=" << static_cast<int>(obj.numBlobs_) << ",size=" << obj.size_
@@ -133,12 +149,13 @@ private:
 
 private:
     /* make sure the size of this class is 64 bytes */
-    uint16_t prot_{0};               /* prot of the mem object, i.e. accessibility */
-    uint8_t priority_{0};            /* priority of the memory object, used for eviction */
-    uint8_t numBlobs_{0};            /* number of blob that the memory object, i.e. replica count */
-    std::list<MmcMemBlobPtr> blobs_; /* 24 bytes */
-    uint64_t size_{0};               /* byteSize of each blob */
-    std::mutex mutex_;               /* must lock before read/write this meta */
+    uint16_t prot_{0};                   /* prot of the mem object, i.e. accessibility */
+    uint8_t priority_{0};                /* priority of the memory object, used for eviction */
+    uint8_t numBlobs_{0};                /* number of blob that the memory object, i.e. replica count */
+    std::list<MmcMemBlobPtr> blobs_;     /* 24 bytes */
+    uint64_t size_{0};                   /* byteSize of each blob */
+    std::mutex mutex_;                   /* must lock before read/write this meta */
+    mutable std::condition_variable cv_; /* key-level: 回温/状态变化时唤醒等待中的并发 Get() */
 };
 
 using MmcMemObjMetaPtr = MmcRef<MmcMemObjMeta>;

@@ -690,43 +690,15 @@ private:
     Result BlobDeleteRpc(const std::string &key, const MmcMemBlobDesc &blob);
 
 private:
-    struct RewarmEntry {
-        size_t index = 0;
-        MmcMemObjMetaPtr memObj = nullptr;
-        MmcMemBlobPtr ssdBlob = nullptr;
-        MmcMemBlobDesc ssdDesc;
-        MmcMemBlobPtr dstBlob = nullptr;
-        MmcMemBlobDesc dstDesc;
-        uint32_t opRankId = 0;
-        uint32_t opSeq = 0;
-
-        RewarmEntry() = default;
-
-        RewarmEntry(size_t idx, MmcMemObjMetaPtr mo, MmcMemBlobPtr sb, const MmcMemBlobDesc &sd, MmcMemBlobPtr db,
-                    const MmcMemBlobDesc &dd, uint32_t rid, uint32_t seq)
-            : index(idx), memObj(mo), ssdBlob(sb), ssdDesc(sd), dstBlob(db), dstDesc(dd), opRankId(rid), opSeq(seq)
-        {}
-    };
-
-    struct DeferredLockEntry {
-        size_t index;
-        MmcMemObjMetaPtr memObj;
-    };
-
-    struct PendingRewarmWait {
-        size_t index;
-        MmcMemObjMetaPtr memObj;
-        MmcMemBlobPtr pendingBlob;
-    };
-
     struct GetByRankContext {
         const std::vector<std::string> &keys;
         std::vector<MmcMemMetaDesc> &objMetas;
         uint32_t opRankId;
         uint32_t opSeq;
-        std::map<uint32_t, std::vector<RewarmEntry>> rankGroups; // 按执行 rank 分组的回温任务。
-        std::vector<PendingRewarmWait> pendingWaitList;          // 等待其他请求完成回温的 key。
-        std::vector<DeferredLockEntry> deferredLockList;         // 待统一申请读租约的 DRAM 命中项。
+        std::vector<MmcMemObjMetaPtr> objs;                 // 原始下标对应的 key 粒度元数据。
+        std::map<uint32_t, std::vector<size_t>> rankGroups; // 按执行 rank 分组的回温 key 下标。
+        std::vector<size_t> pendingWaitList;                // 等待其他请求完成回温的 key 下标。
+        std::vector<size_t> deferredLockList;               // 待统一申请读租约的 DRAM 命中项下标。
 
         // 以下字段仅用于 SSD 元数据分离模式下的存储查询和 SSD-only key 回温。
         const std::vector<uint64_t> &sizes; // 已查询的 value size；为空时查询 SSD。
@@ -742,8 +714,16 @@ private:
         GetByRankContext(const std::vector<std::string> &keyList, uint64_t id, std::vector<MmcMemMetaDesc> &metas,
                          const std::vector<uint64_t> &storageSizes)
             : keys(keyList), objMetas(metas), opRankId(GetRankIdByOperateId(id)), opSeq(GetSequenceByOperateId(id)),
-              sizes(storageSizes)
+              objs(keyList.size()), sizes(storageSizes)
         {}
+    };
+
+    struct RewarmGroupContext {
+        uint32_t opRankId;
+        uint32_t opSeq;
+        const std::vector<std::string> &keys;
+        const std::vector<MmcMemObjMetaPtr> &objs;
+        std::vector<MmcMemMetaDesc> &objMetas;
     };
 
     struct BatchRpcData {
@@ -769,6 +749,17 @@ private:
     void PrepareBatchRewarmBlob(size_t index, uint64_t storageSize, GetByRankContext &context);
 
     /**
+     * @brief 为普通 Meta key 准备 SSD 回温任务，并加入对应 rank 的回温分组
+     * @param key              [in] 原始请求 key
+     * @param index            [in] key 在原始请求中的下标
+     * @param memObj           [in] key 粒度元数据对象
+     * @param srcBlob          [in] 最底层可读源 Blob
+     * @param context          [in/out] 批量查询结果和回温分组
+     */
+    void PrepareRewarmTask(const std::string &key, size_t index, const MmcMemObjMetaPtr &memObj,
+                           const MmcMemBlobPtr &srcBlob, GetByRankContext &context);
+
+    /**
      * @brief 将单个 Meta key 分类为可读、等待写入或需要回温，并归入对应分组
      * @param index            [in] key 在原始请求中的下标
      * @param memObj           [in] 已查询到的 Meta 对象
@@ -788,23 +779,27 @@ private:
      */
     Result ClassifyStorageMisses(GetByRankContext &context);
 
-    void RewarmRankGroup(uint32_t rank, std::vector<RewarmEntry> &group, const std::vector<std::string> &keys,
-                         uint32_t opRankId, uint32_t opSeq, std::vector<MmcMemMetaDesc> &objMetas,
+    void RewarmRankGroup(uint32_t rank, const std::vector<size_t> &indices, const RewarmGroupContext &context,
                          bool attachReadLease = true);
 
     void AttachReadLocks(const std::vector<std::string> &keys, uint32_t opRankId, uint32_t opSeq,
-                         std::vector<MmcMemMetaDesc> &objMetas, std::vector<DeferredLockEntry> &deferredLockList);
+                         const std::vector<MmcMemObjMetaPtr> &objs, std::vector<MmcMemMetaDesc> &objMetas,
+                         const std::vector<size_t> &deferredLockList);
 
-    void PendingWaitAndFill(GetByRankContext &context, PendingRewarmWait &w, bool attachReadLease,
-                            const std::chrono::steady_clock::time_point &deadline);
+    void PendingWaitAndFill(const std::vector<std::string> &keys, const std::vector<MmcMemObjMetaPtr> &objs,
+                            uint32_t opRankId, uint32_t opSeq, std::vector<MmcMemMetaDesc> &objMetas, size_t index,
+                            bool attachReadLease, const std::chrono::steady_clock::time_point &deadline);
 
-    Result SendBatchRpc(uint32_t rank, const std::vector<std::string> &keys, const std::vector<RewarmEntry> &group,
-                        BatchRpcData &batch, size_t groupSize, std::vector<bool> &copyOk);
+    Result SendBatchRpc(uint32_t rank, BatchRpcData &batch, std::vector<bool> &copyOk);
 
-    void RollbackEntry(const std::string &key, const RewarmEntry &entry, MmcMemBlobPtr &dstBlob,
-                       const MmcMemBlobDesc &dstDesc, MediaType dstMedia);
+    void RollbackEntry(const std::string &key, const MmcMemObjMetaPtr &memObj, const MmcMemBlobPtr &srcBlob,
+                       const MmcMemBlobPtr &dstBlob, uint32_t opRankId, uint32_t opSeq);
 
-    Result ApplyRewarm(const std::string &key, RewarmEntry &entry, MmcMemBlobPtr &dstBlob, const RewarmCtx &ctx,
+    void RollbackPendingRewarm(const std::string &key, const MmcMemObjMetaPtr &memObj, uint32_t opRankId,
+                               uint32_t opSeq);
+
+    Result ApplyRewarm(const std::string &key, const MmcMemObjMetaPtr &memObj, const MmcMemBlobPtr &srcBlob,
+                       const MmcMemBlobDesc &srcDesc, const MmcMemBlobPtr &dstBlob, const RewarmCtx &ctx,
                        MmcMemMetaDesc &objMeta, bool attachReadLease = true);
 
 private:
