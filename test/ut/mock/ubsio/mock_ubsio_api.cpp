@@ -11,6 +11,7 @@
  */
 
 #include <cstring>
+#include <cstdlib>
 #include <map>
 #include <mutex>
 #include <string>
@@ -358,4 +359,85 @@ extern "C" int32_t UbsioKvCacheBatchGetDirect(const char **keys, uint32_t keys_c
         results[i] = 0;
     }
     return 0;
+}
+
+// UBS IO scan key result structures, ABI-compatible with dl_ubsio_api.h
+constexpr uint32_t UBSIO_KV_MAX_KEY_SIZE_MOCK = UBSIO_KV_MAX_KEY_SIZE;
+constexpr uint64_t UBSIO_DISK_CAP_BYTES_MOCK = 1024ULL * 1024 * 1024 * 1024;
+constexpr uint64_t UBSIO_MEM_CAP_BYTES_MOCK = 80ULL * 1024 * 1024 * 1024;
+
+typedef struct {
+    char key[UBSIO_KV_MAX_KEY_SIZE_MOCK];
+    uint32_t keyLen;
+    uint32_t reserved;
+    uint64_t valueLen;
+} UbsioKvKeyInfo;
+
+// 已分配的扫描结果，等待释放
+std::vector<UbsioKvKeyInfo *> gScanKeyResults;
+std::mutex gScanKeyMutex;
+
+// 查询资源信息
+extern "C" int32_t UbsioGetResourceInfo(UbsioResourceInfo *info)
+{
+    if (info == nullptr) {
+        return -1;
+    }
+    memset(info, 0, sizeof(UbsioResourceInfo));
+    info->diskCap = UBSIO_DISK_CAP_BYTES_MOCK;
+    info->diskUsed = 0;
+    info->memCap = UBSIO_MEM_CAP_BYTES_MOCK;
+    info->memUsed = 0;
+    info->diskNum = 1;
+    info->faultDiskNum = 0;
+    return 0;
+}
+
+// 扫描 KV 缓存中的所有 key，一次性返回，hasMore 置 false
+extern "C" int32_t UbsioKvCacheScanKey(const UbsioKvKeyInfo **items, uint64_t *count, bool *hasMore)
+{
+    if (items == nullptr || count == nullptr || hasMore == nullptr) {
+        return -1;
+    }
+    std::lock_guard<std::mutex> lock(gUbsioMutex);
+    auto *result = static_cast<UbsioKvKeyInfo *>(calloc(gUbsioStorage.size(), sizeof(UbsioKvKeyInfo)));
+    if (result == nullptr && !gUbsioStorage.empty()) {
+        return -1;
+    }
+    uint64_t index = 0;
+    for (const auto &entry : gUbsioStorage) {
+        size_t keyLen = entry.first.size();
+        if (keyLen >= UBSIO_KV_MAX_KEY_SIZE_MOCK) {
+            keyLen = UBSIO_KV_MAX_KEY_SIZE_MOCK - 1;
+        }
+        memcpy(result[index].key, entry.first.c_str(), keyLen);
+        result[index].key[keyLen] = '\0';
+        result[index].keyLen = static_cast<uint32_t>(keyLen);
+        result[index].reserved = 0;
+        result[index].valueLen = entry.second.size();
+        ++index;
+    }
+    *items = result;
+    *count = gUbsioStorage.size();
+    *hasMore = false;
+    {
+        std::lock_guard<std::mutex> scanLock(gScanKeyMutex);
+        gScanKeyResults.push_back(result);
+    }
+    return 0;
+}
+
+// 释放扫描结果
+extern "C" void UbsioKvCacheFreeScanKeyResult(const UbsioKvKeyInfo **items)
+{
+    if (items == nullptr || *items == nullptr) {
+        return;
+    }
+    std::lock_guard<std::mutex> scanLock(gScanKeyMutex);
+    auto it = std::find(gScanKeyResults.begin(), gScanKeyResults.end(), *items);
+    if (it != gScanKeyResults.end()) {
+        free(*it);
+        gScanKeyResults.erase(it);
+    }
+    *items = nullptr;
 }

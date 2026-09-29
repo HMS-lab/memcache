@@ -103,7 +103,7 @@ RebuildBackend *gRebuildBackend = nullptr;
 int32_t QueryBatch(const char **keys, uint32_t count, bool *results, uint32_t)
 {
     gRebuildBackend->queryBatches.emplace_back(keys, keys + count);
-    // A failed batch may leave partial/default results; RegisterBm must ignore all of them.
+    // A failed batch may leave partial/default results; ReconnectBm must ignore all of them.
     std::fill_n(results, count, false);
     if (gRebuildBackend->queryBatches.size() == gRebuildBackend->failBatch) {
         // Simulate a positive partial result despite the overall failure.
@@ -264,7 +264,7 @@ protected:
     const MmcMemBlobDesc hbm_{kLocalRank, kHbmGva, kBlobSize, MEDIA_HBM};
 };
 
-TEST_F(MmcLocalRebuildTest, BatchResultsPreserveReplicasAndSupplementSsd)
+TEST_F(MmcLocalRebuildTest, BatchResultsRemoveStaleAndSupplementSsd)
 {
     Backups() = {{"dram-only", {dram_}},
                  {"hbm-only", {hbm_}},
@@ -274,13 +274,14 @@ TEST_F(MmcLocalRebuildTest, BatchResultsPreserveReplicasAndSupplementSsd)
     backend_.existingKeys = {"dram-only", "hbm-only", "live"};
     const auto keys = BackupKeys();
 
-    ASSERT_EQ(local_.RegisterBm(), MMC_OK);
+    ASSERT_EQ(local_.ReconnectBm(), MMC_OK);
 
     ASSERT_EQ(backend_.queryBatches.size(), kSingleItem);
     EXPECT_EQ(backend_.queryBatches.front(), keys);
     EXPECT_EQ(Backups().count("stale"), 0U);
     EXPECT_EQ(Backups().at("mixed"), (std::vector<MmcMemBlobDesc>{dram_, hbm_}));
-    EXPECT_EQ(Backups().at("dram-only"), (std::vector<MmcMemBlobDesc>{dram_}));
+    EXPECT_EQ(Backups().at("dram-only"), (std::vector<MmcMemBlobDesc>{dram_, ssd_}));
+    EXPECT_EQ(Backups().at("hbm-only"), (std::vector<MmcMemBlobDesc>{hbm_, ssd_}));
     const BlobList expected{{"dram-only", dram_}, {"dram-only", ssd_}, {"hbm-only", hbm_}, {"hbm-only", ssd_},
                             {"live", ssd_},       {"mixed", dram_},    {"mixed", hbm_}};
     EXPECT_EQ(ReportedBlobs(), expected);
@@ -294,7 +295,7 @@ TEST_F(MmcLocalRebuildTest, QueriesEachKeyOnceAcrossFullAndTailBatches)
     const auto keys = BackupKeys();
     const auto before = Backups();
 
-    ASSERT_EQ(local_.RegisterBm(), MMC_OK);
+    ASSERT_EQ(local_.ReconnectBm(), MMC_OK);
 
     ASSERT_EQ(backend_.queryBatches.size(), kSecondBatch);
     EXPECT_EQ(backend_.queryBatches.front().size(), kQueryBatchSize);
@@ -310,7 +311,7 @@ TEST_F(MmcLocalRebuildTest, ErasingEntireBatchesDoesNotSkipKeysOrFinishEarly)
 {
     AddSsdKeys(kQueryBatchSize + kSingleItem, false);
 
-    ASSERT_EQ(local_.RegisterBm(), MMC_OK);
+    ASSERT_EQ(local_.ReconnectBm(), MMC_OK);
 
     EXPECT_TRUE(Backups().empty());
     EXPECT_EQ(backend_.queryBatches.size(), kSecondBatch);
@@ -330,7 +331,7 @@ TEST_F(MmcLocalRebuildTest, QueryFailureDropsSsdBatchAndContinues)
     const auto tailKey = Backups().rbegin()->first;
     backend_.failBatch = kSingleItem;
 
-    ASSERT_EQ(local_.RegisterBm(), MMC_OK);
+    ASSERT_EQ(local_.ReconnectBm(), MMC_OK);
 
     EXPECT_EQ(Backups(), (BlobMap{{mixedKey, {dram_, hbm_}}, {dramOnlyKey, {dram_}}, {tailKey, {ssd_}}}));
     EXPECT_EQ(ReportedBlobs(), (BlobList{{mixedKey, dram_}, {mixedKey, hbm_}, {dramOnlyKey, dram_}, {tailKey, ssd_}}));
@@ -348,7 +349,7 @@ TEST_F(MmcLocalRebuildTest, LaterQueryFailurePreservesSuccessfulBatchesAndComple
     expected.erase(tailKey);
     backend_.failBatch = kSecondBatch;
 
-    ASSERT_EQ(local_.RegisterBm(), MMC_OK);
+    ASSERT_EQ(local_.ReconnectBm(), MMC_OK);
 
     EXPECT_EQ(Backups(), expected);
     EXPECT_EQ(ReportedBlobs().size(), kQueryBatchSize);
@@ -361,7 +362,7 @@ TEST_F(MmcLocalRebuildTest, MissingBatchApiDropsSsdBackupsAndCompletes)
     Backups() = {{"live", {ssd_}}};
     *GetMember(BatchExistSymbol{}) = nullptr;
 
-    ASSERT_EQ(local_.RegisterBm(), MMC_OK);
+    ASSERT_EQ(local_.ReconnectBm(), MMC_OK);
 
     EXPECT_TRUE(Backups().empty());
     EXPECT_TRUE(ReportedBlobs().empty());
@@ -376,7 +377,7 @@ TEST_F(MmcLocalRebuildTest, NoBackendPreservesExistingDescriptors)
     Backups() = {{"mixed", {dram_, ssd_, hbm_}}};
     const auto before = Backups();
 
-    ASSERT_EQ(local_.RegisterBm(), MMC_OK);
+    ASSERT_EQ(local_.ReconnectBm(), MMC_OK);
 
     EXPECT_EQ(Backups(), before);
     EXPECT_EQ(ReportedBlobs(), (BlobList{{"mixed", dram_}, {"mixed", ssd_}, {"mixed", hbm_}}));
@@ -386,7 +387,7 @@ TEST_F(MmcLocalRebuildTest, NoBackendPreservesExistingDescriptors)
 
 TEST_F(MmcLocalRebuildTest, EmptyMapSendsOnlyCompletion)
 {
-    ASSERT_EQ(local_.RegisterBm(), MMC_OK);
+    ASSERT_EQ(local_.ReconnectBm(), MMC_OK);
 
     EXPECT_TRUE(backend_.queryBatches.empty());
     EXPECT_EQ(engine_->requests.size(), kSingleItem);
@@ -398,7 +399,7 @@ TEST_F(MmcLocalRebuildTest, RegistrationBatchesRemainIndependentOfQueryBatches)
     AddSsdKeys(kRegisterBatchSize + kSingleItem, true);
     const auto before = Backups();
 
-    ASSERT_EQ(local_.RegisterBm(), MMC_OK);
+    ASSERT_EQ(local_.ReconnectBm(), MMC_OK);
 
     ASSERT_EQ(engine_->requests.size(), kThreeRequests);
     EXPECT_EQ(engine_->requests.front().blobList_.size(), kRegisterBatchSize);
@@ -417,7 +418,7 @@ TEST_F(MmcLocalRebuildTest, RpcFailureDoesNotSendCompletion)
         engine_->callResult = transportFailure ? MMC_ERROR : MMC_OK;
         engine_->responseResult = transportFailure ? MMC_OK : MMC_ERROR;
 
-        EXPECT_EQ(local_.RegisterBm(), MMC_ERROR);
+        EXPECT_EQ(local_.ReconnectBm(), MMC_ERROR);
 
         ASSERT_EQ(engine_->requests.size(), kSingleItem);
         EXPECT_FALSE(engine_->requests.front().blobList_.empty());

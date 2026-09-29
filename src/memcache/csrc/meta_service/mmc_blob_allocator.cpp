@@ -210,8 +210,8 @@ Result MmcBlobAllocator::BuildFromBlobs(std::vector<std::pair<std::string, MmcMe
         }
 
         if (it->second.mediaType_ != mediaType_) {
-            MMC_LOG_WARN("rebuild blob not match, allocator mediaType: " << mediaType_ << ", blob mediaType: "
-                                                                         << it->second.mediaType_);
+            MMC_LOG_DEBUG("rebuild blob not match, allocator mediaType: " << mediaType_ << ", blob mediaType: "
+                                                                          << it->second.mediaType_);
             ++it;
             continue;
         }

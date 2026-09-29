@@ -163,6 +163,23 @@ Result MmcUbsIoProxy::RegisterMetaEventCallback()
     return DlUbsioApi::UbsioRegisterMetaEventCallback(&StaticMetaEventCallback, this);
 }
 
+Result MmcUbsIoProxy::ScanKvCache(const UbsioKvKeyInfo *&items, uint64_t &count, bool &hasMore)
+{
+    MMC_ASSERT_LOG_AND_RETURN(started_, "started_ = " << started_, MMC_NOT_INITIALIZED);
+    TP_TRACE_BEGIN(TP_MMC_UBS_IO_SCAN_KEY);
+    Result ret = DlUbsioApi::UbsioKvCacheScanKey(&items, &count, &hasMore);
+    TP_TRACE_END(TP_MMC_UBS_IO_SCAN_KEY, ret);
+    if (ret != MMC_OK) {
+        MMC_LOG_ERROR("ubsIo ScanKvCache failed, ret=" << ret);
+    }
+    return ret;
+}
+
+void MmcUbsIoProxy::FreeScanKeyResult(const UbsioKvKeyInfo *items)
+{
+    DlUbsioApi::UbsioKvCacheFreeScanKeyResult(&items);
+}
+
 Result MmcUbsIoProxy::Put(const std::string &key, void *buf, size_t length)
 {
     MMC_ASSERT_LOG_AND_RETURN(started_, "started_ = " << started_, MMC_NOT_INITIALIZED);

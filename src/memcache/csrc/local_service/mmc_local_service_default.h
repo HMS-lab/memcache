@@ -13,8 +13,10 @@
 #define MEM_FABRIC_MMC_LOCAL_SERVICE_DEFAULT_H
 
 #include <ctime>
+#include <utility>
 
 #include "mmc_meta_net_client.h"
+#include "mmc_msg_client_meta.h"
 #include "mmc_local_service.h"
 #include "mmc_bm_proxy.h"
 #include "mmc_ubs_io_proxy.h"
@@ -31,6 +33,7 @@ constexpr int UBSIO_EVENT_POOL_SIZE = 4;
 // Best-effort timeout for BM unregister during shutdown. MetaService auto-cleans
 // registration on link break (ClearResource), so a short timeout suffices.
 constexpr int BM_UNREGISTER_TIMEOUT_SECOND = 5;
+
 class MmcLocalServiceDefault : public MmcLocalService {
 public:
     explicit MmcLocalServiceDefault(const std::string &name) : name_(name), options_() {}
@@ -42,6 +45,8 @@ public:
     void Stop() override;
 
     Result RegisterBm();
+
+    Result ReconnectBm();
 
     Result BuildMeta();
 
@@ -115,6 +120,16 @@ private:
     void BatchFlushToSsd(const std::vector<size_t> &indices, const std::vector<std::string> &keys,
                          const std::vector<MmcMemBlobDesc> &blobs, std::vector<Result> &keyResults);
 
+    Result RecoverBlob(const MmcUbsIoProxyPtr &ubsIoProxy);
+
+    std::pair<size_t, size_t>
+    UpdateSsdRebuildBatch(std::map<std::string, std::vector<MmcMemBlobDesc>>::iterator &it,
+                          const std::map<std::string, std::vector<MmcMemBlobDesc>>::iterator &batchEnd,
+                          const bool *exists);
+
+    void RegisterBaseInfo(BmRegisterRequest &req);
+
+    Result RebuildBm();
     MetaNetClientPtr metaNetClient_;
     MmcBmProxyPtr bmProxyPtr_;
     MmcUbsIoProxyPtr ubsIoProxyPtr_;

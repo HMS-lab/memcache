@@ -68,6 +68,8 @@ public:
     }
     Result GetResourceInfo(UbsioResourceInfo &info) const;
     Result RegisterMetaEventCallback();
+    Result ScanKvCache(const UbsioKvKeyInfo *&items, uint64_t &count, bool &hasMore);
+    void FreeScanKeyResult(const UbsioKvKeyInfo *items);
 
 private:
     static void StaticMetaEventCallback(void *context, const UbsioMetaEventC *events, uint32_t count);

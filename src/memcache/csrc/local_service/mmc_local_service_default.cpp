@@ -181,7 +181,7 @@ Result MmcLocalServiceDefault::Start(const mmc_local_service_config_t &config)
     }
     metaNetClient_->SetBackupPool(ubsioEventPool_);
     metaNetClient_->RegisterRetryHandler(
-        std::bind(&MmcLocalServiceDefault::RegisterBm, this),
+        std::bind(&MmcLocalServiceDefault::ReconnectBm, this),
         std::bind(&MmcLocalServiceDefault::UpdateMetaBackup, this, std::placeholders::_1, std::placeholders::_2,
                   std::placeholders::_3, std::placeholders::_4),
         std::bind(&MmcLocalServiceDefault::CopyBlob, this, std::placeholders::_1, std::placeholders::_2,
@@ -372,41 +372,133 @@ Result MmcLocalServiceDefault::DestroyBm()
     return MMC_OK;
 }
 
-static size_t AppendRebuildBlobs(const std::string &key, std::vector<MmcMemBlobDesc> &descs, bool metadataSeparated,
-                                 bool checkSsd, bool ssdExists, BmRegisterRequest &request)
-{
-    bool hasSsdInMap = false;
-    size_t removedCount = 0;
-    for (auto descIt = descs.begin(); descIt != descs.end();) {
-        if (descIt->mediaType_ == MEDIA_SSD) {
-            hasSsdInMap = true;
-            if (metadataSeparated || (checkSsd && !ssdExists)) {
-                descIt = descs.erase(descIt);
-                ++removedCount;
-                continue;
-            }
-        }
-        request.blobList_.push_back({key, *descIt});
-        ++descIt;
-    }
-
-    if (!metadataSeparated && !hasSsdInMap && checkSsd && ssdExists && !descs.empty()) {
-        MmcMemBlobDesc ssdDesc = descs.front();
-        ssdDesc.gva_ = 0;
-        ssdDesc.mediaType_ = MEDIA_SSD;
-        ssdDesc.allocSize_ = 0; // SSD 副本不走 allocator 释放，无切块语义
-        request.blobList_.push_back({key, ssdDesc});
-    }
-    return removedCount;
-}
-
 Result MmcLocalServiceDefault::RegisterBm()
 {
     MMC_RETURN_ERROR(bmProxyPtr_ == nullptr, "bm proxy has not been initialized.");
+    std::unique_lock<std::mutex> lockGuard(blobMutex_);
+    return RebuildBm();
+}
 
-    // metadata mode 由独立查询接口从 MetaService 获取；BM 注册保持原有 storageEnabled 语义，不参与模式协商。
-    const bool metadataSeparated = options_.storageEnabled && IsSsdMetadataSeparated(ssdMetadataMode_);
+Result MmcLocalServiceDefault::RebuildBm()
+{
     BmRegisterRequest req;
+    RegisterBaseInfo(req);
+
+    Response resp;
+    for (const auto &backup : blobMap_) {
+        for (const auto &desc : backup.second) {
+            req.blobList_.push_back({backup.first, desc});
+        }
+        if (req.blobList_.size() >= static_cast<size_t>(blobRebuildSendMaxCount)) {
+            MMC_LOG_DEBUG("mmc meta blob rebuild count " << req.blobList_.size());
+            MMC_RETURN_ERROR(SyncCallMeta(req, resp, TIMEOUT_THIRTY), "bm register failed, bmRankId=" << req.rank_);
+            MMC_RETURN_ERROR(resp.ret_, "bm register failed, bmRankId=" << req.rank_ << ", retCode=" << resp.ret_);
+            req.blobList_.clear();
+        }
+    }
+
+    if (!req.blobList_.empty()) {
+        MMC_LOG_DEBUG("mmc meta blob rebuild count " << req.blobList_.size());
+        MMC_RETURN_ERROR(SyncCallMeta(req, resp, TIMEOUT_THIRTY), "bm register failed, bmRankId=" << req.rank_);
+        MMC_RETURN_ERROR(resp.ret_, "bm register failed, bmRankId=" << req.rank_ << ", retCode=" << resp.ret_);
+        req.blobList_.clear();
+    }
+
+    // An empty registration marks completion after all key batches are processed and reported.
+    MMC_RETURN_ERROR(SyncCallMeta(req, resp, TIMEOUT_THIRTY), "bm register failed, bmRankId=" << req.rank_);
+    MMC_RETURN_ERROR(resp.ret_, "bm register failed, bmRankId=" << req.rank_ << ", retCode=" << resp.ret_);
+    req.blobList_.clear();
+    return MMC_OK;
+}
+
+std::pair<size_t, size_t> MmcLocalServiceDefault::UpdateSsdRebuildBatch(
+    std::map<std::string, std::vector<MmcMemBlobDesc>>::iterator &it,
+    const std::map<std::string, std::vector<MmcMemBlobDesc>>::iterator &batchEnd, const bool *exists)
+{
+    size_t removedCount = 0;
+    size_t supplementedCount = 0;
+    for (size_t index = 0; it != batchEnd; ++index) {
+        auto &descs = it->second;
+        for (auto descIt = descs.begin(); descIt != descs.end();) {
+            if (descIt->mediaType_ == MEDIA_SSD && !exists[index]) {
+                descIt = descs.erase(descIt);
+                ++removedCount;
+            } else {
+                ++descIt;
+            }
+        }
+
+        bool hasSsdDesc = false;
+        for (const auto &desc : descs) {
+            if (desc.mediaType_ == MEDIA_SSD) {
+                hasSsdDesc = true;
+                break;
+            }
+        }
+
+        if (!hasSsdDesc && exists[index] && !descs.empty()) {
+            MmcMemBlobDesc ssdDesc = descs.front();
+            ssdDesc.gva_ = 0;
+            ssdDesc.mediaType_ = MEDIA_SSD;
+            ssdDesc.allocSize_ = 0; // SSD 副本不走 allocator 释放，无切块语义
+            descs.push_back(ssdDesc);
+            ++supplementedCount;
+        }
+
+        if (descs.empty()) {
+            it = blobMap_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    return {removedCount, supplementedCount};
+}
+
+Result MmcLocalServiceDefault::ReconnectBm()
+{
+    MMC_RETURN_ERROR(bmProxyPtr_ == nullptr, "bm proxy has not been initialized.");
+    std::unique_lock<std::mutex> lockGuard(blobMutex_);
+    if (ubsIoProxyPtr_ == nullptr || IsSsdMetadataSeparated(ssdMetadataMode_)) {
+        return RebuildBm();
+    }
+
+    auto it = blobMap_.begin();
+    const auto end = blobMap_.end();
+    std::vector<std::string> queryKeys;
+    queryKeys.reserve(kSsdRebuildQueryBatchSize);
+
+    while (it != end) {
+        queryKeys.clear();
+        auto batchEnd = it;
+        while (batchEnd != end && queryKeys.size() < kSsdRebuildQueryBatchSize) {
+            queryKeys.push_back(batchEnd->first);
+            ++batchEnd;
+        }
+
+        std::array<bool, kSsdRebuildQueryBatchSize> exists{};
+        Result ret = ubsIoProxyPtr_->BatchExist(queryKeys, exists.data());
+        if (ret != MMC_OK) {
+            exists.fill(false);
+            MMC_LOG_WARN("SSD rebuild BatchExist failed, treating batch as missing, keyCount=" << queryKeys.size()
+                                                                                               << ", ret=" << ret);
+        }
+
+        const auto rebuildCounts = UpdateSsdRebuildBatch(it, batchEnd, exists.data());
+        if (rebuildCounts.first != 0) {
+            MMC_LOG_INFO("SSD rebuild removed stale backups, keyCount=" << queryKeys.size()
+                                                                        << ", removedCount=" << rebuildCounts.first);
+        }
+        if (rebuildCounts.second != 0) {
+            MMC_LOG_INFO("SSD rebuild supplemented backups, keyCount=" << queryKeys.size() << ", supplementedCount="
+                                                                       << rebuildCounts.second);
+        }
+    }
+    return RebuildBm();
+}
+
+void MmcLocalServiceDefault::RegisterBaseInfo(BmRegisterRequest &req)
+{
     req.rank_ = options_.rankId;
     req.backendId_ = ResolveBackendId();
     req.storageEnabled_ = options_.storageEnabled;
@@ -426,69 +518,6 @@ Result MmcLocalServiceDefault::RegisterBm()
         MMC_LOG_ERROR("SSD storage enabled but ubsIo proxy not initialized, rank=" << options_.rankId);
     }
     req.blobList_.clear();
-
-    Response resp;
-    std::unique_lock<std::mutex> lockGuard(blobMutex_);
-    auto it = blobMap_.begin();
-    const auto end = blobMap_.end();
-    std::vector<std::string> queryKeys;
-    queryKeys.reserve(kSsdRebuildQueryBatchSize);
-
-    while (it != end) {
-        queryKeys.clear();
-        auto batchEnd = it;
-        while (batchEnd != end && queryKeys.size() < kSsdRebuildQueryBatchSize) {
-            queryKeys.push_back(batchEnd->first);
-            ++batchEnd;
-        }
-        std::array<bool, kSsdRebuildQueryBatchSize> exists{};
-        if (ubsIoProxyPtr_ != nullptr && !metadataSeparated) {
-            // Query all keys, including DRAM/HBM-only entries that may need an SSD descriptor restored.
-            Result ret = ubsIoProxyPtr_->BatchExist(queryKeys, exists.data());
-            if (ret != MMC_OK) {
-                // Drop SSD recovery metadata for the failed batch, including any partial hits, and keep scanning.
-                exists.fill(false);
-                MMC_LOG_WARN("SSD rebuild BatchExist failed, treating batch as missing, rank="
-                             << req.rank_ << ", keyCount=" << queryKeys.size() << ", ret=" << ret);
-            }
-        }
-
-        size_t removedCount = 0;
-        for (size_t index = 0; it != batchEnd; ++index) {
-            auto &descs = it->second;
-            removedCount +=
-                AppendRebuildBlobs(it->first, descs, metadataSeparated, ubsIoProxyPtr_ != nullptr, exists[index], req);
-            if (descs.empty()) {
-                it = blobMap_.erase(it);
-            } else {
-                ++it;
-            }
-
-            if (req.blobList_.size() >= static_cast<size_t>(blobRebuildSendMaxCount)) {
-                MMC_LOG_INFO("mmc meta blob rebuild count " << req.blobList_.size());
-                MMC_RETURN_ERROR(SyncCallMeta(req, resp, TIMEOUT_THIRTY), "bm register failed, bmRankId=" << req.rank_);
-                MMC_RETURN_ERROR(resp.ret_, "bm register failed, bmRankId=" << req.rank_ << ", retCode=" << resp.ret_);
-                req.blobList_.clear();
-            }
-        }
-        if (removedCount != 0) {
-            MMC_LOG_INFO("SSD rebuild removed stale backups, keyCount=" << queryKeys.size()
-                                                                        << ", removedCount=" << removedCount);
-        }
-    }
-
-    if (!req.blobList_.empty()) {
-        MMC_LOG_INFO("mmc meta blob rebuild count " << req.blobList_.size());
-        MMC_RETURN_ERROR(SyncCallMeta(req, resp, TIMEOUT_THIRTY), "bm register failed, bmRankId=" << req.rank_);
-        MMC_RETURN_ERROR(resp.ret_, "bm register failed, bmRankId=" << req.rank_ << ", retCode=" << resp.ret_);
-        req.blobList_.clear();
-    }
-    lockGuard.unlock();
-    // An empty registration marks completion after all key batches are processed and reported.
-    MMC_RETURN_ERROR(SyncCallMeta(req, resp, TIMEOUT_THIRTY), "bm register failed, bmRankId=" << req.rank_);
-    MMC_RETURN_ERROR(resp.ret_, "bm register failed, bmRankId=" << req.rank_ << ", retCode=" << resp.ret_);
-    MMC_LOG_TRACE("bm register succeed, bmRankId=" << req.rank_ << ", type num=" << req.mediaType_.size());
-    return MMC_OK;
 }
 
 Result MmcLocalServiceDefault::InitUbsIo(int32_t deviceId, const std::string &confPath)
@@ -510,8 +539,61 @@ Result MmcLocalServiceDefault::InitUbsIo(int32_t deviceId, const std::string &co
     auto ret = ubsIoProxy->InitUbsIo(deviceId, confPath);
     if (ret != MMC_OK) {
         ubsIoProxy->SetMetaEventCallback(nullptr);
+        return ret;
     }
-    return ret;
+
+    if (!IsSsdMetadataSeparated(ssdMetadataMode_)) {
+        ret = RecoverBlob(ubsIoProxy);
+        if (ret != MMC_OK) {
+            MMC_LOG_ERROR("Failed to recover blobMap from ubs, name=" << name_ << ", ret=" << ret);
+            ubsIoProxy->SetMetaEventCallback(nullptr);
+            ubsIoProxy->DestroyUbsIo();
+            ubsIoProxyPtr_ = nullptr;
+            return ret;
+        }
+    }
+    return MMC_OK;
+}
+
+Result MmcLocalServiceDefault::RecoverBlob(const MmcUbsIoProxyPtr &ubsIoProxy)
+{
+    uint64_t recoveredCount = 0;
+    bool hasMore = true;
+    while (hasMore) {
+        const UbsioKvKeyInfo *items = nullptr;
+        uint64_t count = 0;
+        Result ret = ubsIoProxy->ScanKvCache(items, count, hasMore);
+        if (ret != MMC_OK) {
+            MMC_LOG_WARN("Failed to scan persisted KV from ubs, skip blobMap recovery, ret=" << ret);
+            return ret;
+        }
+        if (items == nullptr || count == 0) {
+            break;
+        }
+        {
+            std::lock_guard<std::mutex> guard(blobMutex_);
+            for (uint64_t i = 0; i < count; ++i) {
+                const UbsioKvKeyInfo &info = items[i];
+                if (info.keyLen == 0 || info.keyLen >= UBSIO_KV_MAX_KEY_SIZE) {
+                    MMC_LOG_WARN("Skip invalid persisted KV item, index=" << i);
+                    continue;
+                }
+                std::string key(info.key, info.keyLen);
+                MmcMemBlobDesc desc;
+                desc.mediaType_ = MEDIA_SSD;
+                desc.size_ = info.valueLen;
+                desc.gva_ = 0;
+                desc.rank_ = options_.rankId;
+                auto &descs = blobMap_[key];
+                descs.push_back(desc);
+            }
+        }
+        ubsIoProxy->FreeScanKeyResult(items);
+        recoveredCount += count;
+    }
+
+    MMC_LOG_INFO("Recovered " << recoveredCount << " persisted keys from ubs into blobMap");
+    return MMC_OK;
 }
 
 Result MmcLocalServiceDefault::UpdateMetaBackup(const std::vector<uint32_t> &ops, const std::vector<std::string> &keys,

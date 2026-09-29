@@ -55,8 +55,19 @@ typedef struct {
 
 typedef void (*UbsioMetaEventCallbackC)(void *context, const UbsioMetaEventC *events, uint32_t count);
 
+constexpr uint32_t UBSIO_KV_MAX_KEY_SIZE = 256;
+
+typedef struct {
+    char key[UBSIO_KV_MAX_KEY_SIZE]; /* Null-terminated key; maximum key length is 255 bytes. */
+    uint32_t keyLen;                 /* Key length in bytes, excluding the trailing null byte. */
+    uint32_t reserved;               /* Reserved for ABI extension; callers must ignore it. */
+    uint64_t valueLen;               /* Object value length in bytes. */
+} UbsioKvKeyInfo;
+
 using ubsio_register_meta_event_callbackFunc = int32_t (*)(UbsioMetaEventCallbackC callback, void *context);
 using ubsio_kv_cache_exitFunc = void (*)();
+using ubsio_scan_keyFunc = int32_t (*)(const UbsioKvKeyInfo **items, uint64_t *count, bool *hasMore);
+using ubsio_free_scan_key_resultFunc = void (*)(const UbsioKvKeyInfo **items);
 
 class DlUbsioApi {
 public:
@@ -190,6 +201,23 @@ public:
         return pUbsioGetResourceInfo(&info);
     }
 
+    static inline Result UbsioKvCacheScanKey(const UbsioKvKeyInfo **items, uint64_t *count, bool *hasMore)
+    {
+        if (pUbsioKvCacheScanKey == nullptr) {
+            return MMC_NOT_INITIALIZED;
+        }
+        return pUbsioKvCacheScanKey(items, count, hasMore);
+    }
+
+    static inline void UbsioKvCacheFreeScanKeyResult(const UbsioKvKeyInfo **items)
+    {
+        if (pUbsioKvCacheFreeScanKeyResult == nullptr) {
+            MMC_LOG_ERROR("UbsioKvCacheFreeScanKeyResult not loaded");
+            return;
+        }
+        pUbsioKvCacheFreeScanKeyResult(items);
+    }
+
 private:
     static std::mutex gMutex;
     static bool gLoaded;
@@ -213,6 +241,8 @@ private:
     static ubsio_register_meta_event_callbackFunc pUbsioRegisterMetaEventCallback;
     static ubsio_kv_cache_exitFunc pUbsioKvCacheExit;
     static ubsio_get_resource_infoFunc pUbsioGetResourceInfo;
+    static ubsio_scan_keyFunc pUbsioKvCacheScanKey;
+    static ubsio_free_scan_key_resultFunc pUbsioKvCacheFreeScanKeyResult;
 };
 } // namespace mmc
 } // namespace ock
