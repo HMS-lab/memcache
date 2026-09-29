@@ -34,7 +34,7 @@ void MMCMetaBackUpMgrDefault::BackupThreadFunc()
     while (true) {
         {
             std::unique_lock<std::mutex> lock(backupThreadLock_);
-            backupThreadCv_.wait_for(lock, interval, [this] { return !backupList_.empty() || !started_; });
+            backupThreadCv_.wait_for(lock, interval, [this] { return !backupListsByRank_.empty() || !started_; });
         }
         if (!started_) {
             MMC_LOG_TRACE("backup thread destroy, thread id " << pthread_self());
@@ -56,25 +56,26 @@ void MMCMetaBackUpMgrDefault::SendBackup2Local()
     std::map<uint32_t, std::vector<MetaBackUpOperate>> rankGroups;
     {
         std::lock_guard<std::mutex> lg(backupThreadLock_);
-        std::list<MetaBackUpOperate> drained;
-        drained.splice(drained.begin(), backupList_);
         const size_t batchLimit = asyncFlushBatchLimit_;
-        for (auto it = drained.begin(); it != drained.end();) {
-            const uint32_t rank = it->desc_.rank_;
+        for (auto it = backupListsByRank_.begin(); it != backupListsByRank_.end();) {
+            const uint32_t rank = it->first;
             if (drainingRanks_.count(rank) != 0) {
-                it = drained.erase(it);
+                backupPendingCount_ -= it->second.size();
+                it = backupListsByRank_.erase(it);
                 continue;
             }
             auto &group = rankGroups[rank];
-            if (group.size() < batchLimit) {
-                group.push_back(std::move(*it));
-                it = drained.erase(it);
+            auto &pending = it->second;
+            while (!pending.empty() && group.size() < batchLimit) {
+                group.push_back(std::move(pending.front()));
+                pending.pop_front();
+                --backupPendingCount_;
+            }
+            if (pending.empty()) {
+                it = backupListsByRank_.erase(it);
             } else {
                 ++it;
             }
-        }
-        if (!drained.empty()) {
-            backupList_.splice(backupList_.begin(), drained);
         }
         for (const auto &[rank, entries] : rankGroups) {
             if (!entries.empty()) {
@@ -221,8 +222,12 @@ bool MMCMetaBackUpMgrDefault::DrainRank(uint32_t rank)
 {
     std::unique_lock<std::mutex> lock(backupThreadLock_);
     drainingRanks_.insert(rank);
-    // 从待备份队列 backupList_ 中删除该 rank 的所有尚未发送任务。
-    backupList_.remove_if([rank](const MetaBackUpOperate &entry) { return entry.desc_.rank_ == rank; });
+    // 从该 rank 的待备份队列中删除所有尚未发送任务。
+    auto pending = backupListsByRank_.find(rank);
+    if (pending != backupListsByRank_.end()) {
+        backupPendingCount_ -= pending->second.size();
+        backupListsByRank_.erase(pending);
+    }
     // 等待该 rank 已经发出的备份任务全部完成
     return backupThreadCv_.wait_for(lock, kDrainRankTimeout,
                                     [this, rank] { return inFlightBackups_.count(rank) == 0; });

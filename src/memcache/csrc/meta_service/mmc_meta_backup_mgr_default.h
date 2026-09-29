@@ -120,7 +120,8 @@ public:
         backupPool_->Destroy();
         backupPool_ = nullptr;
         metaNetServer_ = nullptr;
-        backupList_.clear();
+        backupListsByRank_.clear();
+        backupPendingCount_ = 0;
         MMC_LOG_TRACE("Stop MMCMetaBackUpMgr");
     }
     void BackupThreadFunc();
@@ -133,8 +134,8 @@ public:
             if (!started_ || drainingRanks_.count(blobDesc.rank_) != 0) {
                 return MMC_OK;
             }
-            backupList_.push_back({op, key, blobDesc});
-            size = backupList_.size();
+            backupListsByRank_[blobDesc.rank_].push_back({op, key, blobDesc});
+            size = ++backupPendingCount_;
             if (ShouldNotify(size)) {
                 backupThreadCv_.notify_all();
             }
@@ -150,8 +151,8 @@ public:
             if (!started_ || drainingRanks_.count(blobDesc.rank_) != 0) {
                 return MMC_OK;
             }
-            backupList_.push_back({META_BACKUP_REMOVE, key, blobDesc});
-            size = backupList_.size();
+            backupListsByRank_[blobDesc.rank_].push_back({META_BACKUP_REMOVE, key, blobDesc});
+            size = ++backupPendingCount_;
             if (ShouldNotify(size)) {
                 backupThreadCv_.notify_all();
             }
@@ -184,7 +185,8 @@ private:
     std::thread backupThread_;
     std::mutex backupThreadLock_;
     std::condition_variable backupThreadCv_;
-    std::list<MetaBackUpOperate> backupList_;
+    std::map<uint32_t, std::list<MetaBackUpOperate>> backupListsByRank_;
+    size_t backupPendingCount_{0};
     std::unordered_set<uint32_t> drainingRanks_;
     std::unordered_map<uint32_t, uint32_t> inFlightBackups_;
     uint32_t asyncFlushIntervalMs_ = 0;

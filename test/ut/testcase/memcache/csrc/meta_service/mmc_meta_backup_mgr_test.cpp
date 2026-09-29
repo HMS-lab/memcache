@@ -43,6 +43,18 @@ struct BackupPoolMember {
 
 template struct PrivateMemberAccessor<BackupPoolMember, &MMCMetaBackUpMgrDefault::backupPool_>;
 
+struct BackupListsByRankMember {
+    using Type = std::map<uint32_t, std::list<MetaBackUpOperate>> MMCMetaBackUpMgrDefault::*;
+    friend Type GetMember(BackupListsByRankMember);
+};
+template struct PrivateMemberAccessor<BackupListsByRankMember, &MMCMetaBackUpMgrDefault::backupListsByRank_>;
+
+struct BackupPendingCountMember {
+    using Type = size_t MMCMetaBackUpMgrDefault::*;
+    friend Type GetMember(BackupPendingCountMember);
+};
+template struct PrivateMemberAccessor<BackupPendingCountMember, &MMCMetaBackUpMgrDefault::backupPendingCount_>;
+
 class MmcMetaBackupMgrTest : public testing::Test {};
 
 TEST_F(MmcMetaBackupMgrTest, BackupPoolUsesDedicatedThreadName)
@@ -77,6 +89,36 @@ TEST_F(MmcMetaBackupMgrTest, BackupPoolUsesDedicatedThreadName)
     const ThreadObservation observation = threadObservation.get();
     EXPECT_EQ(observation.threadNameResult, 0);
     EXPECT_EQ(observation.threadName.rfind(backupPoolNamePrefix, 0), 0U);
+}
+
+TEST_F(MmcMetaBackupMgrTest, DrainRankOnlyRemovesItsOwnPendingQueue)
+{
+    constexpr uint32_t asyncFlushIntervalMs = 60000U;
+    constexpr uint32_t asyncFlushBatchLimit = 1000U;
+    constexpr uint32_t drainedRank = 1U;
+    constexpr uint32_t retainedRank = 2U;
+    constexpr uint64_t drainedGva = 4096U;
+    constexpr uint64_t retainedGva = 8192U;
+    constexpr uint64_t blobSize = 4096U;
+    auto defaultConf = MmcMakeRef<MMCMetaBackUpConfDefault>(MetaNetServerPtr{});
+    ASSERT_NE(defaultConf, nullptr);
+    defaultConf->Setup(asyncFlushIntervalMs, asyncFlushBatchLimit, nullptr, nullptr);
+    MMCMetaBackUpConfPtr conf = Convert<MMCMetaBackUpConfDefault, MMCMetaBackUpConf>(defaultConf);
+
+    MMCMetaBackUpMgrDefault backupMgr;
+    ASSERT_EQ(backupMgr.Start(conf), MMC_OK);
+    MmcMemBlobDesc drainedDesc{drainedRank, drainedGva, blobSize, MEDIA_DRAM};
+    MmcMemBlobDesc retainedDesc{retainedRank, retainedGva, blobSize, MEDIA_DRAM};
+    ASSERT_EQ(backupMgr.Add("drained", drainedDesc, META_BACKUP_ADD), MMC_OK);
+    ASSERT_EQ(backupMgr.Add("retained", retainedDesc, META_BACKUP_ADD), MMC_OK);
+
+    ASSERT_TRUE(backupMgr.DrainRank(drainedRank));
+    const auto &pending = backupMgr.*GetMember(BackupListsByRankMember{});
+    EXPECT_EQ(pending.count(drainedRank), 0U);
+    ASSERT_EQ(pending.count(retainedRank), 1U);
+    EXPECT_EQ(pending.at(retainedRank).size(), 1U);
+    EXPECT_EQ(backupMgr.*GetMember(BackupPendingCountMember{}), 1U);
+    backupMgr.Stop();
 }
 
 struct BackupSendMember {

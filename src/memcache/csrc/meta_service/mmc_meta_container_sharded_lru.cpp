@@ -311,8 +311,7 @@ public:
     {
         std::vector<std::vector<Key>> shardKeys(shards_.size());
         for (const auto &key : keys) {
-            const uint64_t hash = static_cast<uint64_t>(std::hash<Key>{}(key));
-            shardKeys[hash >> shardSelectShift_].push_back(key);
+            shardKeys[ShardIndex(key)].push_back(key);
         }
 
         size_t evicted = 0;
@@ -451,8 +450,16 @@ private:
 
     MmcMetaContainerLRU<Key, Value> &ShardOf(const Key &key)
     {
-        uint64_t hash = static_cast<uint64_t>(std::hash<Key>{}(key));
-        return *shards_[hash >> shardSelectShift_];
+        return *shards_[ShardIndex(key)];
+    }
+
+    size_t ShardIndex(const Key &key) const
+    {
+        if (shards_.size() == 1) {
+            return 0;
+        }
+        const uint64_t hash = static_cast<uint64_t>(std::hash<Key>{}(key));
+        return hash >> shardSelectShift_;
     }
 
     uint64_t shardSelectShift_;
