@@ -45,7 +45,9 @@ using smemBmUnregisterUserMemFunc = int32_t (*)(smem_bm_t, uint64_t);
 using smemBmWaitFunc = int32_t (*)(smem_bm_t);
 using smemBmGvaToVaFunc = int32_t (*)(smem_bm_t, void *, smem_bm_mem_type_t, void **);
 using smemBmUpdateStoreUrlFunc = int32_t (*)(const char *);
-using smemBmGetMetaServiceInfoFunc = int32_t (*)(char *, size_t, uint16_t *);
+using smemBmGetBindableLeaderAddressFunc = int32_t (*)(char *, size_t, uint16_t *);
+using smemBmGetBindableLeaderAddressByStoreUrlFunc = int32_t (*)(const char *, const smem_tls_config *, uint32_t,
+                                                                 char *, size_t, uint16_t *);
 
 using smemLeaderChangeCallbackFunc = void (*)(void *userData);
 using smemBmRegisterLeaderChangeCallbackFunc = int32_t (*)(smemLeaderChangeCallbackFunc, void *);
@@ -166,9 +168,38 @@ public:
         return gSmemBmUpdateStoreUrl(storeURL);
     }
 
-    static int32_t SmemBmGetMetaServiceInfo(char *ip, size_t ipLen, uint16_t *port)
+    static int32_t SmemBmGetBindableLeaderAddress(char *ip, size_t ipLen, uint16_t *port)
     {
-        return gSmemBmGetMetaServiceInfo(ip, ipLen, port);
+        return gSmemBmGetBindableLeaderAddress(ip, ipLen, port);
+    }
+
+    /**
+     * @brief 按 storeUrl 读取 etcd 中发布的 MetaService 地址（不创建 BM、不注册 rank）。
+     *
+     * 供 client-only 进程（如 vLLM 调度器，initBm=false）在 etcd HA 模式下发现
+     * 动态端口的 MetaService。TLS 需显式传入（该进程无 BM、无人为它配置过
+     * config store TLS）。
+     */
+    static int32_t SmemBmGetBindableLeaderAddressByStoreUrl(const char *storeUrl, const smem_tls_config *tlsOption,
+                                                            uint32_t worldSize, char *ip, size_t ipLen, uint16_t *port)
+    {
+        // client-only 进程（init_bm=False）不会走 mmc_bm_proxy 的 LoadLibrary，这里按需加载。
+        if (gSmemBmGetBindableLeaderAddressByStoreUrl == nullptr && LoadLibrary() != MMC_OK) {
+            return MMC_ERROR;
+        }
+        if (gSmemBmGetBindableLeaderAddressByStoreUrl == nullptr) {
+            MMC_LOG_ERROR("smem_bm_get_bindable_leader_address_by_store_url is unavailable in libmf_smem");
+            return MMC_ERROR;
+        }
+        return gSmemBmGetBindableLeaderAddressByStoreUrl(storeUrl, tlsOption, worldSize, ip, ipLen, port);
+    }
+
+    /** @brief 释放 client-only 发现缓存的 store（客户端 Stop 时调用，幂等）。 */
+    static void SmemBmReleaseLeaderAddressStore()
+    {
+        if (gSmemBmReleaseLeaderAddressStore != nullptr) {
+            gSmemBmReleaseLeaderAddressStore();
+        }
     }
 
     /**
@@ -215,7 +246,9 @@ private:
     static smemBmWaitFunc gSmemBmWait;
     static smemBmGvaToVaFunc gSmemBmGvaToVa;
     static smemBmUpdateStoreUrlFunc gSmemBmUpdateStoreUrl;
-    static smemBmGetMetaServiceInfoFunc gSmemBmGetMetaServiceInfo;
+    static smemBmGetBindableLeaderAddressFunc gSmemBmGetBindableLeaderAddress;
+    static smemBmGetBindableLeaderAddressByStoreUrlFunc gSmemBmGetBindableLeaderAddressByStoreUrl;
+    static void (*gSmemBmReleaseLeaderAddressStore)();
     static smemBmRegisterLeaderChangeCallbackFunc gSmemBmRegisterLeaderChangeCallback;
 };
 } // namespace mmc

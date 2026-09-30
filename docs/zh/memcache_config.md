@@ -121,3 +121,14 @@
 |                                                |            |              |                      |                                                                                       |                                                                                                                                                                                                                                          |
 | ock.mmc.dynamic_config.enable                  | bool       | optional     | true                 | true/false                                                                            | Enable dynamic config polling. When enabled, LocalService periodically checks the config file for `meta_service_url`, `config_store_url`, `log_level` and client tunables (`retry_milliseconds`, `aggregate.io/num`, `batch_option.chunk.size/count`) changes and applies them without restart          |
 | ock.mmc.dynamic_config.interval                | integer    | optional     | 5                    | [1, 300]                                                                              | Polling interval in seconds for dynamic config file check                                                                                                                                                                                |
+
+## client-only（init_bm=False）etcd HA 部署说明
+
+PD/DP 分离等场景下，仅持有元数据、不创建 BM 的客户端进程（`init_bm=False`，如 vLLM 调度器）在 etcd HA 模式下需要发现 MetaService 的动态端口，部署需满足：
+
+- 配置文件需包含：
+  - `ock.mmc.local_service.config_store_url`（`etcd://...`）：用于发现上层 leader 地址；
+  - `ock.mmc.local_service.world_size`：与 MetaService/LocalService 一致；
+  - `ock.mmc.local_service.config_store_tls.*`：若 etcd 启用了 TLS，必须配置。
+- `ock.mmc.meta_service_url` 在 etcd HA 下仅为配置值，MetaService 实际监听动态端口，不会被该客户端直接使用。
+- **升级顺序**：该能力依赖 memfabric 的 `smem_bm_get_bindable_leader_address_by_store_url` 接口（memfabric PR #1363）。必须**先升级 memfabric（libmf_smem）再升级 memcache**；两者版本不配套时，etcd HA + `init_bm=False` 场景会发现失败并报错（不会崩溃）。

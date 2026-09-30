@@ -81,7 +81,7 @@ const char *const kRequiredSymbols[] = {"smem_acc_tcp_server_create",
                                         "smem_bm_wait",
                                         "smem_bm_gva_to_va",
                                         "smem_bm_update_store_url",
-                                        "smem_bm_get_meta_service_info"};
+                                        "smem_bm_get_bindable_leader_address"};
 } // namespace
 
 extern "C" void *__real_dlopen(const char *, int);

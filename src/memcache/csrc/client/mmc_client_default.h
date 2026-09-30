@@ -236,6 +236,8 @@ private:
     static MmcClientDefault *gClientHandler;
     std::mutex mutex_;
     bool started_ = false;
+    // 关机/停止信号：独立于 mutex_，保证 Start 持锁期间 Stop 也能置位并中断发现重试。
+    std::atomic<bool> stopping_{false};
     MetaNetClientPtr metaNetClient_;
     MmcBmProxyPtr bmProxy_;
     MmcUbsIoProxyPtr ubsIoProxy_;

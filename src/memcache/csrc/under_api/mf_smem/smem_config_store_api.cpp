@@ -146,8 +146,8 @@ void HaConfigStore::OnLeaderChange(void *context, const smem_config_store_leader
     }
     LeaderAddresses addresses;
     addresses.isLeader = leader->is_leader != 0;
-    if (leader->meta_service_address != nullptr) {
-        addresses.metaServiceAddr = leader->meta_service_address;
+    if (leader->bindable_leader_address != nullptr) {
+        addresses.metaServiceAddr = leader->bindable_leader_address;
     }
     LeaderChangeCallback callback;
     {

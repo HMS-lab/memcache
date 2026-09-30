@@ -11,6 +11,9 @@
 */
 
 #include "mmc_client_default.h"
+
+#include "mmc_meta_discovery.h"
+#include "smem_bm_api.h"
 #include "mmc_msg_client_meta.h"
 #include "mmc_mem_obj_meta.h"
 #include "mmc_bm_proxy.h"
@@ -84,6 +87,7 @@ std::mutex MmcClientDefault::gClientHandlerMtx;
 Result MmcClientDefault::Start(const mmc_client_config_t &config)
 {
     MMC_LOG_TRACE("Starting client " << name_);
+    stopping_.store(false, std::memory_order_release);
     std::lock_guard<std::mutex> guard(mutex_);
     if (started_) {
         MMC_LOG_TRACE("MetaService " << name_ << " already started");
@@ -118,6 +122,31 @@ Result MmcClientDefault::Start(const mmc_client_config_t &config)
     auto tmpNetClient = MetaNetClientFactory::GetInstance(config.discoveryURL, "MetaClientCommon").Get();
     MMC_ASSERT_LOG_AND_RETURN(tmpNetClient != nullptr, "tmpNetClient is nullptr", MMC_NEW_OBJECT_FAILED);
     if (!tmpNetClient->Status()) {
+        // 仅在本进程首次创建该单例时进入。
+        // 注意：init_bm=True 时 LocalService 已创建单例并注册过 discover 回调，但它可能
+        // 仍在 2s/60s 的 etcd 发现重试中（Status() 为 false）；此时必须避免覆盖其回调，
+        // 因此 etcd 发现分支额外用 !bmInitialized_ 保护。
+        const bool clientOnlyEtcdMode = !bmInitialized_ && IsEtcdStoreUrl(config.configStoreURL);
+
+        // etcd HA 下上层 leader 监听动态端口，必须先发现再 Start/Connect：
+        // 发现只读 etcd、不依赖 net client，放在 Start 之前可避免“已 Start 未 Connect”
+        // 的状态机残渣（发现失败时可直接返回，无需回滚 net client）。
+        // Connect 不消费 discoverUrlFunc_，故首次连接必须自己先发现。
+        std::string targetUrl;
+        if (clientOnlyEtcdMode) {
+            targetUrl = DiscoverMetaServiceUrlWithRetry(config.configStoreURL, &config.configStoreTlsConfig,
+                                                        config.worldSize, rankId_, &stopping_);
+            if (targetUrl.empty()) {
+                // 发现失败（etcd 无主/地址未发布/连接 etcd 失败）或已被 Stop 中断：显式报错，
+                // 便于与静态地址连不通区分。此时尚未 Start net client，无残渣。
+                MMC_LOG_ERROR("etcd HA client-only discovery failed, rank=" << rankId_
+                                                                            << ", storeUrl: " << config.configStoreURL);
+                return MMC_ERROR;
+            }
+        } else {
+            targetUrl = config.discoveryURL;
+        }
+
         NetEngineOptions options;
         options.name = name_;
         options.threadCount = CLIENT_THREAD_COUNT;
@@ -127,7 +156,18 @@ Result MmcClientDefault::Start(const mmc_client_config_t &config)
         options.logLevel = config.logLevel;
         options.logFunc = config.logFunc;
         MMC_RETURN_ERROR(tmpNetClient->Start(options), "Failed to start net server of local service " << name_);
-        MMC_RETURN_ERROR(tmpNetClient->Connect(config.discoveryURL, !bmInitialized_),
+
+        if (clientOnlyEtcdMode) {
+            // 供重连路径（HandleLinkBroken / HandleServerChangedNotify）重新发现使用。
+            tmpNetClient->RegisterDiscoverUrlFunc([storeUrl = std::string(config.configStoreURL),
+                                                   tls = config.configStoreTlsConfig, worldSize = config.worldSize]() {
+                return DiscoverMetaServiceUrlByStoreUrl(storeUrl, &tls, worldSize);
+            });
+        }
+
+        // 非 etcd 或 init_bm=True 路径：targetUrl 为配置的 discoveryURL，行为与改动前完全一致。
+        MMC_LOG_INFO("client connect MetaService: " << targetUrl << ", rank=" << rankId_);
+        MMC_RETURN_ERROR(tmpNetClient->Connect(targetUrl, !bmInitialized_),
                          "Failed to connect net server of local service " << name_);
     }
 
@@ -187,6 +227,8 @@ bool MmcClientDefault::UpdateClientConfig(const mmc_client_config_t &config, uin
 
 void MmcClientDefault::Stop()
 {
+    // 先置停止信号（不加 mutex_）：若 Start 正持锁进行 etcd 发现重试，可立即中断。
+    stopping_.store(true, std::memory_order_release);
     {
         std::lock_guard<std::mutex> guard(mutex_);
         if (!started_) {
@@ -210,6 +252,8 @@ void MmcClientDefault::Stop()
         metaNetClient_ = nullptr;
         MMC_LOG_TRACE("MetaNetClient stopped.");
     }
+    // 释放 client-only 发现缓存的 config store（幂等；仅 etcd HA client-only 场景会创建）。
+    MFSmemApi::SmemBmReleaseLeaderAddressStore();
     gvaBlobTracker_.Clear();
 }
 

@@ -531,6 +531,17 @@ public:
         config.logLevel = MmcOutLogger::Instance().GetLogLevel(logLevelStr);
         GetAccTlsConfig(config.tlsConfig);
         SafeCopy(GetString(ConfConstant::OKC_MMC_LOCAL_SERVICE_PROTOCOL), config.dataOpType, PROTOCOL_SIZE);
+        SafeCopy(GetString(ConfConstant::OKC_MMC_LOCAL_SERVICE_BM_IP_PORT), config.configStoreURL, DISCOVERY_URL_SIZE);
+        GetConfigStoreTlsConfig(config.configStoreTlsConfig);
+        config.worldSize = static_cast<uint32_t>(GetInt(ConfConstant::OKC_MMC_LOCAL_SERVICE_WORLD_SIZE));
+        // 格式校验：非空且 scheme 既非 etcd:// 也非 tcp:// 时显式告警，避免静默落入非 etcd
+        // 分支直连静态地址（那会把“连不上 etcd”伪装成“连不上 MetaService”，难以区分）。
+        const std::string storeUrl(config.configStoreURL);
+        if (!storeUrl.empty() && storeUrl.find("etcd://") != 0 && storeUrl.find("tcp://") != 0) {
+            MMC_LOG_WARN("unexpected config_store_url scheme, value: " << storeUrl
+                                                                       << "; expected etcd:// or tcp://, the etcd HA "
+                                                                          "client-only discovery will be skipped");
+        }
     }
 
     static Result ValidateLocalServiceConfig(mmc_local_service_config_t &config)

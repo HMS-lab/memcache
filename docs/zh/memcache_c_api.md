@@ -688,6 +688,9 @@ int32_t mmc_set_log_level(int level);
 - `logLevel`：日志级别。
 - `logFunc`：外部日志函数。
 - `tlsConfig`：TLS配置。
+- `configStoreURL`：配置存储的URL，取值来源为 `ock.mmc.local_service.config_store_url`。etcd HA 模式下，仅持有元数据、不创建 BM 的客户端（`init_bm=False`）依赖该 URL 发现动态端口的 MetaService；为空或非 `etcd://` 时不启用该发现，回退为按 `discoveryURL` 直连。
+- `configStoreTlsConfig`：配置存储的TLS配置，与 `ock.mmc.local_service.config_store_tls.*` 同源；etcd HA 发现需要，缺失会导致 TLS 集群下发现失败。
+- `worldSize`：世界大小，取值来源为 `ock.mmc.local_service.world_size`（默认 256）；用于创建 client-only 的配置存储。
 
 ### ReplicateConfig
 

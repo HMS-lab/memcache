@@ -155,6 +155,10 @@ typedef struct {
     char dataOpType[PROTOCOL_SIZE];
     uint64_t batchChunkSize;
     uint32_t batchChunkCount;
+    /* 以下三项供 etcd HA 模式下的 client-only 进程发现 MetaService 地址。 */
+    char configStoreURL[DISCOVERY_URL_SIZE]; // local_service.config_store_url
+    mmc_tls_config configStoreTlsConfig;     // config store TLS，缺失会让 TLS 集群静默连不上
+    uint32_t worldSize;                      // local_service.world_size
 } mmc_client_config_t;
 
 typedef struct {

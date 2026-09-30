@@ -11,6 +11,7 @@
 */
 #include <map>
 #include "smem_bm_def.h"
+#include <cstring>
 
 static uint64_t g_spaces[SMEM_MEM_TYPE_BUTT] = {0};
 static std::map<uint64_t, uint64_t> g_registBuffer{};
@@ -172,10 +173,30 @@ int32_t smem_bm_gva_to_va(smem_bm_t handle, void *gva, smem_bm_mem_type_t vaMemT
     return 0;
 }
 
-int32_t smem_bm_get_meta_service_info(char *ip, size_t ipLen, uint16_t *port)
+int32_t smem_bm_get_bindable_leader_address(char *ip, size_t ipLen, uint16_t *port)
 {
     return 0;
 }
+
+/* 集群发现（etcd HA client-only）：固定返回一个可校验的地址，供发现路径 UT 使用 */
+int32_t smem_bm_get_bindable_leader_address_by_store_url(const char *storeUrl, const smem_tls_config *tlsOption,
+                                                         uint32_t worldSize, char *ip, size_t ipLen, uint16_t *port)
+{
+    (void)tlsOption;
+    (void)worldSize;
+    if (storeUrl == nullptr || ip == nullptr || port == nullptr) {
+        return -3000;
+    }
+    const char *addr = "127.0.0.1";
+    if (ipLen <= strlen(addr)) {
+        return -3000;
+    }
+    (void)strcpy(ip, addr);
+    *port = 19001;
+    return 0;
+}
+
+void smem_bm_release_leader_address_store(void) {}
 
 int32_t smem_bm_register_leader_change_callback(void (*callback)(void *), void *userData)
 {

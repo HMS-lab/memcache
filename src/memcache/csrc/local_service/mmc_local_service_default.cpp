@@ -77,7 +77,7 @@ Result MmcLocalServiceDefault::ConnectMetaNetServer(const NetEngineOptions &netO
         }
         char metaIp[64] = {0};
         uint16_t metaPort = 0;
-        if (ock::mmc::MFSmemApi::SmemBmGetMetaServiceInfo(metaIp, sizeof(metaIp), &metaPort) == 0 &&
+        if (ock::mmc::MFSmemApi::SmemBmGetBindableLeaderAddress(metaIp, sizeof(metaIp), &metaPort) == 0 &&
             metaIp[0] != '\0') {
             const std::string connectUrl = "tcp://" + std::string(metaIp) + ":" + std::to_string(metaPort);
             MMC_LOG_TRACE("etcd HA: discovered MetaService leader via ConfigStore, " << connectUrl);
@@ -222,7 +222,8 @@ std::string MmcLocalServiceDefault::DiscoverMetaServiceUrl() const
     }
     char metaIp[64] = {0};
     uint16_t metaPort = 0;
-    if (ock::mmc::MFSmemApi::SmemBmGetMetaServiceInfo(metaIp, sizeof(metaIp), &metaPort) == 0 && metaIp[0] != '\0') {
+    if (ock::mmc::MFSmemApi::SmemBmGetBindableLeaderAddress(metaIp, sizeof(metaIp), &metaPort) == 0 &&
+        metaIp[0] != '\0') {
         return "tcp://" + std::string(metaIp) + ":" + std::to_string(metaPort);
     }
     return "";
