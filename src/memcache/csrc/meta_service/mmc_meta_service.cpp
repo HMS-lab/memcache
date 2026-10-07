@@ -238,11 +238,6 @@ Result MmcMetaService::BmRegister(uint32_t rank, std::vector<uint16_t> mediaType
         return MMC_INVALID_PARAM;
     }
 
-    if (mediaType.empty()) {
-        MMC_LOG_ERROR("BmRegister from rank " << rank << " has empty mediaType, skip mount");
-        return MMC_INVALID_PARAM;
-    }
-
     std::vector<MmcLocation> locs;
     std::vector<MmcLocalMemlInitInfo> infos;
     size_t typeNum = mediaType.size();

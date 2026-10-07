@@ -123,10 +123,6 @@ Result MetaNetServer::HandleBmRegister(const NetContextPtr &context)
         MMC_LOG_ERROR("Failed to deserialize BmRegisterRequest: " << getResult);
         return getResult;
     }
-    if (req.mediaType_.empty()) {
-        MMC_LOG_ERROR("BmRegister from rank " << req.rank_ << " has empty mediaType, skip mount");
-        return MMC_INVALID_PARAM;
-    }
     TP_TRACE_BEGIN(TP_MMC_META_BM_REGISTER);
     auto result = metaService_->BmRegister(req.rank_, req.mediaType_, req.addr_, req.capacity_, req.blobList_,
                                            req.storageEnabled_, req.backendId_, req.enableMaxValueMode_);
