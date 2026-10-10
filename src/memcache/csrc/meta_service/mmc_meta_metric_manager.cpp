@@ -111,6 +111,7 @@ MmcMetaMetricManager::MmcMetaMetricManager()
       rewarmFailCounter_("memcache_rewarm_failed_total", "Total number of failed SSD->DRAM rewarm operations"),
       getHitDramCounter_("memcache_get_hits_dram_total", "Total number of Get hits served from DRAM"),
       getHitSsdCounter_("memcache_get_hits_ssd_total", "Total number of Get hits served from SSD (rewarm)"),
+      queryHitKeysCounter_("memcache_query_hit_keys_total", "Total number of keys hit by Query and BatchQuery"),
       rewarmBytesCounter_("memcache_rewarm_bytes_total", "Total bytes rewarmed from SSD to DRAM"),
       rewarmBytesCurrentGauge_("memcache_rewarm_bytes_current", "Current bytes occupied by rewarmed data"),
       keyCountGauge_("memcache_stored_keys", "Current number of stored keys"),
@@ -184,6 +185,7 @@ MmcMetaMetricSnapshot MmcMetaMetricManager::GetSnapshot() const
     snapshot.rewarmCount = static_cast<uint64_t>(rewarmCounter_.value());
     snapshot.rewarmFailCount = static_cast<uint64_t>(rewarmFailCounter_.value());
     snapshot.getHitDramCount = static_cast<uint64_t>(getHitDramCounter_.value());
+    snapshot.queryHitKeysCount = static_cast<uint64_t>(queryHitKeysCounter_.value());
     snapshot.getHitSsdCount = static_cast<uint64_t>(getHitSsdCounter_.value());
     snapshot.rewarmBytesCount = static_cast<uint64_t>(rewarmBytesCounter_.value());
     snapshot.rewarmBytesCurrent = static_cast<uint64_t>(rewarmBytesCurrentGauge_.value());

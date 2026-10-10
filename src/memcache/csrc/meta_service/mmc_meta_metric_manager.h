@@ -247,6 +247,7 @@ struct MmcMetaMetricSnapshot {
     uint64_t rewarmFailCount{0};     // failed rewarm operations
     uint64_t getHitDramCount{0};     // Get requests served from DRAM
     uint64_t getHitSsdCount{0};      // Get requests served from SSD (triggered rewarm)
+    uint64_t queryHitKeysCount{0};   // keys hit by Query and BatchQuery
     uint64_t rewarmBytesCount{0};    // total bytes rewarmed from SSD to DRAM
     uint64_t rewarmBytesCurrent{0};  // current inflight rewarm bytes
     uint64_t keyCount{0};            // current number of stored keys
@@ -326,6 +327,10 @@ public:
         if (IsPerRankEnabled()) {
             getHitSsdRankedCounter_.Increment(rank);
         }
+    }
+    void IncrementQueryHitKeysCounter()
+    {
+        queryHitKeysCounter_++;
     }
     void IncrementRewarmCounter()
     {
@@ -467,6 +472,7 @@ private:
     prometheus::simpleapi::counter_metric_t rewarmFailCounter_;
     prometheus::simpleapi::counter_metric_t getHitDramCounter_;
     prometheus::simpleapi::counter_metric_t getHitSsdCounter_;
+    prometheus::simpleapi::counter_metric_t queryHitKeysCounter_;
     prometheus::simpleapi::counter_metric_t rewarmBytesCounter_;
     prometheus::simpleapi::gauge_metric_t rewarmBytesCurrentGauge_;
     prometheus::simpleapi::gauge_metric_t keyCountGauge_;

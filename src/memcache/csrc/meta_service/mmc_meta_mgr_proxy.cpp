@@ -463,6 +463,9 @@ Result MmcMetaMgrProxy::Query(const QueryRequest &req, QueryResponse &resp)
     }
     // 预取结果不影响查询，最终以 Query 返回的 Blob/GVA 和结果为准。
     Result metaRet = metaMangerPtr_->Query(req.key_, req.operateId_, req.flag_, resp.queryInfo_);
+    if (metaRet == MMC_OK && resp.queryInfo_.valid_) {
+        metricManager.IncrementQueryHitKeysCounter();
+    }
     IncrementResultCounter(metricManager, RestMetricType::QUERY, metaRet, UINT32_MAX);
     return metaRet;
 }
@@ -483,6 +486,9 @@ Result MmcMetaMgrProxy::BatchQuery(const BatchQueryRequest &req, BatchQueryRespo
         MemObjQueryInfo queryInfo;
         metricManager.IncrementRequestCounter(RestMetricType::QUERY, UINT32_MAX);
         results[index] = metaMangerPtr_->Query(req.keys_[index], req.operateId_, req.flag_, queryInfo);
+        if (results[index] == MMC_OK && queryInfo.valid_) {
+            metricManager.IncrementQueryHitKeysCounter();
+        }
         resp.batchQueryInfos_.push_back(queryInfo);
         IncrementResultCounter(metricManager, RestMetricType::QUERY, results[index], UINT32_MAX);
     }

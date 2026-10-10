@@ -688,10 +688,10 @@ Result MmcRestApiFacade::BuildMetricsSummary(bool serviceReady, std::string &res
         << " rewarm_bytes_current=" << metricSnapshot.rewarmBytesCurrent
         << " flush_blobs=" << metricSnapshot.asyncFlushBlobAdded
         << " flush_bytes=" << metricSnapshot.asyncFlushBlobBytes << " get_hit_dram=" << metricSnapshot.getHitDramCount
-        << " get_hit_ssd=" << metricSnapshot.getHitSsdCount << " hbm_used=" << BuildUsedText(hbmUsage)
-        << " dram_used=" << BuildUsedText(dramUsage) << " ssd_used=" << BuildUsedText(ssdUsage)
-        << " alloc_req=" << metricSnapshot.allocRequestCount << " alloc_success=" << metricSnapshot.allocSuccessCount
-        << " alloc_fail=" << metricSnapshot.allocFailureCount
+        << " get_hit_ssd=" << metricSnapshot.getHitSsdCount << " query_hit_keys=" << metricSnapshot.queryHitKeysCount
+        << " hbm_used=" << BuildUsedText(hbmUsage) << " dram_used=" << BuildUsedText(dramUsage)
+        << " ssd_used=" << BuildUsedText(ssdUsage) << " alloc_req=" << metricSnapshot.allocRequestCount
+        << " alloc_success=" << metricSnapshot.allocSuccessCount << " alloc_fail=" << metricSnapshot.allocFailureCount
         << " batch_alloc_req=" << metricSnapshot.batchAllocRequestCount
         << " batch_alloc_success=" << metricSnapshot.batchAllocSuccessCount
         << " batch_alloc_fail=" << metricSnapshot.batchAllocFailureCount
@@ -900,6 +900,9 @@ Result MmcRestApiFacade::BuildPrometheusMetrics(bool serviceReady, std::string &
     AppendMetricHeader(oss, "memcache_get_hits_ssd_total", "Total number of Get hits served from SSD (rewarm)",
                        "counter");
     AppendMetricValue(oss, "memcache_get_hits_ssd_total", metricSnapshot.getHitSsdCount);
+    AppendMetricHeader(oss, "memcache_query_hit_keys_total", "Total number of keys hit by Query and BatchQuery",
+                       "counter");
+    AppendMetricValue(oss, "memcache_query_hit_keys_total", metricSnapshot.queryHitKeysCount);
     AppendMetricHeader(oss, "memcache_rewarm_total", "Total number of SSD->DRAM rewarm operations", "counter");
     AppendMetricValue(oss, "memcache_rewarm_total", metricSnapshot.rewarmCount);
     AppendMetricHeader(oss, "memcache_rewarm_failed_total", "Total number of failed SSD->DRAM rewarm operations",

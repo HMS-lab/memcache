@@ -484,11 +484,11 @@ TEST_F(MmcMetaServiceHttpTest, MetricsContract)
         << " rewarm_fail=" << snapshot.rewarmFailCount << " rewarm_bytes_total=" << snapshot.rewarmBytesCount
         << " rewarm_bytes_current=" << snapshot.rewarmBytesCurrent << " flush_blobs=" << snapshot.asyncFlushBlobAdded
         << " flush_bytes=" << snapshot.asyncFlushBlobBytes << " get_hit_dram=" << snapshot.getHitDramCount
-        << " get_hit_ssd=" << snapshot.getHitSsdCount << " hbm_used=" << SIZE_32K << "/" << kHttpSegmentCapacityBytes
-        << " dram_used=" << kHttpZeroUsedBytes << "/" << kHttpSegmentCapacityBytes << " ssd_used=" << kHttpZeroUsedBytes
-        << "/" << kHttpZeroUsedBytes << " alloc_req=" << snapshot.allocRequestCount
-        << " alloc_success=" << snapshot.allocSuccessCount << " alloc_fail=" << snapshot.allocFailureCount
-        << " batch_alloc_req=" << snapshot.batchAllocRequestCount
+        << " get_hit_ssd=" << snapshot.getHitSsdCount << " query_hit_keys=" << snapshot.queryHitKeysCount
+        << " hbm_used=" << SIZE_32K << "/" << kHttpSegmentCapacityBytes << " dram_used=" << kHttpZeroUsedBytes << "/"
+        << kHttpSegmentCapacityBytes << " ssd_used=" << kHttpZeroUsedBytes << "/" << kHttpZeroUsedBytes
+        << " alloc_req=" << snapshot.allocRequestCount << " alloc_success=" << snapshot.allocSuccessCount
+        << " alloc_fail=" << snapshot.allocFailureCount << " batch_alloc_req=" << snapshot.batchAllocRequestCount
         << " batch_alloc_success=" << snapshot.batchAllocSuccessCount
         << " batch_alloc_fail=" << snapshot.batchAllocFailureCount << " get_req=" << snapshot.getRequestCount
         << " get_success=" << snapshot.getSuccessCount << " get_fail=" << snapshot.getFailureCount
@@ -535,6 +535,41 @@ TEST_F(MmcMetaServiceHttpTest, MetricsContract)
     auto summaryResponse = WaitForResponse(client, "/metrics/summary");
     ASSERT_NE(summaryResponse, nullptr);
     EXPECT_NE(summaryResponse->body.find(expectedSummary.str()), std::string::npos);
+}
+
+TEST_F(MmcMetaServiceHttpTest, QueryHitKeysCountsSingleBatchAndExports)
+{
+    constexpr uint64_t expectedHits = 3;
+    const auto before = MmcMetaMetricManager::GetInstance().GetSnapshot();
+    QueryRequest missingRequest("query-hit-missing");
+    QueryResponse missingResponse;
+    EXPECT_EQ(metaMgrProxy_->Query(missingRequest, missingResponse), MMC_UNMATCHED_KEY);
+    EXPECT_EQ(MmcMetaMetricManager::GetInstance().GetSnapshot().queryHitKeysCount, before.queryHitKeysCount);
+    QueryRequest singleRequest(kHttpAllocKey);
+    singleRequest.flag_ = GET_KEY_INFO_FOR_LAYER_WISE;
+    QueryResponse singleResponse;
+    ASSERT_EQ(metaMgrProxy_->Query(singleRequest, singleResponse), MMC_OK);
+    ASSERT_TRUE(singleResponse.queryInfo_.valid_);
+    BatchQueryRequest batchRequest({kHttpAllocKey, "query-hit-missing", kHttpAllocKey});
+    batchRequest.flag_ = GET_KEY_INFO_FOR_LAYER_WISE;
+    BatchQueryResponse batchResponse;
+    ASSERT_EQ(metaMgrProxy_->BatchQuery(batchRequest, batchResponse), MMC_OK);
+    ASSERT_EQ(batchResponse.batchQueryInfos_.size(), batchRequest.keys_.size());
+    EXPECT_TRUE(batchResponse.batchQueryInfos_[kHttpFirstItemIndex].valid_);
+    EXPECT_FALSE(batchResponse.batchQueryInfos_[kHttpSecondItemIndex].valid_);
+    const auto after = MmcMetaMetricManager::GetInstance().GetSnapshot();
+    EXPECT_EQ(after.queryHitKeysCount, before.queryHitKeysCount + expectedHits);
+    EXPECT_EQ(after.getHitDramCount, before.getHitDramCount);
+    EXPECT_EQ(after.getHitSsdCount, before.getHitSsdCount);
+
+    MockMmcHttpClient client(kHttpLocalHost, httpPort_);
+    const auto summary = WaitForResponse(client, "/metrics/summary");
+    ASSERT_NE(summary, nullptr);
+    EXPECT_NE(summary->body.find(" query_hit_keys=" + std::to_string(after.queryHitKeysCount)), std::string::npos);
+    const auto prometheus = WaitForResponse(client, "/metrics");
+    ASSERT_NE(prometheus, nullptr);
+    EXPECT_NE(prometheus->body.find("memcache_query_hit_keys_total " + std::to_string(after.queryHitKeysCount)),
+              std::string::npos);
 }
 
 TEST_F(MmcMetaServiceHttpTest, BusinessCountersIgnoreInternalEndpoints)
