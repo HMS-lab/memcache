@@ -41,6 +41,14 @@ stages :
   stage_1:
     name: Codecheck
     jobs:
+      associate_pr_comment:
+        name: associate_pr_comment
+        select: selected_by_default
+        runs-on: [ self-hosted, x86, cpu=2 ]
+        steps:
+          - name: associate-pr-comment
+            uses: associate-pr-comment
+
       pre_commit:
         name: precommit
         runs-on: [ self-hosted, x86, cpu=16 ]
@@ -50,6 +58,7 @@ stages :
           - name: Checkout repository
             uses: checkout
             with:
+              allow-unsafe-pr-checkout: true
               ref: refs/merge-requests/${{ env.pr_id }}/merge
 
           - name: setup-python
@@ -82,6 +91,7 @@ stages :
           - name: Checkout repository
             uses: checkout
             with:
+              allow-unsafe-pr-checkout: true
               ref: refs/merge-requests/${{ env.pr_id }}/merge
 
           - name: Run sca-pr-action
@@ -96,6 +106,7 @@ stages :
           - name: Checkout repository
             uses: checkout
             with:
+              allow-unsafe-pr-checkout: true
               ref: refs/merge-requests/${{ env.pr_id }}/merge
 
           - name: Run malicious-code-pr-action
@@ -115,6 +126,7 @@ stages :
           - name: Checkout repository
             uses: checkout
             with:
+              allow-unsafe-pr-checkout: true
               ref: refs/merge-requests/${{ env.pr_id }}/merge
               submodules: recursive
 
@@ -139,6 +151,7 @@ stages :
           - name: Checkout repository
             uses: checkout
             with:
+              allow-unsafe-pr-checkout: true
               ref: refs/merge-requests/${{ env.pr_id }}/merge
               submodules: recursive
 
