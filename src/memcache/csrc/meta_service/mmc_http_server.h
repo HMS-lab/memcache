@@ -60,6 +60,7 @@ private:
     void RegisterSegmentManagementEndpoints();
     void RegisterDrainJobEndpoints();
     void RegisterMetricsEndpoint();
+    void RegisterMfClusterStatusEndpoint();
     bool SetupTls();
 
     std::atomic<bool> running_{false};

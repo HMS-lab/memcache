@@ -28,6 +28,7 @@ smemAccHttpServerCreateFunc MFAccApi::gSmemAccHttpServerCreate = nullptr;
 smemAccServerDestroyFunc MFAccApi::gSmemAccServerDestroy = nullptr;
 smemAccTcpServerStartFunc MFAccApi::gSmemAccTcpServerStart = nullptr;
 smemAccHttpServerStartFunc MFAccApi::gSmemAccHttpServerStart = nullptr;
+smemAccGetClusterStatusFunc MFAccApi::gSmemAccGetClusterStatus = nullptr;
 smemAccServerStopFunc MFAccApi::gSmemAccServerStop = nullptr;
 smemAccServerLoadTlsLibraryFunc MFAccApi::gSmemAccServerLoadTlsLibrary = nullptr;
 smemAccServerSetDecryptHandlerFunc MFAccApi::gSmemAccServerSetDecryptHandler = nullptr;
@@ -55,6 +56,8 @@ Result MFAccApi::LoadAllSymbols()
     DL_LOAD_SYM(gSmemAccServerDestroy, smemAccServerDestroyFunc, gSmemHandle, "smem_acc_server_destroy");
     DL_LOAD_SYM(gSmemAccTcpServerStart, smemAccTcpServerStartFunc, gSmemHandle, "smem_acc_tcp_server_start");
     DL_LOAD_SYM(gSmemAccHttpServerStart, smemAccHttpServerStartFunc, gSmemHandle, "smem_acc_http_server_start");
+    DL_LOAD_SYM(gSmemAccGetClusterStatus, smemAccGetClusterStatusFunc, gSmemHandle,
+                "smem_config_store_get_cluster_status");
     DL_LOAD_SYM(gSmemAccServerStop, smemAccServerStopFunc, gSmemHandle, "smem_acc_server_stop");
     DL_LOAD_SYM(gSmemAccServerLoadTlsLibrary, smemAccServerLoadTlsLibraryFunc, gSmemHandle,
                 "smem_acc_server_load_tls_library");
@@ -141,6 +144,7 @@ void MFAccApi::ClearAllSymbols()
     gSmemAccHttpRequestParam = nullptr;
     gSmemAccHttpRequestVisitParams = nullptr;
     gSmemAccHttpRequestReply = nullptr;
+    gSmemAccGetClusterStatus = nullptr;
 }
 
 void MFAccApi::CleanupLibrary()

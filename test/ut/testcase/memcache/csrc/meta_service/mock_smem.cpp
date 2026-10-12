@@ -18,6 +18,7 @@
 #include "smem_acc_def.h"
 #include "smem_config_store_def.h"
 #include "mock_acc_http_server.h"
+#include <cstring>
 
 namespace {
 int g_mockHandle;
@@ -495,5 +496,24 @@ const char *smem_get_last_err_msg()
 const char *smem_get_and_clear_last_err_msg()
 {
     return "";
+}
+
+extern "C" int32_t smem_config_store_get_cluster_status(char *json, uint32_t bufLen, uint32_t *outLen)
+{
+    constexpr char kMockClusterStatus[] = "[{\"type\":\"mock\"}]";
+    constexpr uint32_t kMockClusterStatusLen = static_cast<uint32_t>(sizeof(kMockClusterStatus));
+    constexpr int32_t kMockRetBufferTooSmall = -2015; // SMEM_BUFFER_TOO_SMALL
+    if (outLen != nullptr) {
+        *outLen = kMockClusterStatusLen - 1;
+    }
+    if (json == nullptr) {
+        return 0;
+    }
+    if (bufLen < kMockClusterStatusLen) {
+        *outLen = kMockClusterStatusLen;
+        return kMockRetBufferTooSmall;
+    }
+    memcpy(json, kMockClusterStatus, kMockClusterStatusLen);
+    return 0;
 }
 }

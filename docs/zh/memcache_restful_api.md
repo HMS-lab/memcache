@@ -1869,3 +1869,169 @@ ok
 ### 错误示例
 
 无 JSON 错误响应。进程异常（如被 `SIGSTOP`、死锁、崩溃）时无法返回响应，探针侧表现为超时或连接失败，不返回上述 body。
+
+## 29 `GET /api/v1/mf/cluster_status`
+
+### 作用
+
+返回 MemFabric 集群状态视图：config store server 状态机、存活/重连 rank 集合、心跳新鲜度与
+group manager 链路摘要。默认响应为**折叠视图**（仅 `linkSummary` 计数摘要，不含异常明细），
+不输出全量链路矩阵，规模为 O(N)，可支撑 Prometheus/看板 30s 级常驻轮询；
+`linkSummary.abnormalLinks > 0` 时可追加 `?unstable=true` 下钻获取 `unstableLinks` 异常明细。
+
+- 可选查询参数 `unstable`：仅精确 `true` 生效，其余取值（`false`/拼写错误等）一律视为不带参数，**不报错**；其他未知 query
+  参数同样忽略
+- `mf_cluster` 为空数组（`[]`）表示本进程内无 config store，属正常语义（`status: "ok"`），与错误响应可区分
+
+### curl
+
+```bash
+# 默认：折叠视图（无 unstableLinks 明细）
+curl "http://127.0.0.1:8000/api/v1/mf/cluster_status"
+
+# 下钻：异常链路明细（abnormalLinks > 0 时才有价值）
+curl "http://127.0.0.1:8000/api/v1/mf/cluster_status?unstable=true"
+```
+
+### 请求参数
+
+| 参数         | 类型     | 必选 | 含义                                                                                          |
+|------------|--------|----|---------------------------------------------------------------------------------------------|
+| `unstable` | string | 否  | 仅精确 `true` 时在 `groupManager` 内追加 `unstableLinks` 明细及（发生截断时的）`unstableTruncated`；其余取值等价于不带参数 |
+
+### 成功示例
+
+`application/json; charset=utf-8`：
+
+```json
+{
+  "status": "ok",
+  "mf_cluster": [
+    {
+      "type": "tcp",
+      "model": "server",
+      "connect": true,
+      "server": {
+        "state": "SS_NORMAL",
+        "worldSize": 4,
+        "listen": "127.0.0.1:6000",
+        "backendAliveRanks": [
+          1,
+          2
+        ],
+        "aliveRanks": [
+          0,
+          1,
+          2
+        ],
+        "reconnectedRanks": [
+          1
+        ],
+        "lastHeartbeat": [
+          {
+            "rank": 0,
+            "sinceLastMs": 1200
+          }
+        ],
+        "groupManager": {
+          "maxRanks": 4,
+          "ranks": [
+            {
+              "rank": 0,
+              "state": "RANK_ACTIVE"
+            }
+          ],
+          "linkSummary": {
+            "activeRanks": 2,
+            "connectedLinks": 2,
+            "expectedLinks": 2,
+            "completionRate": 1.000,
+            "abnormalLinks": 0
+          }
+        }
+      }
+    }
+  ]
+}
+```
+
+**解释**
+
+server 级字段：
+
+| 字段                         | 含义                                                                                     |
+|----------------------------|----------------------------------------------------------------------------------------|
+| `status`                   | 恒为 `ok`；错误场景见下方错误示例                                                                    |
+| `mf_cluster`               | store 数组；可能为空数组（无 store，非错误）                                                           |
+| `server.state`             | server 主状态机：`SS_INITED` / `SS_RECOVERING` / `SS_RECOVERED` / `SS_NORMAL` / `SS_EXITED` |
+| `server.worldSize`         | 集群约定规模（首个 rank 连接时固定）；未固定时为 `4294967295`（`UINT32_MAX`，序列化为 `-1` 为暂缓规划项）                |
+| `server.listen`            | config store server 监听地址（`ip:port`）                                                    |
+| `server.backendAliveRanks` | backend 层存活的 rank 集合（升序）                                                               |
+| `server.aliveRanks`        | 连接层存活的 rank 集合（升序）；与 `backendAliveRanks` 不一致即为"连接在但 backend 死"的半死状态                    |
+| `server.reconnectedRanks`  | 启动后发生过重连的 rank 集合                                                                      |
+| `server.lastHeartbeat[]`   | 每 rank 心跳新鲜度，元素 `{"rank": uint, "sinceLastMs": int64}`（距上次心跳的毫秒间隔，按 rank 升序）           |
+| `groupManager`             | 进程内无 group manager 时为 `null`                                                           |
+
+groupManager 级字段：
+
+| 字段                           | 含义                                                                                                     |
+|------------------------------|--------------------------------------------------------------------------------------------------------|
+| `maxRanks`                   | GM 矩阵容量                                                                                                |
+| `ranks[]`                    | 非 IDLE rank 状态，元素 `{"rank": uint, "state": "RANK_CHECKED_IN"/"RANK_ACTIVE"}`，按 rank 升序                 |
+| `linkSummary.activeRanks`    | 处于 `RANK_ACTIVE` 的 rank 数                                                                              |
+| `linkSummary.connectedLinks` | 状态为 `LINK_CONNECTED` 的链路数（有序对计）                                                                        |
+| `linkSummary.expectedLinks`  | 期望链路数 = `activeRanks × (activeRanks − 1)`；基数为 activeRanks，未 join 完成时不用 worldSize 压低完成率                 |
+| `linkSummary.completionRate` | `connectedLinks / expectedLinks`，范围 `[0,1]`；`expectedLinks` 为 0 时输出 `1.0`                              |
+| `linkSummary.abnormalLinks`  | 两端 rank 均存活（∈ `aliveRanks`）但链路非 `LINK_CONNECTED` 的数量；不含对端已死的 IDLE（那是预期状态）；大于 0 即值得 `?unstable=true` 下钻 |
+| `unstableLinks[]`            | 异常链路明细，**仅 `?unstable=true` 时出现**（默认响应不含此字段）；收录规则见下                                                    |
+
+unstableLinks 收录规则（取并集，在 server 侧对链路矩阵单次遍历判定）：
+
+- 条件①：链路处于中间态 `LINK_EXCHANGING` / `LINK_EXCHANGED` / `LINK_CONNECTING`（正在建立、可能卡住；`EXCHANGED` 停留即异常）
+- 条件②：链路为 `LINK_IDLE` 且**双端 rank 均存活**（该有链路却没有的真正断链；单端已死的 IDLE 属预期状态，不收录）
+- `LINK_CONNECTED` 不收录（抖动检测属事件层/日志，快照层无历史）
+
+每项元素：
+
+| 字段            | 含义                                                                           |
+|---------------|------------------------------------------------------------------------------|
+| `src` / `dst` | 源/目的 rankId                                                                  |
+| `state`       | 当前链路态：`LINK_IDLE` / `LINK_EXCHANGING` / `LINK_EXCHANGED` / `LINK_CONNECTING` |
+| `retry`       | 当前转换已重试次数                                                                    |
+| `elapsedMs`   | 当前状态已持续毫秒数；IDLE 断链（无活跃转换）时为 `-1`                                             |
+
+**输出规模控制**：`unstableLinks` 输出条目上限为 **256**（`kUnstableLinksMaxEntries`，定义于
+memfabric `smem_tcp_config_store_server.h`）。超出时按 `(retry 降序, elapsedMs 降序)` 截断
+（最可能卡死的排最前），并在响应追加 `"unstableTruncated": <被截掉的数量>`（仅在截断实际发生时出现）。
+该阈值是对外行为契约，修改需走文档变更。
+
+`?unstable=true` 时 `groupManager` 内追加的字段示例：
+
+```json
+"unstableLinks": [
+{"src": 5, "dst": 8, "state": "LINK_EXCHANGING", "retry": 2, "elapsedMs": 4100}
+],
+"unstableTruncated": 127
+```
+
+### 错误示例
+
+`application/json; charset=utf-8`：
+
+```json
+{
+  "success": false,
+  "error_message": "internal server error",
+  "timestamp": 0
+}
+```
+
+**解释**
+
+| 字段              | 含义                                                                                           | 来源         |
+|-----------------|----------------------------------------------------------------------------------------------|------------|
+| `success`       | 请求是否成功；错误场景固定为 `false`                                                                       | 全局统一错误返回规则 |
+| `error_message` | 实际错误原因；本接口在下层调用失败（非 `SMEM_OK` 且非 `SMEM_NOT_EXIST` 返回码）或 JSON 解析失败时返回 `internal server error` | 全局错误返回格式规则 |
+| `timestamp`     | 错误响应生成时间；示例中的 `0` 仅为占位值                                                                      | 全局错误返回格式规则 |
+
+注意：本进程内无 config store **不是错误**，返回 `status: "ok"` + `mf_cluster: []`。

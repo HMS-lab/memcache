@@ -20,6 +20,8 @@
 
 #include "ptracer.h"
 
+#include "smem_acc_api.h"
+
 #include "mmc_logger.h"
 #include "mmc_meta_metric_manager.h"
 #include "mmc_client_metric_store.h"
@@ -365,6 +367,55 @@ nlohmann::json MmcRestApiFacade::BuildLeader() const
     result["leader_address"] = haSnapshot.leaderAddress;
     result["view_version"] = haSnapshot.viewVersion;
     return result;
+}
+
+void StripUnstableLinksDetail(nlohmann::json &clusterArray)
+{
+    if (!clusterArray.is_array()) {
+        return;
+    }
+    for (auto &storeView : clusterArray) {
+        if (!storeView.is_object()) {
+            continue;
+        }
+        auto serverIt = storeView.find("server");
+        if (serverIt == storeView.end() || !serverIt->is_object()) {
+            continue;
+        }
+        auto gmIt = serverIt->find("groupManager");
+        if (gmIt == serverIt->end() || !gmIt->is_object()) {
+            continue;
+        }
+        gmIt->erase("unstableLinks");
+        gmIt->erase("unstableTruncated");
+    }
+}
+
+Result MmcRestApiFacade::BuildMfClusterStatus(nlohmann::json &result, bool includeUnstable) const
+{
+    std::string raw;
+    const int32_t mfRet = MFAccApi::GetClusterStatus(raw);
+    // SMEM_NOT_EXIST：本进程内无 config store，语义为"空集群"而非错误（与下层调用失败必须可区分）
+    if (mfRet == MFAccApi::kClusterStatusNoStore) {
+        result["status"] = kStatusOk;
+        result["mf_cluster"] = nlohmann::json::array();
+        return MMC_OK;
+    }
+    if (mfRet != MMC_OK) {
+        MMC_LOG_ERROR("mf cluster status query failed, mfRet: " << mfRet);
+        return MMC_ERROR;
+    }
+    nlohmann::json parsed = nlohmann::json::parse(raw, nullptr, false);
+    if (parsed.is_discarded()) {
+        MMC_LOG_ERROR("mf cluster status json parse failed, len: " << raw.size());
+        return MMC_ERROR;
+    }
+    if (!includeUnstable) {
+        StripUnstableLinksDetail(parsed);
+    }
+    result["status"] = kStatusOk;
+    result["mf_cluster"] = parsed;
+    return MMC_OK;
 }
 
 Result MmcRestApiFacade::QueryKey(const std::string &key, nlohmann::json &result) const

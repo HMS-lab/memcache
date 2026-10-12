@@ -135,6 +135,7 @@ void MmcHttpServer::RegisterUrls()
     RegisterSegmentManagementEndpoints();
     RegisterDrainJobEndpoints();
     RegisterMetricsEndpoint();
+    RegisterMfClusterStatusEndpoint();
 }
 
 void MmcHttpServer::RegisterHealthCheckEndpoint()
@@ -512,6 +513,29 @@ void MmcHttpServer::RegisterDrainJobEndpoints()
     server_->RegisterHttpHandler(acc::AccHttpMethod::POST, "/api/v1/drain_jobs", notSupportedHandler);
     server_->RegisterHttpHandler(acc::AccHttpMethod::GET, "/api/v1/drain_jobs/query", notSupportedHandler);
     server_->RegisterHttpHandler(acc::AccHttpMethod::POST, "/api/v1/drain_jobs/cancel", notSupportedHandler);
+}
+
+void MmcHttpServer::RegisterMfClusterStatusEndpoint()
+{
+    auto mfClusterStatusHandler = [this](acc::AccHttpRequestContext &ctx) -> int32_t {
+        if (restApiFacade_ == nullptr) {
+            return ReplyJsonError200(ctx, kErrorInternalServer);
+        }
+
+        bool includeUnstable = false;
+        const auto params = ctx.Params();
+        const auto paramIt = params.find("unstable");
+        if (paramIt != params.end() && paramIt->second == "true") {
+            includeUnstable = true;
+        }
+        nlohmann::json result;
+        const Result ret = restApiFacade_->BuildMfClusterStatus(result, includeUnstable);
+        if (ret != MMC_OK) {
+            return ReplyJsonError200(ctx, kErrorInternalServer);
+        }
+        return ReplyJsonOk(ctx, result);
+    };
+    server_->RegisterHttpHandler(acc::AccHttpMethod::GET, "/api/v1/mf/cluster_status", mfClusterStatusHandler);
 }
 
 void MmcHttpServer::RegisterMetricsEndpoint()

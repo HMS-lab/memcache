@@ -69,6 +69,8 @@ public:
     std::string GetRole() const;
     std::string GetHaStatus() const;
     nlohmann::json BuildHealth(bool serviceReady) const;
+
+    Result BuildMfClusterStatus(nlohmann::json &result, bool includeUnstable = false) const;
     nlohmann::json BuildLeader() const;
     nlohmann::json BuildKvEventsStatus() const;
 

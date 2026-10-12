@@ -12,6 +12,7 @@
 #ifndef MEMCACHE_SMEM_ACC_API_H
 #define MEMCACHE_SMEM_ACC_API_H
 
+#include <atomic>
 #include <mutex>
 
 #include "mmc_common_includes.h"
@@ -38,6 +39,7 @@ using smemAccServerConnectFunc = int32_t (*)(smem_acc_server_t, const char *, ui
                                              const smem_acc_connect_request_t *, uint32_t, smem_acc_link_t *);
 using smemAccHttpServerRegisterHandlerFunc = int32_t (*)(smem_acc_server_t, uint8_t, const char *, smem_acc_http_cb,
                                                          void *);
+using smemAccGetClusterStatusFunc = int32_t (*)(char *, uint32_t, uint32_t *);
 using smemAccLinkRetainFunc = smem_acc_link_t (*)(smem_acc_link_t);
 using smemAccLinkReleaseFunc = void (*)(smem_acc_link_t);
 using smemAccLinkIdFunc = uint32_t (*)(smem_acc_link_t);
@@ -53,6 +55,10 @@ using smemAccHttpRequestReplyFunc = int32_t (*)(smem_acc_http_request_t, uint16_
 
 class MFAccApi {
 public:
+    static constexpr uint32_t kProbeClusterStatusLen = 4096;
+    // 与下层 smem.h 公共错误码家族保持一致（人工同步，勿随意改值）
+    static constexpr int32_t kClusterStatusBufferTooSmall = -2015; // SMEM_BUFFER_TOO_SMALL
+    static constexpr int32_t kClusterStatusNoStore = -2007;        // SMEM_NOT_EXIST
     static Result LoadLibrary();
     static void CleanupLibrary();
 
@@ -86,6 +92,28 @@ public:
     static void StopServer(smem_acc_server_t server)
     {
         gSmemAccServerStop(server);
+    }
+
+    static int32_t GetClusterStatus(std::string &jsonBuffer)
+    {
+        // 探测缓冲高水位，只增不减
+        static std::atomic<uint32_t> sProbeLen{kProbeClusterStatusLen};
+        std::vector<char> buf(sProbeLen.load(std::memory_order_relaxed));
+        for (int attempt = 0; attempt < 3; ++attempt) {
+            uint32_t outLen = 0;
+            auto ret = gSmemAccGetClusterStatus(buf.data(), static_cast<uint32_t>(buf.size()), &outLen);
+            if (ret == kClusterStatusBufferTooSmall) {
+                const uint32_t want = outLen + outLen / 2 + 1;
+                buf.resize(want);
+                sProbeLen.store(want, std::memory_order_relaxed);
+                continue;
+            }
+            if (ret == MMC_OK || ret == kClusterStatusNoStore) {
+                jsonBuffer.assign(buf.data(), outLen);
+            }
+            return ret;
+        }
+        return kClusterStatusBufferTooSmall;
     }
 
     static int32_t LoadDynamicLib(smem_acc_server_t server, const char *path)
@@ -209,6 +237,7 @@ private:
     static smemAccServerSetLinkBrokenHandlerFunc gSmemAccServerSetLinkBrokenHandler;
     static smemAccServerConnectFunc gSmemAccServerConnect;
     static smemAccHttpServerRegisterHandlerFunc gSmemAccHttpServerRegisterHandler;
+    static smemAccGetClusterStatusFunc gSmemAccGetClusterStatus;
     static smemAccLinkRetainFunc gSmemAccLinkRetain;
     static smemAccLinkReleaseFunc gSmemAccLinkRelease;
     static smemAccLinkIdFunc gSmemAccLinkId;
