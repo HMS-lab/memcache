@@ -238,6 +238,8 @@ public:
                                      MAX_DEFRAG_EVICT_THRESHOLD),
                    0);
         AddBoolConf(OCK_MMC_PREFETCH_ENABLED, VStrEnum::Create(OCK_MMC_PREFETCH_ENABLED.first, BOOL_ENUM_STR), 0);
+        AddBoolConf(OCK_MMC_META_SERVICE_ENABLE_MAX_VALUE_MODE,
+                    VStrEnum::Create(OCK_MMC_META_SERVICE_ENABLE_MAX_VALUE_MODE.first, BOOL_ENUM_STR), 0);
         AddIntConf(
             OCK_MMC_ASYNC_FLUSH_INTERVAL_MS,
             VIntRange::Create(OCK_MMC_ASYNC_FLUSH_INTERVAL_MS.first, MIN_FLUSH_INTERVAL_MS, MAX_FLUSH_INTERVAL_MS), 0);
@@ -342,6 +344,7 @@ public:
         config.evictThresholdLow = GetInt(ConfConstant::OKC_MMC_EVICT_THRESHOLD_LOW);
         config.defragEvictThreshold = static_cast<uint16_t>(GetInt(ConfConstant::OKC_MMC_DEFRAG_EVICT_THRESHOLD));
         config.prefetchEnabled = GetBool(ConfConstant::OCK_MMC_PREFETCH_ENABLED);
+        config.enableMaxValueMode = GetBool(ConfConstant::OCK_MMC_META_SERVICE_ENABLE_MAX_VALUE_MODE);
         config.asyncFlushIntervalMs = static_cast<uint32_t>(GetInt(ConfConstant::OCK_MMC_ASYNC_FLUSH_INTERVAL_MS));
         config.asyncFlushBatchLimit = static_cast<uint32_t>(GetInt(ConfConstant::OCK_MMC_ASYNC_FLUSH_BATCH_LIMIT));
         config.pendingWaitTimeoutMs = static_cast<uint64_t>(GetInt(ConfConstant::OCK_MMC_PENDING_WAIT_TIMEOUT_MS));
@@ -460,8 +463,6 @@ public:
             0);
         AddBoolConf(OCK_MMC_LOCAL_SERVICE_STORAGE_ENABLED,
                     VStrEnum::Create(OCK_MMC_LOCAL_SERVICE_STORAGE_ENABLED.first, BOOL_ENUM_STR), 0);
-        AddBoolConf(OCK_MMC_LOCAL_SERVICE_ENABLE_MAX_VALUE_MODE,
-                    VStrEnum::Create(OCK_MMC_LOCAL_SERVICE_ENABLE_MAX_VALUE_MODE.first, BOOL_ENUM_STR), 0);
         AddBoolConf(OCK_MMC_LOCAL_SERVICE_DRAM_BEST_EFFORT,
                     VStrEnum::Create(OCK_MMC_LOCAL_SERVICE_DRAM_BEST_EFFORT.first, BOOL_ENUM_STR), 0);
         AddIntConf(OCK_MMC_CLIENT_AGGREGATE_NUM,
@@ -498,7 +499,6 @@ public:
         config.localHBMSize = GetUInt64(ConfConstant::OKC_MMC_LOCAL_SERVICE_HBM_SIZE.first, 0);
         config.localMaxHBMSize = GetUInt64(ConfConstant::OKC_MMC_LOCAL_SERVICE_MAX_HBM_SIZE.first, config.localHBMSize);
         config.storageEnabled = GetBool(ConfConstant::OCK_MMC_LOCAL_SERVICE_STORAGE_ENABLED);
-        config.enableMaxValueMode = GetBool(ConfConstant::OCK_MMC_LOCAL_SERVICE_ENABLE_MAX_VALUE_MODE);
         if (GetBool(ConfConstant::OCK_MMC_LOCAL_SERVICE_DRAM_BEST_EFFORT)) {
             config.flags |= SMEM_BM_FLAG_DRAM_BEST_EFFORT;
         }

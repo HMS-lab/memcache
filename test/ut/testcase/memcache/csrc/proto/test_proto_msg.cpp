@@ -124,7 +124,6 @@ TEST_F(TestProtoMsg, BmRegisterRequestKeepsOriginalPayloadLayout)
     const std::vector<uint64_t> capacities;
     const std::vector<std::pair<std::string, MmcMemBlobDesc>> blobList;
     const bool storageEnabled = true;
-    const bool enableMaxValueMode = false;
     packer.Serialize(msgVer);
     packer.Serialize(msgId);
     packer.Serialize(destRankId);
@@ -135,14 +134,12 @@ TEST_F(TestProtoMsg, BmRegisterRequestKeepsOriginalPayloadLayout)
     packer.Serialize(capacities);
     packer.Serialize(blobList);
     packer.Serialize(storageEnabled);
-    packer.Serialize(enableMaxValueMode);
 
     BmRegisterRequest decoded;
     NetMsgUnpacker unpacker(packer.String());
     ASSERT_EQ(decoded.Deserialize(unpacker), MMC_OK);
     EXPECT_EQ(decoded.rank_, rank);
     EXPECT_TRUE(decoded.storageEnabled_);
-    EXPECT_FALSE(decoded.enableMaxValueMode_);
 }
 
 TEST_F(TestProtoMsg, GetExternalConfigMessagesRoundTrip)

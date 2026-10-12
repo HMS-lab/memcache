@@ -164,6 +164,7 @@ public:
             return MMC_OK;
         }
 
+        MMC_LOG_INFO("GlobalAllocator Mount " << loc << " enableMaxValueMode:" << enableMaxValueMode);
         allocators_[loc] = MmcBlobAllocator::Create(loc, localMemInitInfo, enableMaxValueMode, &maxAlignedSize_);
 
         MMC_LOG_TRACE("Mount bm on " << loc << ", capacity:" << localMemInitInfo.capacity_ << "  successfully");

@@ -503,7 +503,6 @@ void MmcLocalServiceDefault::RegisterBaseInfo(BmRegisterRequest &req)
     req.rank_ = options_.rankId;
     req.backendId_ = ResolveBackendId();
     req.storageEnabled_ = options_.storageEnabled;
-    req.enableMaxValueMode_ = options_.enableMaxValueMode;
     for (MediaType type = MEDIA_HBM; type != MEDIA_NONE;) {
         uint64_t gva = bmProxyPtr_->GetGva(type);
         uint64_t capacity = bmProxyPtr_->GetCapacity(type);

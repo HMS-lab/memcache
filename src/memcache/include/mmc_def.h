@@ -108,6 +108,8 @@ typedef struct {
     uint32_t lruShardCount;
     // SSD 元数据模式属于 MetaService 启动配置；零值保持原有 aggregated 行为。
     uint32_t ssdMetadataMode; // 0: aggregated; 1: separated
+    // 分配时 padding 到全局最大对齐值，全网统一，由 MetaService 统一管理。
+    bool enableMaxValueMode;
 } mmc_meta_service_config_t;
 
 typedef struct {
@@ -125,7 +127,6 @@ typedef struct {
     uint64_t localHBMSize;
     uint64_t localMaxHBMSize;
     bool storageEnabled;
-    bool enableMaxValueMode;
     uint32_t flags;
     mmc_tls_config accTlsConfig;
     int32_t logLevel;

@@ -125,7 +125,7 @@ Result MetaNetServer::HandleBmRegister(const NetContextPtr &context)
     }
     TP_TRACE_BEGIN(TP_MMC_META_BM_REGISTER);
     auto result = metaService_->BmRegister(req.rank_, req.mediaType_, req.addr_, req.capacity_, req.blobList_,
-                                           req.storageEnabled_, req.backendId_, req.enableMaxValueMode_);
+                                           req.storageEnabled_, req.backendId_);
     TP_TRACE_END(TP_MMC_META_BM_REGISTER, result);
     MMC_LOG_TRACE("HandleBmRegister rank: " << req.rank_ << ", storageEnabled: " << req.storageEnabled_
                                             << ", rebuild blob size: " << req.blobList_.size() << ", ret: " << result);

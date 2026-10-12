@@ -48,7 +48,7 @@ public:
 
     Result BmRegister(uint32_t rank, std::vector<uint16_t> mediaType, std::vector<uint64_t> bm,
                       std::vector<uint64_t> capacity, std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList,
-                      bool storageEnabled = false, const std::string &backendId = "", bool enableMaxValueMode = false);
+                      bool storageEnabled = false, const std::string &backendId = "");
 
     Result BmUnregister(uint32_t rank, uint16_t mediaType);
 

@@ -718,6 +718,7 @@ int32_t mmc_set_log_level(int level);
 - `configStoreTlsConfig`：config store的TLS配置。
 - `metricsTlsConfig`：metrics HTTP 服务的 mTLS 配置。
 - `ssdMetadataMode`：SSD元数据模式；`0`表示由MetaService统一管理，`1`表示由存储后端管理。
+- `enableMaxValueMode`：是否启用max-value分配模式（分配时padding到全局最大对齐值），全网统一，由MetaService统一管理；仅在BmRegister注册时生效，不可动态热更。
 
 ### mmc_local_service_config_t
 
@@ -737,7 +738,6 @@ int32_t mmc_set_log_level(int level);
 - `localHBMSize`：本地HBM大小。
 - `localMaxHBMSize`：所有本地进程HBM大小的最大值，各本地进程HBM大小不一致时必填。
 - `storageEnabled`：是否启用本地SSD存储。
-- `enableMaxValueMode`：是否启用max-value分配模式，所有本地服务必须配置相同值；仅在BmRegister注册时生效，不可动态热更。
 - `flags`：标志。
 - `accTlsConfig`：本地服务的TLS配置。
 - `logLevel`：日志级别。

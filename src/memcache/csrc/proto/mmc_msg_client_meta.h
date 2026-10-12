@@ -605,7 +605,6 @@ struct BmRegisterRequest : MsgBase {
     std::vector<uint64_t> capacity_{};
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobList_;
     bool storageEnabled_{false};
-    bool enableMaxValueMode_{false};
 
     BmRegisterRequest() : MsgBase{0, ML_BM_REGISTER_REQ, 0} {}
 
@@ -621,7 +620,6 @@ struct BmRegisterRequest : MsgBase {
         packer.Serialize(capacity_);
         packer.Serialize(blobList_);
         packer.Serialize(storageEnabled_);
-        packer.Serialize(enableMaxValueMode_);
         return MMC_OK;
     }
 
@@ -637,7 +635,6 @@ struct BmRegisterRequest : MsgBase {
         MMC_RETURN_ERROR(packer.Deserialize(capacity_), "deserialize capacity failed");
         MMC_RETURN_ERROR(packer.Deserialize(blobList_), "deserialize blobList failed");
         MMC_RETURN_ERROR(packer.Deserialize(storageEnabled_), "deserialize storageEnabled failed");
-        MMC_RETURN_ERROR(packer.Deserialize(enableMaxValueMode_), "deserialize enableMaxValueMode failed");
         return MMC_OK;
     }
 };
