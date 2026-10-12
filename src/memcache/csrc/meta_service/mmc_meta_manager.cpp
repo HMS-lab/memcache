@@ -1448,10 +1448,19 @@ Result MmcMetaManager::Alloc(const std::string &key, const AllocOptions &allocOp
     MMC_LOG_DEBUG("Alloc key=" << key << ", leaseTtlMs=" << leaseTtlMs
                                << ", defaultTtlMs_=" << defaultTtlMs_.load(std::memory_order_relaxed)
                                << ", actualLeaseTtlMs=" << actualLeaseTtlMs);
+    const uint32_t opRankId = GetRankIdByOperateId(operateId);
+    const uint32_t opSeq = GetSequenceByOperateId(operateId);
     for (auto &blob : blobs) {
         blob->SetDefaultLeaseTtlMs(actualLeaseTtlMs);
         MMC_LOG_DEBUG("Blob allocated, key=" << key << ", size=" << blob->Size() << ", rank=" << blob->Rank());
         tempMetaObj->AddBlob(blob);
+        // Establish the write lease before publishing the object to the eviction container.
+        auto leaseRet = blob->UpdateState(key, opRankId, opSeq, MMC_ALLOCATED_OK);
+        if (leaseRet != MMC_OK) {
+            MMC_LOG_WARN("Alloc: grant write lease failed, key=" << key << ", ret=" << leaseRet);
+            globalAllocator_->Free(blobs);
+            return leaseRet;
+        }
     }
 
     ret = metaContainer_->Insert(key, tempMetaObj);
@@ -1473,12 +1482,9 @@ Result MmcMetaManager::Alloc(const std::string &key, const AllocOptions &allocOp
 
     if (ret == MMC_OK || (ret == MMC_DUPLICATED_OBJECT && (allocOpt.flags_ & ALLOC_FLAGS_GVA_MALLOC_MASK))) {
         std::unique_lock<std::mutex> guard(tempMetaObj->Mutex());
-        uint32_t opRankId = GetRankIdByOperateId(operateId);
-        uint32_t opSeq = GetSequenceByOperateId(operateId);
         for (auto &blob : tempMetaObj->GetBlobs()) {
-            if (blob != nullptr) {
-                BlobActionResult actionRet = (ret == MMC_DUPLICATED_OBJECT) ? MMC_REPEAT_ALLOC : MMC_ALLOCATED_OK;
-                auto leaseRet = blob->UpdateState(key, opRankId, opSeq, actionRet);
+            if (blob != nullptr && ret == MMC_DUPLICATED_OBJECT) {
+                auto leaseRet = blob->UpdateState(key, opRankId, opSeq, MMC_REPEAT_ALLOC);
                 if (leaseRet != MMC_OK) {
                     MMC_LOG_WARN("Alloc: grant write lease failed, key=" << key << ", ret=" << leaseRet);
                 }
@@ -2527,6 +2533,16 @@ EvictResult MmcMetaManager::EvictCallBackFunction(const std::string &key, const 
     TP_TRACE_BEGIN(TP_MMC_META_EVICT);
 
     std::unique_lock<std::mutex> guard(objMeta->Mutex());
+
+    // Lease state and the eviction decision share the object lock with Alloc/UpdateState.
+    // Expired leases do not protect abandoned ALLOCATED blobs from reclamation.
+    for (const auto &blob : objMeta->GetBlobs()) {
+        if (blob != nullptr && blob->Type() == srcMediaType && blob->LeaseTimeoutTtlMs() > 0) {
+            MMC_LOG_DEBUG("Evict skip key=" << key << " from " << srcMediaType << ", active lease");
+            TP_TRACE_END(TP_MMC_META_EVICT, MMC_OK);
+            return EvictResult::FAIL;
+        }
+    }
 
     MediaType dstMedium = MoveDown(srcMediaType);
     MmcBlobFilterPtr srcFilter = MmcMakeRef<MmcBlobFilter>(UINT32_MAX, srcMediaType, READABLE);

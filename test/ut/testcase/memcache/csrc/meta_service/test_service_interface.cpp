@@ -92,6 +92,7 @@ static bool CheckData(void *base, void *ptr)
 
 TEST_F(TestMmcServiceInterface, MultiLevelEvict)
 {
+    constexpr uint64_t leaseTtlMs = 200;
     std::string metaUrl = kServiceInterfaceMetaUrl;
     std::string bmUrl = kServiceInterfaceBmUrl;
     std::string hcomUrl = kServiceInterfaceHcomUrl;
@@ -105,6 +106,7 @@ TEST_F(TestMmcServiceInterface, MultiLevelEvict)
     metaServiceConfig.asyncFlushBatchLimit = 8UL;
     metaServiceConfig.evictThresholdHigh = 80U;
     metaServiceConfig.evictThresholdLow = 60U;
+    metaServiceConfig.leaseTtlMs = leaseTtlMs;
     metaServiceConfig.haEnable = false;
     metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     // localSsdSize removed from mmc_meta_service_config_t

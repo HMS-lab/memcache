@@ -13,6 +13,7 @@
 #include <chrono>
 #include <future>
 #include <iostream>
+#include <limits>
 #include <thread>
 #include "gtest/gtest.h"
 #include "mmc_meta_manager.h"
@@ -57,6 +58,11 @@ protected:
     static bool DefragIdle(MmcRef<MmcMetaManager> &mgr)
     {
         return !mgr->defragCheck_.load(std::memory_order_relaxed);
+    }
+    static EvictResult EvictObject(MmcRef<MmcMetaManager> &mgr, const std::string &key, const MmcMemObjMetaPtr &object,
+                                   MediaType media)
+    {
+        return mgr->EvictCallBackFunction(key, object, media);
     }
 };
 TestMmcMetaManager::TestMmcMetaManager() {}
@@ -473,10 +479,11 @@ TEST_F(TestMmcMetaManager, DefragEvictReleasesConsecutiveColdKeys)
     constexpr uint64_t kBigBlobSize = SIZE_32K * 8;
     constexpr uint64_t kDramCapacity = kBigBlobSize + (kTotalKeys - 1) * SIZE_32K;
     constexpr auto kWaitTimeout = std::chrono::seconds(5);
+    constexpr uint64_t leaseTtlMs = 2000;
 
     MmcLocation loc{0, MEDIA_DRAM};
     MmcLocalMemlInitInfo locInfo{0, kDramCapacity};
-    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(2000, 70U, 60U);
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(leaseTtlMs, 70U, 60U);
     ASSERT_EQ(metaMng->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
     metaMng->Mount(loc, locInfo, blobMap, false);
@@ -496,6 +503,7 @@ TEST_F(TestMmcMetaManager, DefragEvictReleasesConsecutiveColdKeys)
         ASSERT_EQ(metaMng->Remove(keys[i]), MMC_OK);
     }
 
+    std::this_thread::sleep_for(std::chrono::milliseconds(leaseTtlMs));
     metaMng->DefragEvict();
 
     // 先等碎片整理主任务结束（此时释放任务已全部投递到线程池）
@@ -540,10 +548,11 @@ TEST_F(TestMmcMetaManager, DefragEvictKeepsSsdBlobOfDualMediaKey)
     constexpr uint64_t kBigBlobSize = SIZE_32K * 8;
     constexpr uint64_t kDramCapacity = kBigBlobSize + (kTotalKeys - 1) * SIZE_32K;
     constexpr auto kWaitTimeout = std::chrono::seconds(5);
+    constexpr uint64_t leaseTtlMs = 2000;
 
     MmcLocation loc{0, MEDIA_DRAM};
     MmcLocalMemlInitInfo locInfo{0, kDramCapacity};
-    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(2000, 70U, 60U);
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(leaseTtlMs, 70U, 60U);
     ASSERT_EQ(metaMng->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
     metaMng->Mount(loc, locInfo, blobMap, false);
@@ -575,6 +584,7 @@ TEST_F(TestMmcMetaManager, DefragEvictKeepsSsdBlobOfDualMediaKey)
     const size_t lruCountBefore = MetaContainer(metaMng)->GetKeyCount(MEDIA_DRAM);
     ASSERT_EQ(lruCountBefore, static_cast<size_t>(kTotalKeys - kTotalKeys / kHoleInterval));
 
+    std::this_thread::sleep_for(std::chrono::milliseconds(leaseTtlMs));
     metaMng->DefragEvict();
 
     // 先等碎片整理主任务结束（此时释放任务已全部投递到线程池）
@@ -628,10 +638,11 @@ TEST_F(TestMmcMetaManager, DefragEvictSkipsWhenMaxContiguousFreeSufficient)
     constexpr int kHoleInterval = 3;
     constexpr uint64_t kDramCapacity = 1500ULL * 1024 * 1024; // 1500MB，大于 1000MB 碎片判断阈值
     constexpr auto kWaitTimeout = std::chrono::seconds(5);
+    constexpr uint64_t leaseTtlMs = 2000;
 
     MmcLocation loc{0, MEDIA_DRAM};
     MmcLocalMemlInitInfo locInfo{0, kDramCapacity};
-    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(2000, 70U, 60U);
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(leaseTtlMs, 70U, 60U);
     ASSERT_EQ(metaMng->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
     metaMng->Mount(loc, locInfo, blobMap, false);
@@ -651,6 +662,7 @@ TEST_F(TestMmcMetaManager, DefragEvictSkipsWhenMaxContiguousFreeSufficient)
     }
     const size_t lruCountBefore = MetaContainer(metaMng)->GetKeyCount(MEDIA_DRAM);
 
+    std::this_thread::sleep_for(std::chrono::milliseconds(leaseTtlMs));
     metaMng->DefragEvict();
 
     // 等碎片整理主任务结束后断言：最大连续空闲块 ≥ 1000MB，无 key 被释放
@@ -901,6 +913,7 @@ TEST_F(TestMmcMetaManager, EvictCallback_NoSsd_GoesToRemove)
         ASSERT_EQ(metaMng->Alloc(keys[i], allocReq, operateId, 0, objMeta), MMC_OK);
         ASSERT_EQ(metaMng->UpdateState(keys[i], dramLoc, MMC_WRITE_OK, operateId), MMC_OK);
     }
+    std::this_thread::sleep_for(std::chrono::milliseconds(defaultTtl));
     // 访问 key2 使其成为 MRU，确保 key0 是 LRU 末端
     MmcMemMetaDesc temp;
     uint32_t keyId = 2;
@@ -917,9 +930,8 @@ TEST_F(TestMmcMetaManager, EvictCallback_NoSsd_GoesToRemove)
     metaMng->Stop();
 }
 
-// A key holding only ALLOCATED blobs (write not finished / WRITE_OK lost) must still be
-// evictable, otherwise the LRU list is stuck and no key can ever be evicted.
-TEST_F(TestMmcMetaManager, EvictCallback_AllocatedOnly_GoesToRemove)
+// Abandoned writes remain reclaimable after their leases expire.
+TEST_F(TestMmcMetaManager, EvictCallback_AllocatedOnlyExpiredLease_GoesToRemove)
 {
     MmcLocation dramLoc{0, MEDIA_DRAM};
     MmcLocalMemlInitInfo dramInfo{0, 96 * 1024};
@@ -940,15 +952,78 @@ TEST_F(TestMmcMetaManager, EvictCallback_AllocatedOnly_GoesToRemove)
     }
 
     ASSERT_EQ(metaMng->UpdateState(keys[survivingKeyIdx], dramLoc, MMC_WRITE_OK, operateId), MMC_OK);
-    // Eviction removes ALLOCATED-only keys instead of blocking the LRU
+    std::this_thread::sleep_for(std::chrono::milliseconds(defaultTtl));
     metaMng->CheckAndEvict(MEDIA_DRAM, SIZE_32K);
-    usleep(500000UL); // wait for lease timeout + async eviction to finish
+    usleep(500000UL); // wait for async eviction to finish
 
-    EXPECT_EQ(metaMng->ExistKey(keys[0]), MMC_UNMATCHED_KEY);
-    EXPECT_EQ(metaMng->ExistKey(keys[1]), MMC_UNMATCHED_KEY);
+    MmcMemObjMetaPtr remainingMeta;
+    EXPECT_EQ(MetaContainer(metaMng)->Get(keys[0], remainingMeta), MMC_UNMATCHED_KEY);
+    EXPECT_EQ(MetaContainer(metaMng)->Get(keys[1], remainingMeta), MMC_UNMATCHED_KEY);
     EXPECT_EQ(metaMng->ExistKey(keys[survivingKeyIdx]), MMC_OK);
 
     metaMng->Stop();
+}
+
+TEST_F(TestMmcMetaManager, EvictCallback_PreservesActiveWriteLease)
+{
+    constexpr uint64_t leaseTtlMs = 500;
+    constexpr uint16_t highWatermark = 70;
+    constexpr uint16_t lowWatermark = 50;
+    const MmcLocation dramLoc{0, MEDIA_DRAM};
+    const uint64_t operateId = 1;
+    const std::string key = "active_write_key";
+    for (auto lruType : {MetaLruType::LRU, MetaLruType::SHARDED_LRU}) {
+        auto manager = MmcMakeRef<MmcMetaManager>(leaseTtlMs, highWatermark, lowWatermark, MmcMetaExtConfig{}, 0, 0,
+                                                  MMC_DEFAULT_META_LRU_SHARD_COUNT, lruType);
+        ASSERT_EQ(manager->Start(), MMC_OK);
+        std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+        ASSERT_EQ(manager->Mount(dramLoc, {0, SIZE_32K}, blobMap), MMC_OK);
+        MmcMemMetaDesc descriptor;
+        ASSERT_EQ(manager->Alloc(key, {SIZE_32K, 1, MEDIA_DRAM, {0}, 0}, operateId, 0, descriptor), MMC_OK);
+        auto &container = MetaContainer(manager);
+        auto evict = [&manager](const std::string &candidate, const MmcMemObjMetaPtr &object, MediaType media) {
+            return EvictObject(manager, candidate, object, media);
+        };
+        EXPECT_EQ(container->EvictDefragTargets({key}, evict, MEDIA_DRAM), 0U);
+        MmcMemObjMetaPtr object;
+        ASSERT_EQ(container->Get(key, object), MMC_OK);
+        ASSERT_EQ(object->GetBlobs().size(), 1U);
+        EXPECT_EQ(object->GetBlobs()[0]->State(), ALLOCATED);
+        EXPECT_EQ(object->GetBlobs()[0]->UseCount(), 1U);
+        EXPECT_GT(object->GetBlobs()[0]->LeaseTimeoutTtlMs(), 0U);
+        ASSERT_EQ(manager->UpdateState(key, dramLoc, MMC_WRITE_OK, operateId), MMC_OK);
+        EXPECT_EQ(object->GetBlobs()[0]->UseCount(), 0U);
+        EXPECT_GT(object->GetBlobs()[0]->LeaseTimeoutTtlMs(), 0U);
+        EXPECT_EQ(container->EvictDefragTargets({key}, evict, MEDIA_DRAM), 0U);
+        ASSERT_EQ(container->Get(key, object), MMC_OK);
+        std::this_thread::sleep_for(std::chrono::milliseconds(leaseTtlMs));
+        EXPECT_EQ(object->GetBlobs()[0]->LeaseTimeoutTtlMs(), 0U);
+        EXPECT_EQ(container->EvictDefragTargets({key}, evict, MEDIA_DRAM), 1U);
+        EXPECT_EQ(container->Get(key, object), MMC_UNMATCHED_KEY);
+        manager->Stop();
+    }
+}
+
+TEST_F(TestMmcMetaManager, AllocRejectsInvalidWriteLeaseBeforePublishing)
+{
+    constexpr uint64_t leaseTtlMs = 5000;
+    constexpr uint16_t highWatermark = 70;
+    constexpr uint16_t lowWatermark = 50;
+    auto manager = MmcMakeRef<MmcMetaManager>(leaseTtlMs, highWatermark, lowWatermark);
+    ASSERT_EQ(manager->Start(), MMC_OK);
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    ASSERT_EQ(manager->Mount({0, MEDIA_DRAM}, {0, SIZE_32K}, blobMap), MMC_OK);
+    const std::string key = "invalid_write_lease";
+    MmcMemMetaDesc descriptor;
+    EXPECT_EQ(
+        manager->Alloc(key, {SIZE_32K, 1, MEDIA_DRAM, {0}, 0}, 1, std::numeric_limits<uint64_t>::max(), descriptor),
+        MMC_INVALID_PARAM);
+    MmcMemObjMetaPtr object;
+    EXPECT_EQ(MetaContainer(manager)->Get(key, object), MMC_UNMATCHED_KEY);
+    EXPECT_EQ(GlobalAllocator(manager)->GetFreeSpace(MEDIA_DRAM), SIZE_32K);
+    ASSERT_EQ(manager->Alloc(key, {SIZE_32K, 1, MEDIA_DRAM, {0}, 0}, 1, 0, descriptor), MMC_OK);
+    ASSERT_EQ(manager->UpdateState(key, {0, MEDIA_DRAM}, MMC_WRITE_OK, 1), MMC_OK);
+    manager->Stop();
 }
 
 // MoveDown is independent of blobs_ iteration order — verify with SSD Mount + Start/Stop
@@ -973,6 +1048,7 @@ TEST_F(TestMmcMetaManager, EvictCallback_MoveDownIndependentOfBlobOrder)
         ASSERT_EQ(metaMng->Alloc(keys[i], allocReq, 1, 0, objMeta), MMC_OK);
         ASSERT_EQ(metaMng->UpdateState(keys[i], dramLoc, MMC_WRITE_OK, 1), MMC_OK);
     }
+    std::this_thread::sleep_for(std::chrono::milliseconds(defaultTtl));
     MmcMemMetaDesc temp;
     metaMng->Get(keys[2U], 1, nullptr, temp);
 
@@ -1022,6 +1098,7 @@ TEST_F(TestMmcMetaManager, EvictCallback_SsdEvictionDelegatesViaRpc)
         ASSERT_EQ(metaMng->Alloc(keys[i], allocReq, 1, 0, objMeta), MMC_OK);
         ASSERT_EQ(metaMng->UpdateState(keys[i], dramLoc, MMC_WRITE_OK, 1), MMC_OK);
     }
+    std::this_thread::sleep_for(std::chrono::milliseconds(defaultTtl));
     // 访问 key2 使其成为 MRU
     MmcMemMetaDesc temp;
     metaMng->Get(keys[2U], 1, nullptr, temp);
