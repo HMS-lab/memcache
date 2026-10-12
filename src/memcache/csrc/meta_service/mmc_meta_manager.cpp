@@ -1189,12 +1189,12 @@ void MmcMetaManager::DefragEvict()
         MMC_LOG_WARN("DefragEvict skip: previous defrag task still running");
         return;
     }
-    MMC_LOG_INFO("DefragEvict begin: regular/force eviction in progress");
+    MMC_LOG_DEBUG("DefragEvict begin: regular/force eviction in progress");
     // 投递异步任务前同步检测：仅当存在碎片化（多段空闲且不可用空闲占比超阈值）的
     // (media, loc) 时才执行异步整理，无碎片时不空转线程池
     std::vector<std::pair<MediaType, std::vector<MmcLocation>>> defragLocs = DetectDefragLocs();
     if (defragLocs.empty()) {
-        MMC_LOG_INFO("DefragEvict skip: no fragmented address space");
+        MMC_LOG_DEBUG("DefragEvict skip: no fragmented address space");
         defragCheck_.store(false);
         return;
     }
@@ -2084,11 +2084,6 @@ Result MmcMetaManager::PrefetchKeys(const std::vector<std::string> &keys, MediaT
     if (ret != MMC_OK) {
         MMC_LOG_WARN("Batch prefetch rewarm failed, key count=" << keys.size() << ", ret=" << ret);
         return ret;
-    }
-    for (size_t index = 0; index < keys.size(); ++index) {
-        if (objMetas[index].numBlobs_ == 0 || objMetas[index].blobs_.empty()) {
-            MMC_LOG_WARN("Prefetch did not return a blob, key=" << keys[index]);
-        }
     }
     return MMC_OK;
 }
