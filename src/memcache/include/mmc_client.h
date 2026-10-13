@@ -130,7 +130,7 @@ int32_t mmcc_batch_remove_lease(const char **keys, uint32_t keys_count);
  * @param sizes            [in] Size of each GVA blob
  * @param options          [in] Options for allocation
  * @param lease_ttl_ms     [in] Lease time to add, in milliseconds. If 0, use meta service configured lease TTL
- * @param gvas             [out] Allocated GVA of each key, 0 if allocation failed for that key
+ * @param gvas             [out] GVA of each key; 0 for allocation failures, UINT64_MAX for readable SSD-only hits
  * @return 0 if successfully
  */
 int32_t mmcc_batch_malloc(const char **keys, uint32_t keys_count, const size_t *sizes, mmc_put_options options,

@@ -512,7 +512,9 @@ virtual std::vector<uintptr_t> BatchMalloc(const std::vector<std::string> &keys,
 **返回值**
 
 - `std::vector<uintptr_t>`：每个元素为一个 key 对应的起始 GVA。
+- 可读 SSD 命中且没有可用内存 GVA 时，对应元素为 `UINT64_MAX`，调用方跳过该 key 的写入。
 - 申请失败或参数非法时，对应元素为 `0`。
+- 调用方必须过滤这两个值，仅对有效 GVA 执行拷贝和写完成通知。
 
 #### BatchCopy
 

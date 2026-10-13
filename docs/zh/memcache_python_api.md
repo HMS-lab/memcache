@@ -937,7 +937,9 @@ gvas = store.batch_alloc(keys, sizes, media=1, leaseTtlMs=0)
 **返回值**
 
 - `List[int]`：每个元素为一个 key 对应的起始 GVA。
+- 可读 SSD 命中且没有可用内存 GVA 时，对应元素为 `2**64 - 1`（`UINT64_MAX`），调用方跳过该 key 的写入。
 - 申请失败或参数非法时，对应元素为 `0`。
+- 调用方必须过滤这两个值，再转换为 NumPy 整数数组或执行拷贝和写完成通知。
 
 #### batch_copy
 

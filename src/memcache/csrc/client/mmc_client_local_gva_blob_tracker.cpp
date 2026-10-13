@@ -34,7 +34,7 @@ void LocalGvaBlobTracker::SetName(const std::string &name)
 Result LocalGvaBlobTracker::RegisterFromBatchAlloc(const std::string &key, const MmcMemBlobDesc &blob,
                                                    uint64_t operateId)
 {
-    if (blob.gva_ == UINT64_MAX || blob.size_ == 0) {
+    if (blob.gva_ == 0 || blob.gva_ == UINT64_MAX || blob.size_ == 0 || blob.mediaType_ == MEDIA_SSD) {
         return MMC_INVALID_PARAM;
     }
 

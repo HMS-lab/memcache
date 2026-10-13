@@ -56,6 +56,25 @@ TEST_F(TestLocalGvaBlobTracker, RegisterFromBatchAlloc_SetsLastPromoteMs)
     EXPECT_GE(info.lastPromoteMs, beforeMs);
 }
 
+TEST_F(TestLocalGvaBlobTracker, RegisterFromBatchAlloc_RejectsInvalidAndSsdBlobs)
+{
+    const std::vector<MmcMemBlobDesc> invalidBlobs{
+        {testRank, 0, testSize, MEDIA_DRAM, ALLOCATED, testLeaseTtlMs},
+        {testRank, UINT64_MAX, testSize, MEDIA_DRAM, ALLOCATED, testLeaseTtlMs},
+        {testRank, testGva, 0, MEDIA_DRAM, ALLOCATED, testLeaseTtlMs},
+        {testRank, testGva, testSize, MEDIA_SSD, READABLE, testLeaseTtlMs},
+    };
+    for (const auto &blob : invalidBlobs) {
+        EXPECT_EQ(tracker.RegisterFromBatchAlloc(key, blob, testOperateId), MMC_INVALID_PARAM);
+        LocalGvaBlobInfo info;
+        EXPECT_EQ(tracker.FindBlobByKey(key, info), MMC_UNMATCHED_KEY);
+    }
+
+    RegisterBlob(key);
+    LocalGvaBlobInfo info;
+    EXPECT_EQ(tracker.FindWritable(testGva, testSize, info), MMC_OK);
+}
+
 TEST_F(TestLocalGvaBlobTracker, MarkPromoted_UpdatesLastPromoteMs)
 {
     RegisterBlob(key);

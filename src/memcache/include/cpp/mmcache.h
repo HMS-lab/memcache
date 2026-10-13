@@ -372,7 +372,7 @@ public:
      * @param sizes Vector of blob sizes, must have the same length as keys
      * @param media Media type of allocated blobs, such as MEDIA_HBM or MEDIA_DRAM
      * @param leaseTtlMs Lease time to add, in milliseconds. If 0, use meta service configured lease TTL
-     * @return Vector of allocated GVA start addresses, 0 for keys whose allocation failed
+     * @return GVA start addresses; 0 for allocation failures, UINT64_MAX for readable SSD-only hits
      */
     virtual std::vector<uintptr_t> BatchMalloc(const std::vector<std::string> &keys, const std::vector<size_t> &sizes,
                                                uint16_t media, uint64_t leaseTtlMs = 0) = 0;

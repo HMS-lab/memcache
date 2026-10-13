@@ -1333,6 +1333,7 @@ Result MmcClientDefault::UnRegisterBuffer(uint64_t addr, uint64_t size)
 Result MmcClientDefault::BatchMalloc(const std::vector<std::string> &keys, const std::vector<size_t> &sizes,
                                      const mmc_put_options &options, uint64_t leaseTtlMs, std::vector<uintptr_t> &gvas)
 {
+    gvas.assign(keys.size(), 0);
     MMC_VALIDATE_RETURN(bmProxy_ != nullptr, "BmProxy is null", MMC_CLIENT_NOT_INIT);
     MMC_VALIDATE_RETURN(metaNetClient_ != nullptr, "MetaNetClient is null", MMC_CLIENT_NOT_INIT);
 
@@ -1363,31 +1364,50 @@ Result MmcClientDefault::BatchMalloc(const std::vector<std::string> &keys, const
         return MMC_ERROR;
     }
 
-    gvas.resize(keys.size(), 0);
     for (size_t i = 0; i < keys.size(); ++i) {
         const std::string &key = keys[i];
         const auto &blobs = allocResponse.blobs_[i];
         const auto numBlobs = allocResponse.numBlobs_[i];
         if (allocResponse.results_[i] != MMC_OK) {
             // alloc has error, reserve alloc error code
-            if (allocResponse.results_[i] != MMC_DUPLICATED_OBJECT) {
-                MMC_LOG_ERROR("Alloc blob failed for key " << key << ", error code=" << allocResponse.results_[i]);
-                continue;
-            }
-        } else if (numBlobs == 0 || blobs.size() != numBlobs) {
+            MMC_LOG_ERROR("Alloc blob failed for key " << key << ", error code=" << allocResponse.results_[i] << ".");
+            continue;
+        }
+        if (numBlobs == 0 || blobs.size() != numBlobs) {
             MMC_LOG_ERROR("Invalid number of blobs" << numBlobs << " , " << blobs.size() << " for key " << key);
             continue;
         }
 
-        gvas[i] = blobs[0].gva_;
-        Result trackRet = gvaBlobTracker_.RegisterFromBatchAlloc(key, blobs[0], operateId);
-        MMC_LOG_DEBUG("BatchMalloc key:" << keys[i] << ", leaseTime:" << blobs[0].leaseTimeoutTtlMs_);
+        Result trackRet = RegisterBatchAllocBlobs(key, blobs, operateId, gvas[i]);
         if (trackRet != MMC_OK) {
-            MMC_LOG_ERROR("Register batch alloc gva info failed for key " << key << ", ret:" << trackRet);
+            MMC_LOG_ERROR("Register batch alloc gva info failed for key " << key << ", ret:" << trackRet << ".");
         }
-        TP_TRACE_RECORD(TP_MMC_TRACKER_ADD_LEASE_FROM_WRITE, 1000ULL, trackRet);
     }
     return MMC_OK;
+}
+
+Result MmcClientDefault::RegisterBatchAllocBlobs(const std::string &key, const std::vector<MmcMemBlobDesc> &blobs,
+                                                 uint64_t operateId, uintptr_t &gva)
+{
+    auto blobIt = std::find_if(blobs.begin(), blobs.end(), [](const MmcMemBlobDesc &blob) {
+        return blob.mediaType_ == MEDIA_DRAM || blob.mediaType_ == MEDIA_HBM;
+    });
+    if (blobIt == blobs.end()) {
+        const bool hasReadableSsd = std::any_of(blobs.begin(), blobs.end(), [](const MmcMemBlobDesc &blob) {
+            return blob.mediaType_ == MEDIA_SSD && blob.state_ == READABLE && blob.size_ != 0;
+        });
+        if (!hasReadableSsd) {
+            return MMC_UNMATCHED_STATE;
+        }
+        gva = static_cast<uintptr_t>(UINT64_MAX);
+        return MMC_OK;
+    }
+    Result trackRet = gvaBlobTracker_.RegisterFromBatchAlloc(key, *blobIt, operateId);
+    TP_TRACE_RECORD(TP_MMC_TRACKER_ADD_LEASE_FROM_WRITE, 1000ULL, trackRet);
+    if (trackRet == MMC_OK) {
+        gva = static_cast<uintptr_t>(blobIt->gva_);
+    }
+    return trackRet;
 }
 
 Result MmcClientDefault::BatchCopyWritePath(std::vector<void *> &gvas, std::vector<void *> &buffers,

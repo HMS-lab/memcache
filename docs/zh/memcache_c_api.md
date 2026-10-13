@@ -401,7 +401,8 @@ int32_t mmcc_batch_malloc(const char **keys, uint32_t keys_count, const size_t *
 - `sizes`：每个 key 对应的 GVA blob 大小。
 - `options`：申请 GVA blob 的选项。
 - `lease_ttl_ms`：要增加的租约时间，单位为毫秒；为 `0` 时使用 MetaService 配置的默认租期。
-- `gvas`：输出的 GVA 起始地址数组；对应 key 申请失败时该元素为 `0`。
+- `gvas`：输出的 GVA 起始地址数组；申请失败时为 `0`，可读 SSD 命中且没有可用内存 GVA 时为 `UINT64_MAX`。
+  `0` 和 `UINT64_MAX` 都不能用于拷贝或写完成通知；仅对有效 GVA 执行后续写入。
 
 **返回值**
 

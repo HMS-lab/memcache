@@ -1080,6 +1080,10 @@ std::vector<uintptr_t> MmcacheStore::BatchMalloc(const std::vector<std::string> 
     TP_TRACE_BEGIN(TP_MMC_PY_BATCH_ALLOC);
     Result ret = mmcc_batch_malloc(keyArray.data(), keys.size(), sizes.data(), options, leaseTtlMs, gvaValues.data());
     TP_TRACE_END(TP_MMC_PY_BATCH_ALLOC, ret);
+    if (ret != MMC_OK) {
+        MMC_LOG_ERROR("Batch malloc failed, ret:" << ret << ".");
+        return gvas;
+    }
     for (size_t i = 0; i < gvaValues.size(); ++i) {
         gvas[i] = static_cast<uintptr_t>(gvaValues[i]);
     }

@@ -1483,7 +1483,7 @@ Result MmcMetaManager::Alloc(const std::string &key, const AllocOptions &allocOp
     if (ret == MMC_OK || (ret == MMC_DUPLICATED_OBJECT && (allocOpt.flags_ & ALLOC_FLAGS_GVA_MALLOC_MASK))) {
         std::unique_lock<std::mutex> guard(tempMetaObj->Mutex());
         for (auto &blob : tempMetaObj->GetBlobs()) {
-            if (blob != nullptr && ret == MMC_DUPLICATED_OBJECT) {
+            if (blob != nullptr && ret == MMC_DUPLICATED_OBJECT && blob->Type() != MEDIA_SSD) {
                 auto leaseRet = blob->UpdateState(key, opRankId, opSeq, MMC_REPEAT_ALLOC);
                 if (leaseRet != MMC_OK) {
                     MMC_LOG_WARN("Alloc: grant write lease failed, key=" << key << ", ret=" << leaseRet);
@@ -2535,9 +2535,9 @@ EvictResult MmcMetaManager::EvictCallBackFunction(const std::string &key, const 
     std::unique_lock<std::mutex> guard(objMeta->Mutex());
 
     // Lease state and the eviction decision share the object lock with Alloc/UpdateState.
-    // Expired leases do not protect abandoned ALLOCATED blobs from reclamation.
+    // Released or expired leases do not protect blobs from reclamation.
     for (const auto &blob : objMeta->GetBlobs()) {
-        if (blob != nullptr && blob->Type() == srcMediaType && blob->LeaseTimeoutTtlMs() > 0) {
+        if (blob != nullptr && blob->Type() == srcMediaType && blob->UseCount() > 0 && blob->LeaseTimeoutTtlMs() > 0) {
             MMC_LOG_DEBUG("Evict skip key=" << key << " from " << srcMediaType << ", active lease");
             TP_TRACE_END(TP_MMC_META_EVICT, MMC_OK);
             return EvictResult::FAIL;

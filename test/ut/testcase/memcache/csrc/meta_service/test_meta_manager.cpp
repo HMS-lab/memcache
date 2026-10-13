@@ -994,10 +994,6 @@ TEST_F(TestMmcMetaManager, EvictCallback_PreservesActiveWriteLease)
         ASSERT_EQ(manager->UpdateState(key, dramLoc, MMC_WRITE_OK, operateId), MMC_OK);
         EXPECT_EQ(object->GetBlobs()[0]->UseCount(), 0U);
         EXPECT_GT(object->GetBlobs()[0]->LeaseTimeoutTtlMs(), 0U);
-        EXPECT_EQ(container->EvictDefragTargets({key}, evict, MEDIA_DRAM), 0U);
-        ASSERT_EQ(container->Get(key, object), MMC_OK);
-        std::this_thread::sleep_for(std::chrono::milliseconds(leaseTtlMs));
-        EXPECT_EQ(object->GetBlobs()[0]->LeaseTimeoutTtlMs(), 0U);
         EXPECT_EQ(container->EvictDefragTargets({key}, evict, MEDIA_DRAM), 1U);
         EXPECT_EQ(container->Get(key, object), MMC_UNMATCHED_KEY);
         manager->Stop();
@@ -1323,6 +1319,43 @@ TEST_F(TestMmcMetaManager, GvaAlloc_PendingWriteCannotRead)
     ASSERT_EQ(queryInfo.blobs_[0].state_, ALLOCATED);
 
     metaMng->Remove("gva_key_1");
+    metaMng->Stop();
+}
+
+TEST_F(TestMmcMetaManager, GvaAlloc_DuplicateSsdDoesNotGrantWriteLease)
+{
+    constexpr uint64_t TEST_LEASE_TTL_MS = 2000;
+    constexpr uint64_t TEST_DRAM_BLOB_COUNT = 8;
+    constexpr uint64_t TEST_DRAM_CAPACITY = SIZE_32K * TEST_DRAM_BLOB_COUNT;
+    constexpr uint64_t TEST_DRAM_GVA = SIZE_32K;
+    constexpr uint64_t TEST_OPERATE_ID = 1;
+    constexpr uint32_t TEST_REPLICA_COUNT = 1;
+    constexpr uint16_t EVICT_HIGH_PERCENT = 70;
+    constexpr uint16_t EVICT_LOW_PERCENT = 60;
+    const std::string key = "duplicate_ssd_key";
+    auto metaMng = MmcMakeRef<MmcMetaManager>(TEST_LEASE_TTL_MS, EVICT_HIGH_PERCENT, EVICT_LOW_PERCENT);
+    ASSERT_NE(metaMng, nullptr);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+    const MmcLocation dramLoc{0, MEDIA_DRAM};
+    const MmcLocalMemlInitInfo dramInfo{TEST_DRAM_GVA, TEST_DRAM_CAPACITY};
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    ASSERT_EQ(metaMng->Mount(dramLoc, dramInfo, blobMap), MMC_OK);
+
+    auto object = MmcMakeRef<MmcMemObjMeta>();
+    auto ssdBlob = MmcMakeRef<MmcMemBlob>(0, 0, SIZE_32K, MEDIA_SSD, READABLE, SIZE_32K);
+    ASSERT_NE(object, nullptr);
+    ASSERT_NE(ssdBlob, nullptr);
+    ASSERT_EQ(object->AddBlob(ssdBlob), MMC_OK);
+    ASSERT_EQ(MetaContainer(metaMng)->Insert(key, object), MMC_OK);
+    const AllocOptions options{SIZE_32K, TEST_REPLICA_COUNT, MEDIA_DRAM, {0}, ALLOC_FLAGS_GVA_MALLOC_MASK};
+    MmcMemMetaDesc result;
+    ASSERT_EQ(metaMng->Alloc(key, options, TEST_OPERATE_ID, TEST_LEASE_TTL_MS, result), MMC_OK);
+    ASSERT_EQ(result.blobs_.size(), static_cast<size_t>(TEST_REPLICA_COUNT));
+    EXPECT_EQ(result.blobs_.front().mediaType_, static_cast<uint16_t>(MEDIA_SSD));
+    EXPECT_EQ(result.blobs_.front().gva_, uint64_t{0});
+    EXPECT_EQ(result.blobs_.front().state_, READABLE);
+    EXPECT_EQ(ssdBlob->UseCount(), uint32_t{0});
+    EXPECT_EQ(ssdBlob->LeaseTimeoutTtlMs(), uint64_t{0});
     metaMng->Stop();
 }
 

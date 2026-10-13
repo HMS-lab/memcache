@@ -195,6 +195,8 @@ private:
                              MediaType &mediaType, BatchCopyDesc &copyDesc, bool blobIsSrc);
     Result PutData2Blobs(const std::vector<std::string> &keys, const std::vector<MmcBufferArray> &bufArrs,
                          const BatchAllocResponse &allocResponse, std::vector<int> &batchResult);
+    Result RegisterBatchAllocBlobs(const std::string &key, const std::vector<MmcMemBlobDesc> &blobs, uint64_t operateId,
+                                   uintptr_t &gva);
     void WaitFeatures(std::vector<std::tuple<uint32_t, uint32_t, std::future<int32_t>>> &futures,
                       std::vector<int> &batchResult);
     Result SyncUpdateState(const BatchUpdateRequest &updateRequest, const std::string &opName,
