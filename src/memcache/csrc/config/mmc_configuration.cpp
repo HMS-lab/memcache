@@ -772,7 +772,7 @@ std::string Configuration::ResolveUrlField(const std::string &url, const std::st
     UrlParser parser;
     const std::string resolvedUrl = parser.ResolveDomainToIp(url);
     if (!resolvedUrl.empty() && resolvedUrl != url) {
-        MMC_LOG_INFO("Resolved domain for " << name << ": " << url << " -> " << resolvedUrl);
+        MMC_LOG_DEBUG("Resolved domain for " << name << ": " << url << " -> " << resolvedUrl);
         return resolvedUrl;
     }
     return url;
