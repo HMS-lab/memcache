@@ -1236,8 +1236,8 @@ std::vector<std::pair<MediaType, std::vector<MmcLocation>>> MmcMetaManager::Dete
     // （不可用空闲占比超阈值且至少两段空闲才值得整理），结果按介质分组，无碎片时为空
     const uint64_t maxAlignedSize = globalAllocator_->GetMaxAlignedSize();
     const uint64_t minUsableBlockSize = maxAlignedSize != 0 ? maxAlignedSize : DEFRAG_EVICT_MIN_USABLE_BLOCK_SIZE;
-    MMC_LOG_INFO("DetectDefragLocs: maxAlignedSize: " << maxAlignedSize
-                                                      << ", minUsableBlockSize: " << minUsableBlockSize);
+    MMC_LOG_DEBUG("DetectDefragLocs: maxAlignedSize: " << maxAlignedSize
+                                                       << ", minUsableBlockSize: " << minUsableBlockSize);
     std::vector<std::pair<MediaType, std::vector<MmcLocation>>> defragLocs;
     for (MediaType media = MEDIA_HBM; media != MEDIA_NONE; media = MoveDown(media)) {
         if (media == MEDIA_SSD) {
@@ -1251,9 +1251,9 @@ std::vector<std::pair<MediaType, std::vector<MmcLocation>>> MmcMetaManager::Dete
                                minUsableBlockSize)) {
                 fragmentedLocs.push_back(loc);
             }
-            MMC_LOG_INFO("DetectDefragLocs: fragmented loc, media: " << media << ", rank: " << loc.rank_
-                                                                     << ", freeSegments: " << freeSegments.size()
-                                                                     << ", fragmentedRate: " << fragmentedRate << "%");
+            MMC_LOG_DEBUG("DetectDefragLocs: fragmented loc, media: " << media << ", rank: " << loc.rank_
+                                                                      << ", freeSegments: " << freeSegments.size()
+                                                                      << ", fragmentedRate: " << fragmentedRate << "%");
         }
         if (!fragmentedLocs.empty()) {
             defragLocs.emplace_back(media, std::move(fragmentedLocs));
