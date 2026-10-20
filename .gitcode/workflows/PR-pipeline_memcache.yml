@@ -18,6 +18,7 @@ on:
       - master
       - develop
       - release/1.2
+      - release/1.3
 
   pr_comment:
     types: [ created ]
@@ -75,11 +76,12 @@ stages :
               ln -sf $(which pip3.11) /usr/bin/pip
               which pip3.11
               python --version
-          - name: setup-go
-            uses: setup-go
-            with:
-              version: 1.26
-              cache: true
+
+          - name: install gitleaks
+            run: |
+              cd ${ATOMGIT_WORKSPACE}
+              wget --no-host-directories -c --no-check-certificate https://pytorch-package.obs.cn-north-4.myhuaweicloud.com/pta-codecheck/gitleaks
+              chmod +x gitleaks
 
           - name: Run pre-commit
             uses: openlibing/pre-commit-action@v1.0.0
