@@ -507,7 +507,7 @@ curl "http://127.0.0.1:8000/metrics/summary"
 `text/plain; charset=utf-8`：
 
 ```text
-keys=2 evict=0 rewarm=0 rewarm_fail=0 rewarm_bytes_total=0 rewarm_bytes_current=0 flush_blobs=0 flush_bytes=0 get_hit_dram=0 get_hit_ssd=0 query_hit_keys=0 hbm_used=368640/5368709120 dram_used=0/5368709120 ssd_used=0/0 alloc_req=68 alloc_success=68 alloc_fail=0 batch_alloc_req=0 batch_alloc_success=0 batch_alloc_fail=0 get_req=68 get_success=68 get_fail=0 get_not_found=0 batch_get_req=0 batch_get_success=0 batch_get_fail=0 batch_get_not_found=0 remove_req=0 remove_success=0 remove_fail=0 remove_not_found=0 batch_remove_req=0 batch_remove_success=0 batch_remove_fail=0 batch_remove_not_found=0 remove_all_req=0 remove_all_success=0 remove_all_fail=0 update_state_req=0 update_state_success=0 update_state_fail=0 update_state_not_found=0 batch_update_state_req=0 batch_update_state_success=0 batch_update_state_fail=0 batch_update_state_not_found=0 query_req=12 query_success=11 query_fail=0 query_not_found=1 batch_query_req=3 batch_query_success=3 batch_query_fail=0 batch_query_not_found=1 get_all_keys_req=4 get_all_keys_success=4 get_all_keys_fail=0 exist_key_req=0 exist_key_success=0 exist_key_fail=0 exist_key_not_found=0 batch_exist_key_req=0 batch_exist_key_success=0 batch_exist_key_fail=0 batch_exist_key_not_found=0 mount_req=0 mount_success=0 mount_fail=0 unmount_req=0 unmount_success=0 unmount_fail=0
+keys=2 evict=0 rewarm=0 rewarm_fail=0 rewarm_bytes_total=0 rewarm_bytes_current=0 flush_blobs=0 flush_bytes=0 get_hit_dram=0 get_hit_ssd=0 query_hit_keys=0 hbm_used=360KiB/5.0GiB (0.01%) dram_used=0B/5.0GiB (0.00%) ssd_used=0B/0B alloc_req=68 alloc_success=68 alloc_fail=0 batch_alloc_req=0 batch_alloc_success=0 batch_alloc_fail=0 get_req=68 get_success=68 get_fail=0 get_not_found=0 batch_get_req=0 batch_get_success=0 batch_get_fail=0 batch_get_not_found=0 remove_req=0 remove_success=0 remove_fail=0 remove_not_found=0 batch_remove_req=0 batch_remove_success=0 batch_remove_fail=0 batch_remove_not_found=0 remove_all_req=0 remove_all_success=0 remove_all_fail=0 update_state_req=0 update_state_success=0 update_state_fail=0 update_state_not_found=0 batch_update_state_req=0 batch_update_state_success=0 batch_update_state_fail=0 batch_update_state_not_found=0 query_req=12 query_success=11 query_fail=0 query_not_found=1 batch_query_req=3 batch_query_success=3 batch_query_fail=0 batch_query_not_found=1 get_all_keys_req=4 get_all_keys_success=4 get_all_keys_fail=0 exist_key_req=0 exist_key_success=0 exist_key_fail=0 exist_key_not_found=0 batch_exist_key_req=0 batch_exist_key_success=0 batch_exist_key_fail=0 batch_exist_key_not_found=0 mount_req=0 mount_success=0 mount_fail=0 unmount_req=0 unmount_success=0 unmount_fail=0
 ```
 
 **解释**
@@ -518,10 +518,10 @@ keys=2 evict=0 rewarm=0 rewarm_fail=0 rewarm_bytes_total=0 rewarm_bytes_current=
 | 格式 | 以空格分隔的 `key=value` 串，字段顺序固定 | 统计摘要接口契约 |
 | 成功示例字段 | 成功示例应包含当前约定的全部字段 | 统计摘要接口契约 |
 | 字段顺序固定 | 依次为 `keys`、`evict`、`rewarm`、`rewarm_fail`、`rewarm_bytes_total`、`rewarm_bytes_current`、`flush_blobs`、`flush_bytes`、`get_hit_dram`、`get_hit_ssd`、`query_hit_keys`、`hbm_used`、`dram_used`、`ssd_used`、`alloc_req`、`alloc_success`、`alloc_fail`、`batch_alloc_req`、`batch_alloc_success`、`batch_alloc_fail`、`get_req`、`get_success`、`get_fail`、`get_not_found`、`batch_get_req`、`batch_get_success`、`batch_get_fail`、`batch_get_not_found`、`remove_req`、`remove_success`、`remove_fail`、`remove_not_found`、`batch_remove_req`、`batch_remove_success`、`batch_remove_fail`、`batch_remove_not_found`、`remove_all_req`、`remove_all_success`、`remove_all_fail`、`update_state_req`、`update_state_success`、`update_state_fail`、`update_state_not_found`、`batch_update_state_req`、`batch_update_state_success`、`batch_update_state_fail`、`batch_update_state_not_found`、`query_req`、`query_success`、`query_fail`、`query_not_found`、`batch_query_req`、`batch_query_success`、`batch_query_fail`、`batch_query_not_found`、`get_all_keys_req`、`get_all_keys_success`、`get_all_keys_fail`、`exist_key_req`、`exist_key_success`、`exist_key_fail`、`exist_key_not_found`、`batch_exist_key_req`、`batch_exist_key_success`、`batch_exist_key_fail`、`batch_exist_key_not_found`、`mount_req`、`mount_success`、`mount_fail`、`unmount_req`、`unmount_success`、`unmount_fail` | 统计摘要接口契约 |
-| 容量字段 | `hbm_used` / `dram_used` / `ssd_used` 格式为 `used/total`；未配置 SSD 时 `ssd_used` 为 `0/0` | 统计摘要接口契约 |
+| 容量字段 | `hbm_used` / `dram_used` / `ssd_used` 格式为 `used/total (xx.xx%)`：`used`/`total` 为人类可读容量（`B`/`KiB`/`MiB`/`GiB`/`TiB`/`PiB`/`EiB`，1024 进制，数值 <10 保留 1 位小数、否则取整），`(xx.xx%)` 为使用率（2 位小数）；`total` 为 0（未配置 SSD）时只输出 `0B/0B`、不带百分比；需要精确字节请使用 `/metrics` 的 `memcache_total_capacity_bytes` / `memcache_allocated_bytes` | 统计摘要接口契约 |
 | per-rank 字段 | 开启 `MmcMetaMetricManager::IsPerRankEnabled()` 时，在上述固定字段后以 `<base>_by_rank_<rank>=<val>` 形式追加 per-rank 字段（每个 rank 一项），覆盖驱逐/回温/flush/命中：`evict_by_rank`、`get_hit_dram_by_rank`、`get_hit_ssd_by_rank`、`rewarm_by_rank`、`rewarm_fail_by_rank`、`rewarm_bytes_by_rank`、`rewarm_bytes_current_by_rank`、`flush_blobs_by_rank`、`flush_bytes_by_rank`| per-rank 统计契约 |
 | 结果口径 | `*_success` 表示 `MMC_OK`；`*_fail` 表示真实错误（包括 `MMC_DUPLICATED_OBJECT`）；`*_not_found` 表示 `MMC_UNMATCHED_KEY`，不计入 fail；Batch 字段为接口调用级统计，Batch 子项同时累计到对应非 Batch 字段；Batch 调用级统计中真实错误优先，只有无真实错误且存在子项 `MMC_UNMATCHED_KEY` 时才增加 Batch `*_not_found` | 统计摘要接口契约 |
-| 占位值策略 | 当前无法提供真实值的字段仍保留在成功体中，可使用 `0`、`0/0` 或空值占位 | 降级规则 |
+| 占位值策略 | 当前无法提供真实值的字段仍保留在成功体中，可使用 `0`、`0B/0B` 或空值占位 | 降级规则 |
 
 **字段说明**
 
@@ -540,9 +540,9 @@ keys=2 evict=0 rewarm=0 rewarm_fail=0 rewarm_bytes_total=0 rewarm_bytes_current=
 | `get_hit_dram` | uint | `MmcMetaMetricSnapshot::getHitDramCount` | Get 直接命中可读块（HBM/DRAM）返回的 key 数，不触发回温 |
 | `get_hit_ssd` | uint | `MmcMetaMetricSnapshot::getHitSsdCount` | Get 命中 SSD 且回温成功后由回温目标块返回的 key 数；回温失败不计入（计入 `rewarm_fail`） |
 | `query_hit_keys` | uint | `MmcMetaMetricSnapshot::queryHitKeysCount` | Query/BatchQuery 成功返回有效查询结果的 key 数 |
-| `hbm_used` | `used/total` (bytes) | `RestUsageSnapshot`(hbm) | HBM 已用/总容量 |
-| `dram_used` | `used/total` (bytes) | `RestUsageSnapshot`(dram) | DRAM 已用/总容量 |
-| `ssd_used` | `used/total` (bytes) | `RestUsageSnapshot`(ssd) | SSD 已用/总容量；未配置 SSD 时为 `0/0` |
+| `hbm_used` | `used/total (xx.xx%)`（人类可读，如 `360KiB/5.0GiB (0.01%)`） | `RestUsageSnapshot`(hbm) | HBM 已用/总容量及使用率 |
+| `dram_used` | `used/total (xx.xx%)`（人类可读，如 `26GiB/4.1TiB (0.62%)`） | `RestUsageSnapshot`(dram) | DRAM 已用/总容量及使用率 |
+| `ssd_used` | `used/total (xx.xx%)`（人类可读，如 `0B/0B`） | `RestUsageSnapshot`(ssd) | SSD 已用/总容量及使用率；未配置 SSD 时为 `0B/0B`（无百分比） |
 | `<op>_req` | uint | `MmcMetaMetricSnapshot::<op>RequestCount` | `<op>` 接口调用总次数 |
 | `<op>_success` | uint | `MmcMetaMetricSnapshot::<op>SuccessCount` | `<op>` 成功次数（`MMC_OK`） |
 | `<op>_fail` | uint | `MmcMetaMetricSnapshot::<op>FailureCount` | `<op>` 失败次数（真实错误，含 `MMC_DUPLICATED_OBJECT`） |

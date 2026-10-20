@@ -15,7 +15,11 @@
 
 #include <algorithm>
 #include <climits>
+#include <cstddef>
+#include <cstdint>
 #include <dlfcn.h>
+#include <iomanip>
+#include <sstream>
 #include <string>
 #include <sys/stat.h>
 #include "mmc_types.h"
@@ -165,6 +169,75 @@ inline std::string SafeGetEnv(const char *name) noexcept
         return "";
     }
     return value;
+}
+
+/**
+ * @brief 把字节数格式化为人类可读容量，风格接近 `free -h`。
+ *
+ * 规则：
+ *   - 0~1023 输出 "<n>B"；
+ *   - >= 1KiB 按 1024 进制选择 KiB/MiB/GiB/TiB/PiB/EiB；
+ *   - 数值小于 10 时保留 1 位小数，否则取整（与 free -h 的有效位风格一致）；
+ *   - 四舍五入会到达 1024 时先进位到下一单位，避免出现 "1024.0KiB"。
+ * 示例：28179398656 -> "26GiB"，4509715660800 -> "4.1TiB"，0 -> "0B"。
+ */
+inline std::string FormatBytesHuman(uint64_t bytes)
+{
+    constexpr uint64_t kBytesPerUnit = 1024;
+    constexpr double kBytesPerUnitValue = static_cast<double>(kBytesPerUnit);
+    constexpr double kOneDecimalUpperBound = 10.0;
+    constexpr double kUnitCarryBoundary = 1023.5; // 取整后会显示成 1024，需进位到下一单位
+    constexpr int kOneDecimalPlaces = 1;
+    constexpr int kNoDecimalPlaces = 0;
+    static const char *const kUnitSuffixes[] = {"B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"};
+    constexpr size_t kMaxUnitIndex = sizeof(kUnitSuffixes) / sizeof(kUnitSuffixes[0]) - 1;
+
+    if (bytes < kBytesPerUnit) {
+        return std::to_string(bytes) + kUnitSuffixes[0];
+    }
+
+    double value = static_cast<double>(bytes);
+    size_t unitIndex = 0;
+    while (unitIndex < kMaxUnitIndex && value >= kBytesPerUnitValue) {
+        value /= kBytesPerUnitValue;
+        ++unitIndex;
+    }
+    if (unitIndex < kMaxUnitIndex && value >= kUnitCarryBoundary) {
+        value /= kBytesPerUnitValue;
+        ++unitIndex;
+    }
+
+    std::ostringstream text;
+    text << std::fixed;
+    if (value < kOneDecimalUpperBound) {
+        text << std::setprecision(kOneDecimalPlaces);
+    } else {
+        text << std::setprecision(kNoDecimalPlaces);
+    }
+    text << value << kUnitSuffixes[unitIndex];
+    return text.str();
+}
+
+/**
+ * @brief 把「已用/总量」格式化为人类可读文本，并追加使用率百分比。
+ *
+ * 示例：used=28179398656，total=4509715660800 -> "26GiB/4.1TiB (0.62%)"。
+ * total 为 0（例如未配置 SSD）时不输出百分比，只返回 "0B/0B"。
+ */
+inline std::string FormatUsageHuman(uint64_t usedBytes, uint64_t totalBytes)
+{
+    constexpr double kPercentScale = 100.0;
+    constexpr int kPercentDecimalPlaces = 2;
+
+    std::string text = FormatBytesHuman(usedBytes) + "/" + FormatBytesHuman(totalBytes);
+    if (totalBytes == 0) {
+        return text;
+    }
+
+    std::ostringstream percent;
+    percent << std::fixed << std::setprecision(kPercentDecimalPlaces)
+            << kPercentScale * static_cast<double>(usedBytes) / static_cast<double>(totalBytes);
+    return text + " (" + percent.str() + "%)";
 }
 
 // bit ops

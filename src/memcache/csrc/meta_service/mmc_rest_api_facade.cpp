@@ -23,6 +23,7 @@
 #include "smem_acc_api.h"
 
 #include "mmc_logger.h"
+#include "mmc_functions.h"
 #include "mmc_meta_metric_manager.h"
 #include "mmc_client_metric_store.h"
 
@@ -64,7 +65,9 @@ void AppendLabeledMetricValue(std::ostringstream &oss, const std::string &metric
 
 std::string BuildUsedText(const ock::mmc::RestUsageSnapshot &usage)
 {
-    return std::to_string(usage.usedBytes) + "/" + std::to_string(usage.totalBytes);
+    // 摘要面向人读：容量按 free -h 风格展示并附使用率（如 26GiB/4.1TiB (0.6%)）；
+    // 需要精确字节请走 /metrics。
+    return ock::mmc::FormatUsageHuman(usage.usedBytes, usage.totalBytes);
 }
 
 void AppendPerRankText(std::ostringstream &oss, const std::string &name,

@@ -36,6 +36,7 @@
 #include "mmc_msg_client_meta.h"
 #include "mmc_ref.h"
 #include "mmc_rest_api_facade.h"
+#include "common/mmc_functions.h"
 
 using namespace testing;
 using namespace std;
@@ -485,8 +486,9 @@ TEST_F(MmcMetaServiceHttpTest, MetricsContract)
         << " rewarm_bytes_current=" << snapshot.rewarmBytesCurrent << " flush_blobs=" << snapshot.asyncFlushBlobAdded
         << " flush_bytes=" << snapshot.asyncFlushBlobBytes << " get_hit_dram=" << snapshot.getHitDramCount
         << " get_hit_ssd=" << snapshot.getHitSsdCount << " query_hit_keys=" << snapshot.queryHitKeysCount
-        << " hbm_used=" << SIZE_32K << "/" << kHttpSegmentCapacityBytes << " dram_used=" << kHttpZeroUsedBytes << "/"
-        << kHttpSegmentCapacityBytes << " ssd_used=" << kHttpZeroUsedBytes << "/" << kHttpZeroUsedBytes
+        << " hbm_used=" << FormatUsageHuman(SIZE_32K, kHttpSegmentCapacityBytes)
+        << " dram_used=" << FormatUsageHuman(kHttpZeroUsedBytes, kHttpSegmentCapacityBytes)
+        << " ssd_used=" << FormatUsageHuman(kHttpZeroUsedBytes, kHttpZeroUsedBytes)
         << " alloc_req=" << snapshot.allocRequestCount << " alloc_success=" << snapshot.allocSuccessCount
         << " alloc_fail=" << snapshot.allocFailureCount << " batch_alloc_req=" << snapshot.batchAllocRequestCount
         << " batch_alloc_success=" << snapshot.batchAllocSuccessCount
