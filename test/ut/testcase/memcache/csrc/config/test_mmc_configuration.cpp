@@ -331,6 +331,69 @@ TEST_F(TestMmcConfiguration, ValidateLocalServiceConfigTest)
     ASSERT_EQ(zeroConfig.localHBMSize, 0);                   // 保持为0
 }
 
+TEST_F(TestMmcConfiguration, StorageEnabledRejectsZeroDram)
+{
+    for (const auto *dramSize : {"0", "0MB", "0GB"}) {
+        SCOPED_TRACE(dramSize);
+        ClientConfig clientConfig;
+        auto config = CreateLocalConfigWithCurrentDefaults();
+        SafeCopy(dramSize, config.dram_size, sizeof(config.dram_size));
+        ASSERT_TRUE(clientConfig.Setup(&config));
+        clientConfig.Set(ConfConstant::OCK_MMC_LOCAL_SERVICE_STORAGE_ENABLED.first, true);
+
+        mmc_local_service_config_t serviceConfig{};
+        clientConfig.GetLocalServiceConfig(serviceConfig);
+        ASSERT_EQ(serviceConfig.localDRAMSize, 0);
+        ASSERT_GT(serviceConfig.localMaxDRAMSize, 0);
+        ASSERT_TRUE(serviceConfig.storageEnabled);
+        EXPECT_EQ(ClientConfig::ValidateLocalServiceConfig(serviceConfig), MMC_INVALID_PARAM);
+
+        SafeCopy("device_rdma", serviceConfig.dataOpType, sizeof(serviceConfig.dataOpType));
+        serviceConfig.localHBMSize = GB_MEM_BYTES;
+        serviceConfig.localMaxHBMSize = GB_MEM_BYTES;
+        EXPECT_EQ(ClientConfig::ValidateLocalServiceConfig(serviceConfig), MMC_INVALID_PARAM);
+    }
+}
+
+TEST_F(TestMmcConfiguration, StorageDisabledAllowsZeroDram)
+{
+    ClientConfig clientConfig;
+    auto config = CreateLocalConfigWithCurrentDefaults();
+    SafeCopy("0", config.dram_size, sizeof(config.dram_size));
+    ASSERT_TRUE(clientConfig.Setup(&config));
+
+    mmc_local_service_config_t serviceConfig{};
+    clientConfig.GetLocalServiceConfig(serviceConfig);
+    ASSERT_FALSE(serviceConfig.storageEnabled);
+    EXPECT_EQ(ClientConfig::ValidateLocalServiceConfig(serviceConfig), MMC_OK);
+    EXPECT_EQ(serviceConfig.localDRAMSize, 0);
+
+    SafeCopy("device_rdma", serviceConfig.dataOpType, sizeof(serviceConfig.dataOpType));
+    serviceConfig.localHBMSize = GB_MEM_BYTES;
+    serviceConfig.localMaxHBMSize = GB_MEM_BYTES;
+    EXPECT_EQ(ClientConfig::ValidateLocalServiceConfig(serviceConfig), MMC_OK);
+    EXPECT_EQ(serviceConfig.localDRAMSize, 0);
+}
+
+TEST_F(TestMmcConfiguration, StorageEnabledAllowsNonzeroDram)
+{
+    for (const auto *protocol : {"host_rdma", "device_rdma"}) {
+        SCOPED_TRACE(protocol);
+        ClientConfig clientConfig;
+        auto config = CreateLocalConfigWithCurrentDefaults();
+        SafeCopy(protocol, config.protocol, sizeof(config.protocol));
+        SafeCopy("1MB", config.dram_size, sizeof(config.dram_size));
+        ASSERT_TRUE(clientConfig.Setup(&config));
+        clientConfig.Set(ConfConstant::OCK_MMC_LOCAL_SERVICE_STORAGE_ENABLED.first, true);
+
+        mmc_local_service_config_t serviceConfig{};
+        clientConfig.GetLocalServiceConfig(serviceConfig);
+        EXPECT_EQ(ClientConfig::ValidateLocalServiceConfig(serviceConfig), MMC_OK);
+        EXPECT_GT(serviceConfig.localDRAMSize, 0);
+        EXPECT_TRUE(serviceConfig.storageEnabled);
+    }
+}
+
 TEST_F(TestMmcConfiguration, SetTest)
 {
     Configuration configuration;

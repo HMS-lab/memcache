@@ -546,6 +546,11 @@ public:
 
     static Result ValidateLocalServiceConfig(mmc_local_service_config_t &config)
     {
+        MMC_VALIDATE_RETURN(!config.storageEnabled || config.localDRAMSize > 0,
+                            "Conflicting configuration: ock.mmc.local_service.dram.size = 0 and "
+                            "ock.mmc.local_service.storage.enabled = true",
+                            MMC_INVALID_PARAM);
+
         constexpr uint64_t GB_SIZE_ALIGNMENT = 1073741824; // 1GB
         uint64_t alignment = DRAM_SIZE_ALIGNMENT;          // 默认 2MB 对齐
         std::string protocol(config.dataOpType);
