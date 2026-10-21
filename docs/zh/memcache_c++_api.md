@@ -1,28 +1,28 @@
 # MemCache API
 
-## C++接口列表
+## C++ interface list
 
-C++语言接口功能齐全，基于面向对象设计，提供统一的 `ObjectStore` 抽象基类，封装了实例管理、缓冲区注册、数据操作、批量处理及分层张量等功能。
+The C++ language interface is fully functional and based on object-oriented design, providing a unified `ObjectStore` abstract base class that encapsulates functions such as instance management, buffer registration, data operations, batch processing, and hierarchical tensors.
 
-### 1. 实例创建与生命周期管理接口
+### 1. Instance creation and life cycle management interface
 
 #### local_config
 
-`local_config` 是 `Setup` 接口使用的本地配置类型，定义位于 `src/memcache/include/mmc.h`。
+`local_config` is the local configuration type used by the `Setup` interface, defined in `src/memcache/include/mmc.h`.
 
-> [!NOTE] 说明
-> 建议先通过 `create_default_local_config()` 获取带默认值的配置对象，再按需覆盖字段。
+> [!NOTE] Description
+> It is recommended to first obtain the configuration object with default values ​​through `create_default_local_config()`, and then overwrite the fields as needed.
 
-**常用字段**
+**Commonly used fields**
 
-- `meta_service_url`：元服务地址。
-- `config_store_url`：配置存储服务地址。
-- `log_level`：日志级别，如 `debug`、`info`、`warn`、`error`。
-- `world_size`：最大 rank 数。
-- `protocol`：数据传输协议，如 `host_rdma`、`host_urma`、`host_tcp`、`device_rdma`、`device_urma`、`device_sdma`。
-- `hcom_url`：HCOM 服务地址。
-- `dram_size` / `hbm_size`：本地服务 DRAM / HBM 容量。
-- `max_dram_size` / `max_hbm_size`：所有本地进程可使用的 DRAM / HBM 总上限。
+- `meta_service_url`: Meta service address.
+- `config_store_url`: Configure storage service address.
+- `log_level`: log level, such as `debug`, `info`, `warn`, `error`.
+- `world_size`: Maximum number of ranks.
+- `protocol`: Data transmission protocol, such as `host_rdma`, `host_urma`, `host_tcp`, `device_rdma`, `device_urma`, `device_sdma`.
+- `hcom_url`: HCOM service address.
+- `dram_size`/`hbm_size`: Local service DRAM/HBM capacity.
+- `max_dram_size`/`max_hbm_size`: Total upper limit of DRAM/HBM that can be used by all local processes.
 
 #### create_default_local_config
 
@@ -30,13 +30,13 @@ C++语言接口功能齐全，基于面向对象设计，提供统一的 `Object
 local_config create_default_local_config();
 ```
 
-**功能**
+**Function**
 
-创建一个带内置默认值的 `local_config` 对象，便于用户只覆盖必要配置项。
+Create a `local_config` object with built-in default values, allowing users to override only necessary configuration items.
 
-**返回值**
+**return value**
 
-返回默认初始化后的 `local_config`。
+Returns the default initialized `local_config`.
 
 #### ObjectStore::CreateObjectStore
 
@@ -44,13 +44,13 @@ local_config create_default_local_config();
 static std::shared_ptr<ObjectStore> CreateObjectStore();
 ```
 
-**功能**
+**Function**
 
-创建一个分布式内存缓存存储实例。
+Create a distributed memory cache storage instance.
 
-**返回值**
+**return value**
 
-返回 std::shared_ptr 管理的智能指针，确保资源自动释放，非空 shared_ptr 表示成功。
+Returns a smart pointer managed by std::shared_ptr to ensure automatic release of resources. A non-empty shared_ptr indicates success.
 
 #### Setup
 
@@ -58,26 +58,26 @@ static std::shared_ptr<ObjectStore> CreateObjectStore();
 virtual int Setup(const local_config &config);
 ```
 
-**功能**
+**Function**
 
-初始化并校验本地配置，供后续 `Init` 使用。
+Initialize and verify the local configuration for subsequent use by `Init`.
 
-**参数**
+**parameter**
 
-`config`：本地配置（`local_config`）。
+`config`: local configuration (`local_config`).
 
-**返回值**
+**return value**
 
-- `0`：成功
-- 其他：失败
+- `0`: Success
+- Others: failed
 
-**推荐调用顺序**
+**Recommended calling order**
 
 ```c++
 auto store = ock::mmc::ObjectStore::CreateObjectStore();
 local_config config = create_default_local_config();
 
-// 可按需覆盖默认配置，或仅设置 config_path 指向配置文件
+// You can override the default configuration as needed, or just set config_path to point to the configuration file
 int ret = store->Setup(config);
 if (ret != 0) {
     return ret;
@@ -95,19 +95,19 @@ if (ret != 0) {
 virtual int Init(const uint32_t deviceId, bool initBm = true) = 0;
 ```
 
-**功能**
+**Function**
 
-初始化当前存储实例，绑定到指定设备。
+Initialize the current storage instance and bind it to the specified device.
 
-**参数**
+**parameter**
 
-- `deviceId`：目标设备ID。
-- `initBm`：是否初始化BM提供内存，默认值为 true。设 false 时将启动纯client模式，不支持数据读写操作。
+- `deviceId`: Target device ID.
+- `initBm`: Whether to initialize BM to provide memory, the default value is true. When set to false, pure client mode will be enabled and data reading and writing operations will not be supported.
 
-**返回值**
+**return value**
 
-- `0`：成功
-- 其他：失败
+- `0`: Success
+- Others: failed
 
 #### TearDown
 
@@ -115,16 +115,16 @@ virtual int Init(const uint32_t deviceId, bool initBm = true) = 0;
 virtual int TearDown() = 0;
 ```
 
-**功能**
+**Function**
 
-释放当前实例占用的所有资源，断开与元服务和本地服务的连接。
+Release all resources occupied by the current instance and disconnect from meta-services and local services.
 
-**返回值**
+**return value**
 
-- `0`：成功
-- 其他：失败
+- `0`: Success
+- Others: failed
 
-### 2. 缓冲区注册接口
+### 2. Buffer registration interface
 
 #### RegisterBuffer
 
@@ -132,19 +132,19 @@ virtual int TearDown() = 0;
 virtual int RegisterBuffer(void *buffer, size_t size) = 0;
 ```
 
-**功能**
+**Function**
 
-将用户分配的内存区域注册到系统中，以启用 RDMA 或零拷贝传输。
+Registers a user-allocated memory area with the system to enable RDMA or zero-copy transfers.
 
-**参数**
+**parameter**
 
-- `buffer`：内存起始地址。
-- `size`：缓冲区字节大小。
+- `buffer`: memory starting address.
+- `size`: Buffer size in bytes.
 
-**返回值**
+**return value**
 
-- `0`：成功
-- 其他：失败
+- `0`: Success
+- Others: failed
 
 #### UnRegisterBuffer
 
@@ -152,21 +152,21 @@ virtual int RegisterBuffer(void *buffer, size_t size) = 0;
 virtual int UnRegisterBuffer(void *buffer, size_t size) = 0;
 ```
 
-**功能**
+**Function**
 
-注销已注册的内存区域。
+Unregister a registered memory area.
 
-**参数**
+**parameter**
 
-- `buffer`：内存起始地址。
-- `size`：缓冲区字节大小。
+- `buffer`: memory starting address.
+- `size`: Buffer size in bytes.
 
-**返回值**
+**return value**
 
-- `0`：成功
-- 其他：失败
+- `0`: Success
+- Others: failed
 
-### 3. 数据操作接口
+### 3. Data operation interface
 
 #### GetInto
 
@@ -174,21 +174,21 @@ virtual int UnRegisterBuffer(void *buffer, size_t size) = 0;
 virtual int GetInto(const std::string &key, void *buffer, size_t size, const int32_t direct = 2) = 0;
 ```
 
-**功能**
+**Function**
 
-将指定键的数据读入预分配的 buffer 中。
+Reads data for the specified key into a preallocated buffer.
 
-**参数**
+**parameter**
 
-- `key`：数据键（长度 < 256字节）。
-- `buffer`：目标内存地址。
-- `size`：缓冲区容量。
-- `direct`：数据流向。
+- `key`: Data key (length < 256 bytes).
+- `buffer`: Target memory address.
+- `size`: buffer capacity.
+- `direct`: Data flow direction.
 
-**返回值**
+**return value**
 
-- `0`：成功
-- 其他：失败
+- `0`: Success
+- Others: failed
 
 #### PutFrom
 
@@ -197,22 +197,22 @@ virtual int PutFrom(const std::string &key, void *buffer, size_t size, const int
                         const ReplicateConfig &replicateConfig = {}) = 0;
 ```
 
-**功能**
+**Function**
 
-将 buffer 中的数据写入缓存并关联到 key。
+Write the data in the buffer to the cache and associate it with the key.
 
-**参数**
+**parameter**
 
-- `key`：数据键（长度 < 256字节）。
-- `buffer`：目标内存地址。
-- `size`：缓冲区容量。
-- `direct`：数据流向。
-- `replicateConfig`：副本策略配置。
+- `key`: Data key (length < 256 bytes).
+- `buffer`: Target memory address.
+- `size`: buffer capacity.
+- `direct`: Data flow direction.
+- `replicateConfig`: Replica policy configuration.
 
-**返回值**
+**return value**
 
-- `0`：成功
-- 其他：失败
+- `0`: Success
+- Others: failed
 
 #### Remove
 
@@ -220,18 +220,18 @@ virtual int PutFrom(const std::string &key, void *buffer, size_t size, const int
 virtual int Remove(const std::string &key) = 0;
 ```
 
-**功能**
+**Function**
 
-删除指定键的数据对象。
+Delete the data object with the specified key.
 
-**参数**
+**parameter**
 
-`key`：数据键（长度 < 256字节）。
+`key`: Data key (length < 256 bytes).
 
-**返回值**
+**return value**
 
-- `0`：成功
-- 其他：失败
+- `0`: Success
+- Others: failed
 
 #### IsExist
 
@@ -239,19 +239,19 @@ virtual int Remove(const std::string &key) = 0;
 virtual int IsExist(const std::string &key) = 0;
 ```
 
-**功能**
+**Function**
 
-检查键是否存在。
+Check if the key exists.
 
-**参数**
+**parameter**
 
-`key`：数据键（长度 < 256字节）。
+`key`: Data key (length < 256 bytes).
 
-**返回值**
+**return value**
 
-- `1`：存在
-- `0`：不存在
-- 其他：失败
+- `1`: exists
+- `0`: does not exist
+- Others: failed
 
 #### GetKeyInfo
 
@@ -259,31 +259,31 @@ virtual int IsExist(const std::string &key) = 0;
 virtual KeyInfo GetKeyInfo(const std::string &key, uint32_t flag = 0) = 0;
 ```
 
-**功能**
+**Function**
 
-获取键的元信息。
+Get the meta information of the key.
 
-**参数**
+**parameter**
 
-- `key`：数据的键，长度小于256个字节。
-- `flag`：查询标志，默认值为 `0`。
+- `key`: The key of the data, the length is less than 256 bytes.
+- `flag`: Query flag, the default value is `0`.
 
-**返回值**
+**return value**
 
-返回 KeyInfo，包含：
+Returns KeyInfo, containing:
 
-- `size_`：数据字节数。
-- `blobNum_`：数据副本数。
-- `loc_`：数据副本所在位置列表。
-- `type_`：数据副本所在介质类型列表。
-- `gva_`：数据副本对应的 GVA 列表。
+- `size_`: Number of data bytes.
+- `blobNum_`: Number of data copies.
+- `loc_`: List of locations of data copies.
+- `type_`: List of media types where the data copies are located.
+- `gva_`: GVA list corresponding to the data copy.
 
-> [!NOTE] 补充说明
+> [!NOTE] Additional notes
 >
-> - `GetKeyInfo` 的实际签名带 `flag` 参数。默认值为 `0`。
-> - `KeyInfo` 除 `size_`、`blobNum_`、`loc_`、`type_` 外，还包含 `gva_`，用于描述每个 blob 对应的 GVA 列表。
+> - The actual signature of `GetKeyInfo` takes the `flag` parameter. The default value is `0`.
+> - In addition to `size_`, `blobNum_`, `loc_`, and `type_`, `KeyInfo` also contains `gva_`, which is used to describe the GVA list corresponding to each blob.
 
-### 4. 批量操作接口
+### 4. Batch operation interface
 
 #### BatchGetInto
 
@@ -292,20 +292,20 @@ virtual std::vector<int> BatchGetInto(const std::vector<std::string> &keys, cons
                                           const std::vector<size_t> &sizes, const int32_t direct = 2) = 0;
 ```
 
-**功能**
+**Function**
 
-批量读取多个键到各自缓冲区。
+Read multiple keys in batches into their respective buffers.
 
-**参数**
+**parameter**
 
-- `keys`：数据键列表（每个键长度 < 256字节）。
-- `buffers`：目标内存地址列表，必须与keys一一对应。
-- `sizes`：缓冲区容量列表，必须与buffers长度一致。
-- `direct`：数据流向。
+- `keys`: List of data keys (each key length < 256 bytes).
+- `buffers`: Target memory address list, which must correspond to keys one-to-one.
+- `sizes`: Buffer capacity list, must be consistent with the buffers length.
+- `direct`: Data flow direction.
 
-**返回值**
+**return value**
 
-返回每个键对应的处理结果列表，每个元素 `0` 表示成功，负数表示失败。
+Returns a list of processing results corresponding to each key. Each element `0` represents success, and a negative number represents failure.
 
 #### BatchPutFrom
 
@@ -315,21 +315,21 @@ virtual std::vector<int> BatchPutFrom(const std::vector<std::string> &keys, cons
                                           const ReplicateConfig &replicateConfig = {}) = 0;
 ```
 
-**功能**
+**Function**
 
-批量写入多个键。
+Write multiple keys in batches.
 
-**参数**
+**parameter**
 
-- `keys`：数据键列表（每个键长度 < 256字节）。
-- `buffers`：目标内存地址列表，必须与keys一一对应。
-- `sizes`：缓冲区容量列表，必须与buffers长度一致。
-- `direct`：数据流向。
-- `replicateConfig`：副本策略配置。
+- `keys`: List of data keys (each key length < 256 bytes).
+- `buffers`: Target memory address list, which must correspond to keys one-to-one.
+- `sizes`: Buffer capacity list, must be consistent with the buffers length.
+- `direct`: Data flow direction.
+- `replicateConfig`: Replica policy configuration.
 
-**返回值**
+**return value**
 
-返回每个键对应的处理结果列表，每个元素 `0` 表示成功，负数表示失败。
+Returns a list of processing results corresponding to each key. Each element `0` represents success, and a negative number represents failure.
 
 #### BatchRemove
 
@@ -337,17 +337,17 @@ virtual std::vector<int> BatchPutFrom(const std::vector<std::string> &keys, cons
 virtual std::vector<int> BatchRemove(const std::vector<std::string> &keys) = 0;
 ```
 
-**功能**
+**Function**
 
-批量删除。
+Delete in bulk.
 
-**参数**
+**parameter**
 
-`keys`：数据键列表（每个键长度 < 256字节）。
+`keys`: List of data keys (each key length < 256 bytes).
 
-**返回值**
+**return value**
 
-返回每个键对应的处理结果列表，每个元素 `0` 表示成功，负数表示失败。
+Returns a list of processing results corresponding to each key. Each element `0` represents success, and a negative number represents failure.
 
 #### BatchIsExist
 
@@ -355,19 +355,19 @@ virtual std::vector<int> BatchRemove(const std::vector<std::string> &keys) = 0;
 virtual std::vector<int> BatchIsExist(const std::vector<std::string> &keys) = 0;
 ```
 
-**功能**
+**Function**
 
-批量存在性检查。
+Batch existence check.
 
-**参数**
+**parameter**
 
-`keys`：数据键列表（每个键长度 < 256字节）。
+`keys`: List of data keys (each key length < 256 bytes).
 
-**返回值**
+**return value**
 
-- `1`：存在
-- `0`：不存在
-- 其他：失败
+- `1`: exists
+- `0`: does not exist
+- Others: failed
 
 #### BatchGetKeyInfo
 
@@ -375,24 +375,24 @@ virtual std::vector<int> BatchIsExist(const std::vector<std::string> &keys) = 0;
 virtual std::vector<KeyInfo> BatchGetKeyInfo(const std::vector<std::string> &keys, uint32_t flag = 0) = 0;
 ```
 
-**功能**
+**Function**
 
-批量查询元信息。
+Query meta information in batches.
 
-**参数**
+**parameter**
 
-- `keys`：数据键列表（每个键长度 < 256字节）。
-- `flag`：查询标志，默认值为 `0`。
+- `keys`: List of data keys (each key length < 256 bytes).
+- `flag`: Query flag, the default value is `0`.
 
-**返回值**
+**return value**
 
-返回KeyInfo列表，每个KeyInfo包含：
+Returns a list of KeyInfo, each KeyInfo contains:
 
-- `size_`：数据字节数。
-- `blobNum_`：数据副本数。
-- `loc_`：数据副本所在位置列表。
-- `type_`：数据副本所在介质类型列表。
-- `gva_`：数据副本对应的 GVA 列表。
+- `size_`: Number of data bytes.
+- `blobNum_`: Number of data copies.
+- `loc_`: List of locations of data copies.
+- `type_`: List of media types where the data copies are located.
+- `gva_`: GVA list corresponding to the data copy.
 
 #### PrefetchKeys
 
@@ -401,21 +401,21 @@ virtual int PrefetchKeys(std::vector<std::string> keys, uint8_t srcMedia = MMC_M
                          uint8_t dstMedia = MMC_MEDIA_DRAM, uint32_t flags = 0) = 0;
 ```
 
-**功能**
+**Function**
 
-将指定 keys 从源介质回温到目标介质。当前仅支持 SSD→DRAM（`MMC_MEDIA_SSD` → `MMC_MEDIA_DRAM`），其他 src/dst 组合暂不支持，会返回 `MMC_INVALID_PARAM`。
+Rewarm specified keys from source media to target media. Currently only SSD→DRAM (`MMC_MEDIA_SSD` → `MMC_MEDIA_DRAM`) is supported. Other src/dst combinations are not supported yet and `MMC_INVALID_PARAM` will be returned.
 
-**参数**
+**parameter**
 
-- `keys`：数据键列表（每个键长度 < 256字节）。
-- `srcMedia`：源介质类型（`MMC_MEDIA_HBM`=0/`MMC_MEDIA_DRAM`=1/`MMC_MEDIA_SSD`=2），默认 `MMC_MEDIA_SSD`，预留参数。
-- `dstMedia`：目标介质类型，默认 `MMC_MEDIA_DRAM`，预留参数。
-- `flags`：预留标志，必须为 `0`。
+- `keys`: List of data keys (each key length < 256 bytes).
+- `srcMedia`: Source media type (`MMC_MEDIA_HBM`=0/`MMC_MEDIA_DRAM`=1/`MMC_MEDIA_SSD`=2), default `MMC_MEDIA_SSD`, reserved parameters.
+- `dstMedia`: Target media type, default `MMC_MEDIA_DRAM`, reserved parameters.
+- `flags`: reserved flag, must be `0`.
 
-**返回值**
+**return value**
 
-- `0`：成功
-- 其他：失败
+- `0`: Success
+- Others: failed
 
 #### EvictKeys
 
@@ -424,21 +424,21 @@ virtual int EvictKeys(std::vector<std::string> keys, uint8_t srcMedia = MMC_MEDI
                       uint8_t dstMedia = MMC_MEDIA_SSD, uint32_t flags = 0) = 0;
 ```
 
-**功能**
+**Function**
 
-将指定 keys 从源介质驱逐到目标介质。当前仅支持 DRAM→SSD（`MMC_MEDIA_DRAM` → `MMC_MEDIA_SSD`），其他 src/dst 组合暂不支持，会返回 `MMC_INVALID_PARAM`。当 SSD 不可用或 DRAM 使用率高于回温水线时，DRAM 上的 blob 会被直接删除。
+Deports the specified keys from the source media to the target media. Currently only DRAM → SSD (`MMC_MEDIA_DRAM` → `MMC_MEDIA_SSD`) is supported. Other src/dst combinations are not supported yet and `MMC_INVALID_PARAM` will be returned. When the SSD is unavailable or the DRAM usage is above the recovery waterline, the blobs on the DRAM will be deleted directly.
 
-**参数**
+**parameter**
 
-- `keys`：数据键列表（每个键长度 < 256字节）。
-- `srcMedia`：源介质类型（`MMC_MEDIA_HBM`=0/`MMC_MEDIA_DRAM`=1/`MMC_MEDIA_SSD`=2），默认 `MMC_MEDIA_DRAM`，预留参数。
-- `dstMedia`：目标介质类型，默认 `MMC_MEDIA_SSD`，预留参数。
-- `flags`：预留标志，必须为 `0`。
+- `keys`: List of data keys (each key length < 256 bytes).
+- `srcMedia`: Source media type (`MMC_MEDIA_HBM`=0/`MMC_MEDIA_DRAM`=1/`MMC_MEDIA_SSD`=2), default `MMC_MEDIA_DRAM`, reserved parameters.
+- `dstMedia`: Target media type, default `MMC_MEDIA_SSD`, reserved parameters.
+- `flags`: reserved flag, must be `0`.
 
-**返回值**
+**return value**
 
-- `0`：成功
-- 其他：失败
+- `0`: Success
+- Others: failed
 
 #### BatchAddLease
 
@@ -446,27 +446,27 @@ virtual int EvictKeys(std::vector<std::string> keys, uint8_t srcMedia = MMC_MEDI
 virtual std::vector<int> BatchAddLease(const std::vector<std::string> &keys, uint64_t leaseTtlMs = 0) = 0;
 ```
 
-**功能**
+**Function**
 
-批量为多个 key 增加读租约，并记录后续 GVA 读取所需的读租约状态。
+Add read leases for multiple keys in batches, and record the read lease status required for subsequent GVA reads.
 
-**参数**
+**parameter**
 
-- `keys`：要增加读租约的 key 列表（每个键长度 < 256字节），不能为空。
-- `leaseTtlMs`：要增加的租约时间，单位为毫秒，默认为 `0`。为 `0` 时使用 meta 侧配置项 `ock.mmc.meta.lease_ttl_ms`。
+- `keys`: The key list to add a read lease (each key length < 256 bytes), cannot be empty.
+- `leaseTtlMs`: The lease time to be increased, in milliseconds, the default is `0`. When it is `0`, use the meta-side configuration item `ock.mmc.meta.lease_ttl_ms`.
 
-**返回值**
+**return value**
 
-`std::vector<int>`：每个元素表示对应 key 的处理结果，`0` 表示成功，其他值表示失败。返回列表长度与 `keys` 一致。
+`std::vector<int>`: Each element represents the processing result of the corresponding key. `0` represents success, and other values ​​represent failure. The length of the returned list is consistent with `keys`.
 
-**使用说明**
+**Instructions for use**
 
-- 该接口返回每个 key 的错误码，不返回 `KeyInfo`。
-- 该接口为非事务接口；某个 key 失败不会回滚其他 key 已经成功增加的读租约。
-- `leaseTtlMs` 为 `0` 时，meta 侧使用配置项 `ock.mmc.meta.lease_ttl_ms` 的值增加租约。
-- 调用方应只对返回值为 `0` 的 key 继续执行后续基于 GVA 的读取流程。
-- 典型用法是先通过 `BatchGetKeyInfo(keys)` 获取 GVA，再调用 `BatchAddLease(keys)`，为后续基于 GVA 的读取流程建立读租约状态。
-- 同一进程对同一 key 重复调用时，会复用当前进程中已有的读租约并在 meta 侧续租；完成读取后调用一次 `BatchRemoveLease` 即可释放。
+- This interface returns the error code of each key and does not return `KeyInfo`.
+- This interface is a non-transactional interface; the failure of a certain key will not roll back the read leases that have been successfully added to other keys.
+- When `leaseTtlMs` is `0`, the meta side uses the value of the configuration item `ock.mmc.meta.lease_ttl_ms` to increase the lease.
+- The caller should only continue to perform subsequent GVA-based reading processes for keys whose return value is `0`.
+- Typical usage is to first obtain GVA through `BatchGetKeyInfo(keys)`, and then call `BatchAddLease(keys)` to establish a read lease status for subsequent GVA-based reading processes.
+- When the same process calls the same key repeatedly, the existing read lease in the current process will be reused and renewed on the meta side; after completing the reading, call `BatchRemoveLease` once to release it.
 
 #### BatchRemoveLease
 
@@ -474,22 +474,22 @@ virtual std::vector<int> BatchAddLease(const std::vector<std::string> &keys, uin
 virtual int BatchRemoveLease(const std::vector<std::string> &keys) = 0;
 ```
 
-**功能**
+**Function**
 
-批量移除多个 key 的读租约，并清理当前进程中对应的 GVA 读取状态。
+Remove the read leases of multiple keys in batches and clear the corresponding GVA read status in the current process.
 
-**参数**
+**parameter**
 
-`keys`：要移除读租约的 key 列表（每个键长度 < 256字节），不能为空。
+`keys`: The key list to remove the read lease (each key length < 256 bytes), cannot be empty.
 
-**返回值**
+**return value**
 
-- `int`：`0` 表示本地读租约检查通过并已触发移除租约请求发送流程。
-- 其他值表示失败。
+- `int`: `0` indicates that the local read lease check has passed and the lease removal request sending process has been triggered.
+- Other values ​​indicate failure.
 
-**使用说明**
+**Instructions for use**
 
-调用方完成基于 GVA 的读取后，应调用该接口显式释放由 `BatchAddLease` 建立的读租约。
+After the caller completes the GVA-based read, it should call this interface to explicitly release the read lease established by `BatchAddLease`.
 
 #### BatchMalloc
 
@@ -498,23 +498,23 @@ virtual std::vector<uintptr_t> BatchMalloc(const std::vector<std::string> &keys,
                                                uint16_t media, uint64_t leaseTtlMs = 0) = 0;
 ```
 
-**功能**
+**Function**
 
-批量为多个 key 申请全局内存，并返回每个 key 对应的起始 GVA。
+Apply for global memory for multiple keys in batches and return the starting GVA corresponding to each key.
 
-**参数**
+**parameter**
 
-- `keys`：要申请内存的 key 列表，长度必须与 `sizes` 一致。
-- `sizes`：每个 key 对应的数据大小列表。
-- `media`：申请的介质类型，如 `MEDIA_HBM` 或 `MEDIA_DRAM`。
-- `leaseTtlMs`：要增加的租约时间，单位为毫秒，默认为 `0`。为 `0` 时使用 meta 侧配置项 `ock.mmc.meta.lease_ttl_ms`。
+- `keys`: The key list to apply for memory, the length must be consistent with `sizes`.
+- `sizes`: List of data sizes corresponding to each key.
+- `media`: The requested media type, such as `MEDIA_HBM` or `MEDIA_DRAM`.
+- `leaseTtlMs`: The lease time to be increased, in milliseconds, the default is `0`. When it is `0`, use the meta-side configuration item `ock.mmc.meta.lease_ttl_ms`.
 
-**返回值**
+**return value**
 
-- `std::vector<uintptr_t>`：每个元素为一个 key 对应的起始 GVA。
-- 可读 SSD 命中且没有可用内存 GVA 时，对应元素为 `UINT64_MAX`，调用方跳过该 key 的写入。
-- 申请失败或参数非法时，对应元素为 `0`。
-- 调用方必须过滤这两个值，仅对有效 GVA 执行拷贝和写完成通知。
+- `std::vector<uintptr_t>`: Each element is the starting GVA corresponding to a key.
+- On a readable SSD hit with no available memory GVA, the corresponding element is `UINT64_MAX`. The caller skips writing that key.
+- When allocation fails or the parameters are invalid, the corresponding element is `0`.
+- The caller must filter out both sentinel values and perform copies and write-completion notifications only for valid GVAs.
 
 #### BatchCopy
 
@@ -523,25 +523,25 @@ virtual int BatchCopy(std::vector<void *> &gvas, std::vector<void *> &buffers, s
                           const int32_t direct = 3, uint32_t flag = 0) = 0;
 ```
 
-**功能**
+**Function**
 
-批量在 GVA 地址与本地缓冲区之间执行数据拷贝。
+Performs data copies between GVA addresses and local buffers in batches.
 
-> [!NOTE] 说明
-> 写方向（如 `SMEMB_COPY_L2G`/`SMEMB_COPY_H2G`）只拷贝数据，**不会**将 GVA 对应的 blob 状态翻转为 READABLE；调用方必须再调用 `MmcacheStore::BatchWriteFinish` 显式通知写完成，blob 才会进入可读状态。
+> [!NOTE] Description
+> The write direction (such as `SMEMB_COPY_L2G`/`SMEMB_COPY_H2G`) only copies data and will not flip the blob status corresponding to GVA to READABLE; the caller must call `MmcacheStore::BatchWriteFinish` again to explicitly notify the write completion before the blob enters the readable state.
 
-**参数**
+**parameter**
 
-- `gvas`：GVA 地址列表。
-- `buffers`：本地缓冲区列表，必须与 `gvas` 一一对应。
-- `sizes`：每次拷贝的大小列表，长度必须与 `gvas` 一致。
-- `direct`：数据拷贝方向，取值参见 `smem_bm_copy_type`，常用值包括 `SMEMB_COPY_L2G`、`SMEMB_COPY_G2L`、`SMEMB_COPY_G2H`、`SMEMB_COPY_H2G`。
-- `flag`：拷贝标志位，默认 0。读方向设置 `GET_DATA_FOR_LAYER_WISE` 可跳过 GVA tracker 合法性校验，直接执行 DMA 拷贝。
+- `gvas`: GVA address list.
+- `buffers`: local buffer list, must correspond to `gvas` one-to-one.
+- `sizes`: The size list of each copy, the length must be consistent with `gvas`.
+- `direct`: Data copy direction, see `smem_bm_copy_type` for the value. Common values ​​include `SMEMB_COPY_L2G`, `SMEMB_COPY_G2L`, `SMEMB_COPY_G2H`, and `SMEMB_COPY_H2G`.
+- `flag`: copy flag, default 0. The read direction setting `GET_DATA_FOR_LAYER_WISE` can skip the GVA tracker validity check and directly perform DMA copy.
 
-**返回值**
+**return value**
 
-- `0`：成功
-- 其他：失败
+- `0`: Success
+- Others: failed
 
 #### BatchWriteFinish
 
@@ -550,28 +550,28 @@ virtual std::vector<int> BatchWriteFinish(const std::vector<std::string> &keys,
                                          const std::vector<int32_t> &writeResults) = 0;
 ```
 
-**功能**
+**Function**
 
-显式通知 meta service 给定 key 的写入已完成。
+Explicitly notify the meta service that writing for the given key is complete.
 
-> [!NOTE] 说明
-> 调用方在 `BatchCopy` 写方向完成后必须调用此接口，meta service 才会将对应 blob 从 `ALLOCATED` 翻转为 `READABLE`，此后其他进程才能通过 `BatchGetKeyInfo` / `BatchCopy` 读方向读到数据。对于已处于 `READABLE` 的 key，再次调用为幂等并直接返回成功；对未分配过的 key 返回 `MMC_UNMATCHED_KEY`。
+> [!NOTE] Description
+> The caller must call this interface after the `BatchCopy` write direction is completed, so that the meta service will flip the corresponding blob from `ALLOCATED` to `READABLE`. After that, other processes can read the data through the `BatchGetKeyInfo` / `BatchCopy` read direction. For a key that is already at `READABLE`, calling it again is idempotent and directly returns success; for an unallocated key, `MMC_UNMATCHED_KEY` is returned.
 
-**参数**
+**parameter**
 
-- `keys`：已写入完成的键列表，每个键长度小于 256 个字节。
-- `writeResults`：与 `keys` 等长的每键写入结果，`0` 表示成功（对应 `MMC_WRITE_OK`，blob 翻为 `READABLE`），非 `0` 表示失败（对应 `MMC_WRITE_FAIL`，meta service 会移除该 blob）。
+- `keys`: Completed key list written, each key less than 256 bytes long.
+- `writeResults`: The write result of each key is the same length as `keys`. `0` indicates success (corresponding to `MMC_WRITE_OK`, the blob is translated to `READABLE`), and non-`0` indicates failure (corresponding to `MMC_WRITE_FAIL`, the meta service will remove the blob).
 
-**返回值**
+**return value**
 
-`std::vector<int>`：与 `keys` 等长，每个元素为 meta service 对该键的实际更新结果；`0` 表示成功。
+`std::vector<int>`: The same length as `keys`. Each element is the actual update result of the key by meta service; `0` indicates success.
 
-> [!NOTE] 典型 GVA 跨进程读取流程：
+> [!NOTE] Typical GVA cross-process reading process:
 >
-> - 写进程：`BatchMalloc -> BatchCopy`（写入数据）-> `BatchWriteFinish` 显式通知写完成，blob 翻为 READABLE。
-> - 读进程：`BatchGetKeyInfo(keys, 0)` 获取 GVA -> `BatchAddLease(...)` 增加读租约并准备 GVA 读取状态 ->  `BatchCopy`（读取）-> `BatchRemoveLease(...)` 显式释放读租约。
+> - Writing process: `BatchMalloc -> BatchCopy` (writing data) -> `BatchWriteFinish` explicitly notifies the writing completion, and the blob is converted to READABLE.
+> - Read process: `BatchGetKeyInfo(keys, 0)` acquires GVA -> `BatchAddLease(...)` adds read lease and prepares GVA read status -> `BatchCopy` (read) -> `BatchRemoveLease(...)` explicitly releases read lease.
 
-### 5. 分层张量操作
+### 5. Hierarchical tensor operations
 
 #### PutFromLayers
 
@@ -582,22 +582,22 @@ virtual int PutFromLayers(const std::string &key, const std::vector<void *> &buf
 
 ```
 
-**功能**
+**Function**
 
-将多个内存块（layers）拼接后作为一个逻辑对象写入缓存，并关联到指定键。
+Concatenate multiple memory blocks (layers) and write them into the cache as a logical object and associate them with the specified key.
 
-**参数**
+**parameter**
 
-- `key`：数据键（长度 < 256字节）。
-- `buffers`：多层内存地址列表。
-- `sizes`：每层缓冲区容量大小列表，必须与buffers长度一致。
-- `direct`：数据流向。
-- `replicateConfig`：副本策略配置。
+- `key`: Data key (length < 256 bytes).
+- `buffers`: Multi-level memory address list.
+- `sizes`: List of buffer capacity sizes for each layer, which must be consistent with the buffers length.
+- `direct`: Data flow direction.
+- `replicateConfig`: Replica policy configuration.
 
-**返回值**
+**return value**
 
-- `0`：成功
-- 其他：失败
+- `0`: Success
+- Others: failed
 
 #### GetIntoLayers
 
@@ -606,21 +606,21 @@ virtual int GetIntoLayers(const std::string &key, const std::vector<void *> &buf
                               const std::vector<size_t> &sizes, const int32_t direct = 2) = 0;
 ```
 
-**功能**
+**Function**
 
-从缓存中读取指定键的逻辑对象，并按预定义大小分发到多个目标缓冲区。
+Reads a logical object with the specified key from the cache and distributes it to multiple destination buffers in a predefined size.
 
-**参数**
+**parameter**
 
-- `key`：数据键（长度 < 256字节）。
-- `buffers`：多层内存地址列表。
-- `sizes`：每层缓冲区容量大小列表，必须与buffers长度一致。
-- `direct`：数据流向。
+- `key`: Data key (length < 256 bytes).
+- `buffers`: Multi-level memory address list.
+- `sizes`: List of buffer capacity sizes for each layer, which must be consistent with the buffers length.
+- `direct`: Data flow direction.
 
-**返回值**
+**return value**
 
-- `0`：成功
-- 其他：失败
+- `0`: Success
+- Others: failed
 
 #### BatchPutFromLayers
 
@@ -631,21 +631,21 @@ virtual std::vector<int> BatchPutFromLayers(const std::vector<std::string> &keys
                                                 const ReplicateConfig &replicateConfig = {}) = 0;
 ```
 
-**功能**
+**Function**
 
-批量将多个逻辑对象（每个由多层内存块组成）写入缓存。
+Batch writes multiple logical objects (each consisting of multiple layers of memory blocks) to the cache.
 
-**参数**
+**parameter**
 
-- `keys`：数据键列表（每个键长度 < 256字节）。
-- `buffers`：多层内存地址列表，必须与keys一一对应。
-- `sizes`：每层缓冲区容量大小列表，必须与buffers长度一致。
-- `direct`：数据流向。
-- `replicateConfig`：副本策略配置。
+- `keys`: List of data keys (each key length < 256 bytes).
+- `buffers`: A multi-layer memory address list, which must correspond to keys one-to-one.
+- `sizes`: List of buffer capacity sizes for each layer, which must be consistent with the buffers length.
+- `direct`: Data flow direction.
+- `replicateConfig`: Replica policy configuration.
 
-**返回值**
+**return value**
 
-返回每个键对应的处理结果列表，每个元素 `0` 表示成功，负数表示失败
+Returns a list of processing results corresponding to each key. Each element `0` represents success, and a negative number represents failure.
 
 #### BatchGetIntoLayers
 
@@ -656,22 +656,22 @@ virtual std::vector<int> BatchGetIntoLayers(const std::vector<std::string> &keys
                                                 const int32_t direct = 2) = 0;
 ```
 
-**功能**
+**Function**
 
-批量从缓存中读取多个逻辑对象，并分别分发到各自的多层缓冲区。
+Multiple logical objects are read from the cache in batches and distributed to their respective multi-layer buffers.
 
-**参数**
+**parameter**
 
-- `keys`：数据键列表（每个键长度 < 256字节）。
-- `buffers`：多层内存地址列表，必须与keys一一对应。
-- `sizes`：每层缓冲区容量大小列表，必须与buffers长度一致。
-- `direct`：数据流向。
+- `keys`: List of data keys (each key length < 256 bytes).
+- `buffers`: A multi-layer memory address list, which must correspond to keys one-to-one.
+- `sizes`: List of buffer capacity sizes for each layer, which must be consistent with the buffers length.
+- `direct`: Data flow direction.
 
-**返回值**
+**return value**
 
-返回每个键对应的处理结果列表，每个元素 `0` 表示成功，负数表示失败。
+Returns a list of processing results corresponding to each key. Each element `0` represents success, and a negative number represents failure.
 
-### 6. 辅助接口
+### 6. Auxiliary interface
 
 #### GetLocalServiceId
 
@@ -679,87 +679,87 @@ virtual std::vector<int> BatchGetIntoLayers(const std::vector<std::string> &keys
 virtual int GetLocalServiceId(uint32_t &localServiceId) = 0;
 ```
 
-**功能**
+**Function**
 
-获取当前实例关联的本地服务 ID（用于调试或日志追踪）。
+Get the local service ID associated with the current instance (for debugging or log tracing).
 
-**参数**
+**parameter**
 
-`localServiceId`：输出参数。
+`localServiceId`: Output parameters.
 
-**返回值**
+**return value**
 
-- `0`：成功
-- 其他：失败
+- `0`: Success
+- Others: failed
 
-## 数据结构
+## data structure
 
 ### ReplicateConfig
 
-副本策略配置，包含以下字段：
+Replica policy configuration, including the following fields:
 
-- `replicaNum`：副本数，默认1，最大8。
-- `preferredLocalServiceIDs`：优先分配的本地服务 ID 列表，列表大小必须小于或等于replicaNum。
+- `replicaNum`: Number of copies, default 1, maximum 8.
+- `preferredLocalServiceIDs`: A list of local service IDs allocated with priority. The list size must be less than or equal to replicaNum.
 
 ### KeyInfo
 
-键元信息结构体，包含以下字段：
+Key element information structure, including the following fields:
 
-- `size_`：数据字节数。
-- `blobNum_`：数据副本数。
-- `loc_`：数据副本所在位置列表。
-- `type_`：数据副本所在介质类型列表。
-- `gva_`：数据副本的全局虚拟地址列表。
+- `size_`: Number of data bytes.
+- `blobNum_`: Number of data copies.
+- `loc_`: List of locations of data copies.
+- `type_`: List of media types where the data copies are located.
+- `gva_`: List of global virtual addresses for data copies.
 
-## smem_bm_copy_type 枚举类型
+## smem_bm_copy_type enumeration type
 
-| 类型 | 值 | 说明 |
+| Type | Value | Description |
 | ------------------- | ---- | -------------------- |
-| SMEMB_COPY_L2G | 0 | 从卡上内存复制到全局内存 |
-| SMEMB_COPY_G2L | 1 | 从全局内存复制到卡上内存 |
-| SMEMB_COPY_G2H | 2 | 从全局内存复制到主机内存 |
-| SMEMB_COPY_H2G | 3 | 从主机内存复制到全局内存 |
-| SMEMB_COPY_L2GH | 4 | 从卡上内存复制到全局主机内存 |
-| SMEMB_COPY_GH2L | 5 | 从全局主机内存复制到卡上内存 |
-| SMEMB_COPY_GH2H | 6 | 从全局主机内存复制到主机内存 |
-| SMEMB_COPY_H2GH | 7 | 从主机内存复制到全局主机内存 |
-| SMEMB_COPY_G2G | 8 | 从全局内存复制到全局内存 |
-| SMEMB_COPY_AUTO | 9 | 自动选择数据拷贝方向 |
+| SMEMB_COPY_L2G | 0 | Copy from card memory to global memory |
+| SMEMB_COPY_G2L | 1 | Copy from global memory to on-card memory |
+| SMEMB_COPY_G2H | 2 | Copy from global memory to host memory |
+| SMEMB_COPY_H2G | 3 | Copy from host memory to global memory |
+| SMEMB_COPY_L2GH | 4 | Copy from card memory to global host memory |
+| SMEMB_COPY_GH2L | 5 | Copy from global host memory to on-card memory |
+| SMEMB_COPY_GH2H | 6 | Copy from global host memory to host memory |
+| SMEMB_COPY_H2GH | 7 | Copy from host memory to global host memory |
+| SMEMB_COPY_G2G | 8 | Copy from global memory to global memory |
+| SMEMB_COPY_AUTO | 9 | Automatically select the data copy direction |
 
-## 错误码
+## error code
 
-| 值     | 说明        |
+| Value | Description |
 |-------|-----------|
-| 0     | 操作成功      |
-| -1    | 一般错误      |
-| -3000 | 参数无效      |
-| -3001 | 内存分配失败    |
-| -3002 | 对象创建失败    |
-| -3003 | 服务未启动     |
-| -3004 | 操作超时      |
-| -3005 | 重复调用      |
-| -3006 | 对象已存在     |
-| -3007 | 对象不存在     |
-| -3008 | 未初始化      |
-| -3009 | 网络序列号重复   |
-| -3010 | 网络序列号未找到  |
-| -3011 | 已通知       |
-| -3012 | 内部错误      |
-| -3013 | 超出容量限制    |
-| -3014 | 连接未找到     |
-| -3015 | 网络请求句柄未找到 |
-| -3016 | 内存不足      |
-| -3017 | 未连接到元数据服务 |
-| -3018 | 未连接到本地服务  |
-| -3019 | 客户端未初始化   |
-| -3101 | 状态不匹配     |
-| -3102 | 键不匹配      |
-| -3103 | 返回值不匹配    |
-| -3104 | 租约未到期     |
-| -3105 | 元数据备份失败   |
+| 0 | Operation successful |
+| -1 | General error |
+| -3000 | invalid parameter |
+| -3001 | memory allocation failure |
+| -3002 | object creation failed |
+| -3003 | service is not started |
+| -3004 | operation timeout |
+| -3005 | calls | repeatedly
+| -3006 | object already exists |
+| -3007 | object does not exist |
+| -3008 | not initialized |
+| -3009 | Duplicate network serial number |
+| -3010 | Network serial number not found |
+| -3011 | has notified |
+| -3012 | internal error |
+| -3013 | exceeds capacity limit |
+| -3014 | connection not found |
+| -3015 | Network request handle not found |
+| -3016 | Insufficient memory |
+| -3017 | is not connected to the metadata service |
+| -3018 | is not connected to the local service |
+| -3019 | client is not initialized |
+| -3101 | status does not match |
+| -3102 | key does not match |
+| -3103 | return value does not match |
+| -3104 | The lease has not expired |
+| -3105 | Metadata backup failed |
 
-## 注意事项
+## Things to note
 
-- 所有键的长度必须小于256个字节。
-- 支持同步和异步两种操作模式。
-- 批量操作可以提高处理效率。
+- All keys must be less than 256 bytes in length.
+- Supports both synchronous and asynchronous operation modes.
+- Batch operations can improve processing efficiency.
