@@ -1,21 +1,21 @@
-# MemCache Hybrid RESTful API 文档
+# MemCache Hybrid RESTful API Documentation
 
-本文档定义 MemCache Hybrid REST 接口的目标契约；如某接口当前未实现，会在对应条目标注状态。
+This document defines the target contract of the MemCache Hybrid REST interface; if an interface is not currently implemented, the status will be noted in the corresponding entry.
 
-- 默认 HTTP 地址来自配置项 `ock.mmc.meta_service.metrics_url`
-- 默认值：`http://127.0.0.1:8000`；host 支持任意 IP 或域名
-- 支持通过 `ock.mmc.metrics.tls.*` 配置项独立开启 mTLS
-- 成功响应的 `Content-Type` 由各接口单独约定
-- 业务错误也返回 `HTTP 200`；客户端需通过响应体中的 `success` 字段判断是否成功
-- 错误返回统一使用 JSON 格式；`error_message` 会随具体错误场景变化
-- `error_message` 返回实际错误原因；未实现接口等场景可返回 `Not supported`
-- 若成功响应包含 `timestamp`，其含义由对应接口定义；错误响应中的 `timestamp` 表示错误响应生成时间，示例中的 `0` 仅为占位值
+- The default HTTP address comes from the configuration item `ock.mmc.meta_service.metrics_url`
+- Default value: `http://127.0.0.1:8000`; host supports any IP or domain name
+- Support independently enabling mTLS through the `ock.mmc.metrics.tls.*` configuration item
+- The `Content-Type` of successful response is independently agreed by each interface.
+- Business errors also return `HTTP 200`; the client needs to determine whether it is successful through the `success` field in the response body.
+- Error returns uniformly use JSON format; `error_message` will change according to specific error scenarios.
+- `error_message` returns the actual error cause; in scenarios such as when the interface is not implemented, `Not supported` can be returned
+- If the successful response contains `timestamp`, its meaning is defined by the corresponding interface; `timestamp` in the error response indicates the error response generation time, and `0` in the example is only a placeholder value
 
 ## 1 `GET /metadata?key=...`
 
-### 作用
+### Purpose
 
-按原样读取指定 metadata value；成功时直接返回原始内容，不额外包装 JSON。
+Read the specified metadata value as is; upon success, the original content is returned directly without additional JSON packaging.
 
 ### curl
 
@@ -23,30 +23,30 @@
 curl "http://127.0.0.1:8000/metadata?key=demo_key"
 ```
 
-### 请求参数
+### Request parameters
 
-| 参数名 | 类型 | 必填 | 描述 |
+| Parameter name | Type | Required | Description |
 |---|---|---|---|
-| `key` | String | 是 | 要读取的 metadata key |
+| `key` | String | Yes | The metadata key to be read |
 
-### 成功示例
+### Successful Examples
 
-`text/plain; charset=utf-8`：
+`text/plain; charset=utf-8`:
 
 ```text
 demo metadata value
 ```
 
-**解释**
+**Explanation**
 
-| 内容 | 含义 | 来源 |
+| Content | Meaning | Source |
 |---|---|---|
-| 原样返回 value | 成功时直接返回 metadata value，不重组外层 JSON | 接口契约 |
-| 成功 `Content-Type` | 本文示例使用 `text/plain; charset=utf-8` | 示例约定 |
+| returns the value as it is | directly returns the metadata value on success without reorganizing the outer JSON | interface contract |
+| Success `Content-Type` | The example in this article uses `text/plain; charset=utf-8` | Example convention |
 
-### 错误示例
+### Error example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -56,19 +56,19 @@ demo metadata value
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 请求是否成功；错误场景固定为 `false` | 全局统一错误返回规则 |
-| `error_message` | 实际错误原因；此处仅为格式示例 | 全局错误返回格式规则 |
-| `timestamp` | 错误返回格式中的时间戳字段 | 全局错误返回格式规则 |
+| `success` | Whether the request is successful; the error scenario is fixed to `false` | Global unified error return rule |
+| `error_message` | Actual error cause; here is only a format example | Global error return format rules |
+| `timestamp` | Timestamp field in error return format | Global error return format rules |
 
 ## 2 `PUT /metadata?key=...`
 
-### 作用
+### Purpose
 
-按原始文本写入指定 metadata value。
+Writes the specified metadata value as raw text.
 
 ### curl
 
@@ -77,36 +77,36 @@ curl -X PUT "http://127.0.0.1:8000/metadata?key=demo_key" \
   --data 'demo metadata value'
 ```
 
-### 请求参数
+### Request parameters
 
-| 参数名 | 类型 | 必填 | 描述 |
+| Parameter name | Type | Required | Description |
 |---|---|---|---|
-| `key` | String | 是 | 要写入的 metadata key |
+| `key` | String | Yes | The metadata key to be written |
 
-### 请求体
+### Request body
 
-`key` 对应的原始文本；服务端按收到的 body 原样写入，不做 schema 校验。
+The original text corresponding to `key`; the server writes the received body as it is without schema verification.
 
-请求体建议使用 `Content-Type: text/plain; charset=utf-8`。
+It is recommended to use `Content-Type: text/plain; charset=utf-8` for the request body.
 
-### 成功示例
+### Successful Examples
 
-`text/plain; charset=utf-8`：
+`text/plain; charset=utf-8`:
 
 ```text
 metadata updated
 ```
 
-**解释**
+**Explanation**
 
-| 内容 | 含义 | 来源 |
+| Content | Meaning | Source |
 |---|---|---|
-| `metadata updated` | metadata 写入成功后的固定文本 | 接口成功返回约定 |
-| 原样写入 | 请求体不做 schema 校验，按原文保存 | 接口契约 |
+| `metadata updated` | metadata fixed text after successful writing | interface successful return convention |
+| Write the | request body as it is without schema verification and save it as the original text | Interface contract |
 
-### 错误示例
+### Error example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -116,19 +116,19 @@ metadata updated
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 请求是否成功；错误场景固定为 `false` | 全局统一错误返回规则 |
-| `error_message` | 实际错误原因；此处仅为格式示例 | 全局错误返回格式规则 |
-| `timestamp` | 错误返回格式中的时间戳字段 | 全局错误返回格式规则 |
+| `success` | Whether the request is successful; the error scenario is fixed to `false` | Global unified error return rule |
+| `error_message` | Actual error cause; here is only a format example | Global error return format rules |
+| `timestamp` | Timestamp field in error return format | Global error return format rules |
 
 ## 3 `DELETE /metadata?key=...`
 
-### 作用
+### Purpose
 
-删除指定 metadata key。
+Delete the specified metadata key.
 
 ### curl
 
@@ -136,29 +136,29 @@ metadata updated
 curl -X DELETE "http://127.0.0.1:8000/metadata?key=demo_key"
 ```
 
-### 请求参数
+### Request parameters
 
-| 参数名 | 类型 | 必填 | 描述 |
+| Parameter name | Type | Required | Description |
 |---|---|---|---|
-| `key` | String | 是 | 要删除的 metadata key |
+| `key` | String | Yes | The metadata key to be deleted |
 
-### 成功示例
+### Successful Examples
 
-`text/plain; charset=utf-8`：
+`text/plain; charset=utf-8`:
 
 ```text
 metadata deleted
 ```
 
-**解释**
+**Explanation**
 
-| 内容 | 含义 | 来源 |
+| Content | Meaning | Source |
 |---|---|---|
-| `metadata deleted` | metadata 删除成功后的固定文本 | 接口成功返回约定 |
+| `metadata deleted` | metadata fixed text after successful deletion | interface successful return convention |
 
-### 错误示例
+### Error example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -168,19 +168,19 @@ metadata deleted
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 请求是否成功；错误场景固定为 `false` | 全局统一错误返回规则 |
-| `error_message` | 实际错误原因；此处仅为格式示例 | 全局错误返回格式规则 |
-| `timestamp` | 错误返回格式中的时间戳字段 | 全局错误返回格式规则 |
+| `success` | Whether the request is successful; the error scenario is fixed to `false` | Global unified error return rule |
+| `error_message` | Actual error cause; here is only a format example | Global error return format rules |
+| `timestamp` | Timestamp field in error return format | Global error return format rules |
 
 ## 4 `GET /health`
 
-### 作用
+### Purpose
 
-返回 HTTP 服务健康状态、HA 状态和服务就绪状态。
+Returns HTTP service health status, HA status, and service readiness status.
 
 ### curl
 
@@ -188,13 +188,13 @@ metadata deleted
 curl "http://127.0.0.1:8000/health"
 ```
 
-### 请求参数
+### Request parameters
 
-无
+none
 
-### 成功示例
+### Successful Examples
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -207,20 +207,20 @@ curl "http://127.0.0.1:8000/health"
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `status` | 健康状态；成功时固定为 `ok` | 接口成功返回约定 |
-| `role` | 当前角色，取值 `leader / standby / unknown` | HA 状态快照 |
-| `ha_state` | 当前 HA 状态，取值 `starting / standby / serving / unknown` | HA 状态快照 |
-| `service_ready` | HTTP 服务是否已准备就绪 | 服务运行状态 |
-| `leader_address` | leader 地址；无稳定来源时固定 `unknown` | HA 状态快照 |
-| `view_version` | 视图版本；无稳定来源时固定 `0` | HA 状态快照 |
+| `status` | Health status; fixed to `ok` when successful | The interface successfully returns the convention |
+| `role` | Current role, value `leader / standby / unknown` | HA status snapshot |
+| `ha_state` | Current HA status, value `starting / standby / serving / unknown` | HA status snapshot |
+| `service_ready` | Whether the HTTP service is ready | Service running status |
+| `leader_address` | leader address; fixed when there is no stable source `unknown` | HA status snapshot |
+| `view_version` | View version; fixed when no stable source `0` | HA state snapshot |
 
-### 错误示例
+### Error example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -230,19 +230,19 @@ curl "http://127.0.0.1:8000/health"
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 请求是否成功；错误场景固定为 `false` | 全局统一错误返回规则 |
-| `error_message` | 实际错误原因；此处仅为格式示例 | 全局错误返回格式规则 |
-| `timestamp` | 错误返回格式中的时间戳字段 | 全局错误返回格式规则 |
+| `success` | Whether the request is successful; the error scenario is fixed to `false` | Global unified error return rule |
+| `error_message` | Actual error cause; here is only a format example | Global error return format rules |
+| `timestamp` | Timestamp field in error return format | Global error return format rules |
 
 ## 5 `GET /metrics`
 
-### 作用
+### Purpose
 
-以 Prometheus 文本格式导出 MemCache 监控指标。当前无法提供的字段允许以 `0` 或 `false` 等占位值导出。
+Export MemCache monitoring metrics in Prometheus text format. Fields that are currently unavailable allow export with placeholder values ​​such as `0` or `false`.
 
 ### curl
 
@@ -250,13 +250,13 @@ curl "http://127.0.0.1:8000/health"
 curl "http://127.0.0.1:8000/metrics"
 ```
 
-### 请求参数
+### Request parameters
 
-无
+none
 
-### 成功示例
+### Successful Examples
 
-`text/plain; version=0.0.4`：
+`text/plain; version=0.0.4`:
 
 ```text
 # HELP memcache_segment_capacity_bytes Segment total capacity in bytes
@@ -362,8 +362,8 @@ memcache_bandwidth_bytes_cum_total{rank="0",operation="batch_put"} 0
 # TYPE memcache_bandwidth_duration_ms_cum_total counter
 memcache_bandwidth_duration_ms_cum_total{rank="0",operation="batch_put"} 0
 # HELP memcache_bandwidth_latency_seconds Client bandwidth operation latency in seconds
-# TYPE memcache_bandwidth_latency_seconds gauge
-memcache_bandwidth_latency_seconds{rank="0",operation="batch_put",quantile="P50"} 0
+# HELP memcache_bandwidth_latency_seconds Client bandwidth operation latency in seconds
+# HELP memcache_bandwidth_latency_seconds Client bandwidth operation latency in seconds
 # HELP memcache_bandwidth_bytes_per_sec Client bandwidth instantaneous bytes per second
 # TYPE memcache_bandwidth_bytes_per_sec gauge
 memcache_bandwidth_bytes_per_sec{rank="0",operation="batch_put"} 0
@@ -399,74 +399,74 @@ memcache_ubs_io_disk_write_bandwidth_bytes_per_sec{rank="0",disk_path="/data/dis
 memcache_ubs_io_disk_total_bandwidth_bytes_per_sec{rank="0",disk_path="/data/disk0"} 0
 ```
 
-**解释**
+**Explanation**
 
-| 内容 | 含义 | 来源 |
+| Content | Meaning | Source |
 |---|---|---|
-| Prometheus 文本 | 成功时返回 Prometheus exposition 文本 | 接口成功返回约定 |
-| 成功示例 | 成功示例以每个指标一行代表值覆盖大部分指标与标签字段，非逐行完整样例；标签取值见下文指标说明表 | 监控指标契约 |
-| 输出顺序 | 指标按分组输出，主要分组顺序为：容量 → 业务调用 → 驱逐/回温/命中 → `stored_keys` → KV 事件 → 客户端指标 | 监控指标契约 |
-| 结果口径 | `successes_total` 表示 `MMC_OK`；`failures_total` 表示真实错误（包括 `MMC_DUPLICATED_OBJECT`）；`not_found_total` 表示 `MMC_UNMATCHED_KEY`，不计入 failure；Batch 指标保留接口调用级统计，Batch 子项同时累计到对应非 Batch 指标；Batch 调用级统计中真实错误优先，只有无真实错误且存在子项 `MMC_UNMATCHED_KEY` 时才增加 Batch `not_found_total` | 监控指标契约 |
-| 占位值策略 | 当前无法提供真实值的指标仍保留在成功体中，可使用 `0` 或 `false` 占位 | 降级规则 |
+| Prometheus text | Returns Prometheus exposition text | Successfully returns the convention |
+| Successful example | Successful example uses one row of representative values ​​for each indicator to cover most indicators and label fields, not a complete example line by line; for label values, see the indicator description table below | Monitoring indicator contract |
+| output sequence | indicators are output in groups. The main grouping sequence is: capacity → business call → eviction/warming/hit → `stored_keys` → KV event → client indicator | Monitoring indicator contract |
+| Result semantics | `successes_total` indicates `MMC_OK`; `failures_total` indicates real errors (including `MMC_DUPLICATED_OBJECT`); `not_found_total` indicates `MMC_UNMATCHED_KEY` and is excluded from failures. Batch metrics count API calls, and batch sub-operations also contribute to the corresponding non-batch metrics. For a batch call, real errors take precedence; increment Batch `not_found_total` only when there is no real error and a sub-operation returns `MMC_UNMATCHED_KEY`. | Monitoring metric contract |
+| placeholder value strategy | Indicators that currently cannot provide real values ​​are still retained in the success body, and `0` or `false` placeholders can be used | downgrade rule |
 
-**指标说明**
+**Indicator Description**
 
-下表按输出顺序逐项说明。
+The following table explains each item in order of output.
 
-| 指标 | 类型 | 标签 | 数据来源 | 含义 |
+| indicator | type | label | data source | meaning |
 |---|---|---|---|---|
-| `memcache_segment_capacity_bytes` | gauge | `segment` | `RestSegmentSnapshot::totalBytes` | segment 总容量 |
-| `memcache_segment_allocated_bytes` | gauge | `segment` | `RestSegmentSnapshot::usedBytes` | segment 已分配容量 |
-| `memcache_segment_fragmentation_bytes` | gauge | `segment` | `RestSegmentSnapshot::fragmentationBytes` | segment 内部碎片（切块总量减活跃 blob 逻辑请求字节之和，含对齐与 max 模式放大） |
-| `memcache_total_capacity_bytes` | gauge | `medium`=`hbm`\|`dram`\|`ssd` | `RestUsageSnapshot::totalBytes` | 按介质汇总总容量；`ssd` 仅在容量或已用量非 0 时输出 |
-| `memcache_allocated_bytes` | gauge | `medium`=`hbm`\|`dram`\|`ssd` | `RestUsageSnapshot::usedBytes` | 按介质汇总已分配容量；`ssd` 同上 |
-| `memcache_<op>_requests_total` | counter | — | `MmcMetaMetricSnapshot::<op>RequestCount` | `<op>` 接口调用总次数；`<op>` ∈ {alloc, batch_alloc, get, batch_get, remove, batch_remove, remove_all, update_state, batch_update_state, query, batch_query, get_all_keys, exist_key, batch_exist_key, mount, unmount}；支持 per-rank（开启 `IsPerRankEnabled()` 时另输出同名 `{rank}` 标签明细） |
-| `memcache_<op>_successes_total` | counter | — | `MmcMetaMetricSnapshot::<op>SuccessCount` | `<op>` 成功次数（`MMC_OK`）；支持 per-rank |
-| `memcache_<op>_failures_total` | counter | — | `MmcMetaMetricSnapshot::<op>FailureCount` | `<op>` 失败次数（真实错误，含 `MMC_DUPLICATED_OBJECT`）；支持 per-rank |
-| `memcache_<op>_not_found_total` | counter | — | `MmcMetaMetricSnapshot::<op>NotFoundCount` | `<op>` 未命中次数（`MMC_UNMATCHED_KEY`），不计入 failure；仅 `get`/`batch_get`/`remove`/`batch_remove`/`update_state`/`batch_update_state`/`query`/`batch_query`/`exist_key`/`batch_exist_key` 输出；支持 per-rank |
-| `memcache_evict_operations_total` | counter | — | `MmcMetaMetricSnapshot::evictCount` | 驱逐操作总数；支持 per-rank |
-| `memcache_evict_running` | gauge | — | `MmcMetaManager::evictCheck_` | 是否正在执行淘汰(GC)（1=是，0=否） |
-| `memcache_flush_blobs_total` | counter | — | `MmcMetaMetricSnapshot::asyncFlushBlobAdded` | 异步 flush 写入 SSD 的 blob 总数；支持 per-rank |
-| `memcache_flush_bytes_total` | counter | — | `MmcMetaMetricSnapshot::asyncFlushBlobBytes` | 异步 flush 写入 SSD 的字节总数；支持 per-rank |
-| `memcache_get_hits_dram_total` | counter | — | `MmcMetaMetricSnapshot::getHitDramCount` | Get 直接命中可读块（HBM/DRAM）返回的 key 数，不触发回温；支持 per-rank |
-| `memcache_get_hits_ssd_total` | counter | — | `MmcMetaMetricSnapshot::getHitSsdCount` | Get 命中 SSD 且回温成功后由回温目标块返回的 key 数；回温失败不计入（计入 `rewarm_failed_total`）；支持 per-rank |
-| `memcache_rewarm_total` | counter | — | `MmcMetaMetricSnapshot::rewarmCount` | SSD→DRAM 回温操作总数；支持 per-rank |
-| `memcache_rewarm_failed_total` | counter | — | `MmcMetaMetricSnapshot::rewarmFailCount` | 失败的回温操作数；支持 per-rank |
-| `memcache_rewarm_bytes_total` | counter | — | `MmcMetaMetricSnapshot::rewarmBytesCount` | 累计回温字节数；支持 per-rank |
-| `memcache_rewarm_bytes_current` | gauge | — | `MmcMetaMetricSnapshot::rewarmBytesCurrent` | 当前在途回温字节数；支持 per-rank |
-| `memcache_stored_keys` | gauge | — | `MmcMetaMetricSnapshot::keyCount` | 当前已存储 key 数 |
-| `memcache_kv_events_published_total` | counter | — | `KvEventStats::publishedEvents` | 已发布 KV 事件总数 |
-| `memcache_kv_events_published_by_type_total` | counter | `type`=`stored`\|`removed`\|`cleared` | `KvEventStats::publishedStoredEvents` 等 | 按事件类型分组的发布数 |
-| `memcache_kv_events_published_by_medium_total` | counter | `medium`=`hbm`\|`dram`\|`ssd`\|`unknown` | `KvEventStats::publishedHbmEvents` 等 | 按存储介质分组的发布数 |
-| `memcache_kv_events_dropped_total` | counter | — | `KvEventStats::droppedEvents` | 队列满丢弃事件总数 |
-| `memcache_kv_events_dropped_stored_total` | counter | — | `KvEventStats::droppedStoredEvents` | 丢弃的 stored 类型事件数 |
-| `memcache_kv_events_dropped_high_priority_total` | counter | — | `KvEventStats::droppedHighPriorityEvents` | 丢弃的高优先级（removed/cleared）事件数 |
-| `memcache_kv_events_skipped_unparsed_total` | counter | — | `KvEventStats::skippedUnparsedKeys` | 无法解析为 hash 的 key 数 |
-| `memcache_kv_events_queue_size` | gauge | — | `KvEventStats::queueSize` | 当前队列事件数 |
-| `memcache_kv_events_queue_capacity` | gauge | — | `KvEventStats::queueCapacity` | 队列软容量上限（配置值） |
-| `memcache_kv_events_publisher_active` | gauge | — | `KvEventStats::publisherActive` | 发布线程是否运行（1/0） |
-| `memcache_kv_events_last_sequence` | gauge | — | `KvEventStats::lastSequence` | 最后发布的 ZMQ 序列号 |
-| `memcache_metric_stale` | gauge | `rank` | `RankMetricView::stale` | 客户端 metric 是否过期（1=过期，0=在线）；客户端指标仅在存在在线 `RankMetricView` 时输出 |
-| `memcache_bandwidth_bytes` | gauge | `rank`,`operation`=`batch_put`\|`batch_get` | `BandwidthMetricData::totalBytes` | 带宽窗口传输字节数（滑动窗口值） |
-| `memcache_bandwidth_duration_ms` | gauge | `rank`,`operation`=`batch_put`\|`batch_get`\|`batch_exist` | `BandwidthMetricData::totalDurationMs` | 带宽窗口时长（ms，滑动窗口值） |
-| `memcache_bandwidth_bytes_cum_total` | counter | `rank`,`operation`=`batch_put`\|`batch_get` | `BandwidthMetricData::cumTotalBytes` | 累计传输字节数（自启动起累计） |
-| `memcache_bandwidth_duration_ms_cum_total` | counter | `rank`,`operation`=`batch_put`\|`batch_get`\|`batch_exist` | `BandwidthMetricData::cumTotalDurationMs` | 累计时长（ms，自启动起累计） |
-| `memcache_bandwidth_latency_seconds` | gauge | `rank`,`operation`=`batch_put`\|`batch_get`\|`batch_exist`,`quantile`=`P50`\|`P90`\|`P99`\|`Avg` | `BandwidthMetricData::latencyP50`/`P90`/`P99`/`Avg` | 操作延迟分位（秒） |
-| `memcache_bandwidth_bytes_per_sec` | gauge | `rank`,`operation`=`batch_put`\|`batch_get` | `BandwidthMetricData::bytesPerSec` | 瞬时带宽（B/s） |
-| `memcache_ubs_io_disk_capacity_bytes` | gauge | `rank` | `UbsIoMetricData::diskCap` | SSD 总容量 |
-| `memcache_ubs_io_disk_used_bytes` | gauge | `rank` | `UbsIoMetricData::diskUsed` | SSD 已用容量 |
-| `memcache_ubs_io_mem_capacity_bytes` | gauge | `rank` | `UbsIoMetricData::memCap` | 内存总容量 |
-| `memcache_ubs_io_mem_used_bytes` | gauge | `rank` | `UbsIoMetricData::memUsed` | 内存已用容量 |
-| `memcache_ubs_io_disk_num` | gauge | `rank` | `UbsIoMetricData::diskNum` | 磁盘总数 |
-| `memcache_ubs_io_fault_disk_num` | gauge | `rank` | `UbsIoMetricData::faultDiskNum` | 故障磁盘数 |
-| `memcache_ubs_io_disk_status` | gauge | `rank`,`disk_path` | `UbsIoPerDiskMetric::status` | 单盘状态（0=正常） |
-| `memcache_ubs_io_disk_read_bandwidth_bytes_per_sec` | gauge | `rank`,`disk_path` | `UbsIoPerDiskMetric::readBandwidth` | 单盘读带宽 |
-| `memcache_ubs_io_disk_write_bandwidth_bytes_per_sec` | gauge | `rank`,`disk_path` | `UbsIoPerDiskMetric::writeBandwidth` | 单盘写带宽 |
-| `memcache_ubs_io_disk_total_bandwidth_bytes_per_sec` | gauge | `rank`,`disk_path` | `UbsIoPerDiskMetric::totalBandwidth` | 单盘总带宽 |
+| `memcache_segment_capacity_bytes` | gauge | `segment` | `RestSegmentSnapshot::totalBytes` | segment total capacity |
+| `memcache_segment_allocated_bytes` | gauge | `segment` | `RestSegmentSnapshot::usedBytes` | segment allocated capacity |
+| `memcache_segment_fragmentation_bytes` | gauge | `segment` | `RestSegmentSnapshot::fragmentationBytes` | segment internal fragmentation (total block size minus the sum of active blob logical request bytes, including alignment and max mode amplification) |
+| `memcache_total_capacity_bytes` | gauge | `medium`=`hbm`\|`dram`\|`ssd` | `RestUsageSnapshot::totalBytes` | Total capacity grouped by medium. `ssd` is included only when SSD capacity or usage is non-zero. |
+| `memcache_allocated_bytes` | gauge | `medium`=`hbm`\|`dram`\|`ssd` | `RestUsageSnapshot::usedBytes` | summarizes allocated capacity by medium; `ssd` same as |
+| `memcache_<op>_requests_total` | counter | — | `MmcMetaMetricSnapshot::<op>RequestCount` | `<op>` Total number of interface calls; `<op>` ∈ {alloc, batch_alloc, get, batch_get, remove, batch_remove, remove_all, update_state, batch_update_state, query, batch_query, get_all_keys, exist_key, batch_exist_key, mount, unmount}; supports per-rank (when `IsPerRankEnabled()` is turned on, the `{rank}` label details with the same name will also be output) |
+| `memcache_<op>_successes_total` | counter | — | `MmcMetaMetricSnapshot::<op>SuccessCount` | `<op>` Number of successes (`MMC_OK`); support per-rank |
+| `memcache_<op>_failures_total` | counter | — | `MmcMetaMetricSnapshot::<op>FailureCount` | `<op>` Number of failures (real errors, including `MMC_DUPLICATED_OBJECT`); support per-rank |
+| `memcache_<op>_not_found_total` | counter | — | `MmcMetaMetricSnapshot::<op>NotFoundCount` | `<op>` Number of misses (`MMC_UNMATCHED_KEY`), not included in failure; only `get`/`batch_get`/`remove`/`batch_remove`/`update_state`/`batch_update_state`/`query`/`batch_query`/`exist_key`/`batch_exist_key` output; supports per-rank |
+| `memcache_evict_operations_total` | counter | — | `MmcMetaMetricSnapshot::evictCount` | Total number of eviction operations; supports per-rank |
+| `memcache_evict_running` | gauge | — | `MmcMetaManager::evictCheck_` | Whether the elimination (GC) is being performed (1=yes, 0=no) |
+| `memcache_flush_blobs_total` | counter | — | `MmcMetaMetricSnapshot::asyncFlushBlobAdded` | Asynchronous flush The total number of blobs written to SSD; supports per-rank |
+| `memcache_flush_bytes_total` | counter | — | `MmcMetaMetricSnapshot::asyncFlushBlobBytes` | Asynchronous flush The total number of bytes written to SSD; supports per-rank |
+| `memcache_get_hits_dram_total` | counter | — | `MmcMetaMetricSnapshot::getHitDramCount` | Get The number of keys returned by directly hitting the readable block (HBM/DRAM) without triggering warm-up; supports per-rank |
+| `memcache_get_hits_ssd_total` | counter | — | `MmcMetaMetricSnapshot::getHitSsdCount` | Get The number of keys returned by the temperature recovery target block after hitting the SSD and the recovery is successful; recovery failures are not counted (counted into `rewarm_failed_total`); support per-rank |
+| `memcache_rewarm_total` | counter | — | `MmcMetaMetricSnapshot::rewarmCount` | Total number of SSD→DRAM rewarming operations; support per-rank |
+| `memcache_rewarm_failed_total` | counter | — | `MmcMetaMetricSnapshot::rewarmFailCount` | Number of failed warm-up operations; supports per-rank |
+| `memcache_rewarm_bytes_total` | counter | — | `MmcMetaMetricSnapshot::rewarmBytesCount` | Cumulative number of recovery bytes; supports per-rank |
+| `memcache_rewarm_bytes_current` | gauge | — | `MmcMetaMetricSnapshot::rewarmBytesCurrent` | Current number of recovery bytes in transit; supports per-rank |
+| `memcache_stored_keys` | gauge | — | `MmcMetaMetricSnapshot::keyCount` | Currently stored key number |
+| `memcache_kv_events_published_total` | counter | — | `KvEventStats::publishedEvents` | Total number of published KV events |
+| `memcache_kv_events_published_by_type_total` | counter | `type`=`stored`\|`removed`\|`cleared` | `KvEventStats::publishedStoredEvents` etc. | Number of publications grouped by event type |
+| `memcache_kv_events_published_by_medium_total` | counter | `medium`=`hbm`\|`dram`\|`ssd`\|`unknown` | `KvEventStats::publishedHbmEvents` etc. | Number of releases grouped by storage medium |
+| `memcache_kv_events_dropped_total` | counter | — | `KvEventStats::droppedEvents` | Total number of queue full discard events |
+| `memcache_kv_events_dropped_stored_total` | counter | — | `KvEventStats::droppedStoredEvents` | Number of discarded stored type events |
+| `memcache_kv_events_dropped_high_priority_total` | counter | — | `KvEventStats::droppedHighPriorityEvents` | Number of discarded high priority (removed/cleared) events |
+| `memcache_kv_events_skipped_unparsed_total` | counter | — | `KvEventStats::skippedUnparsedKeys` | The number of keys that cannot be parsed into hash |
+| `memcache_kv_events_queue_size` | gauge | — | `KvEventStats::queueSize` | Current number of queue events |
+| `memcache_kv_events_queue_capacity` | gauge | — | `KvEventStats::queueCapacity` | Queue soft capacity upper limit (configured value) |
+| `memcache_kv_events_publisher_active` | gauge | — | `KvEventStats::publisherActive` | Is the publishing thread running (1/0) |
+| `memcache_kv_events_last_sequence` | gauge | — | `KvEventStats::lastSequence` | Last released ZMQ serial number |
+| `memcache_metric_stale` | gauge | `rank` | `RankMetricView::stale` | Whether the client metric is expired (1=expired, 0=online); the client metric is only output when there is an online `RankMetricView` |
+| `memcache_bandwidth_bytes` | gauge | `rank`,`operation`=`batch_put`\|`batch_get` | `BandwidthMetricData::totalBytes` | Number of bytes transmitted in the bandwidth window (sliding window value) |
+| `memcache_bandwidth_duration_ms` | gauge | `rank`,`operation`=`batch_put`\|`batch_get`\|`batch_exist` | `BandwidthMetricData::totalDurationMs` | Bandwidth window duration (ms, sliding window value) |
+| `memcache_bandwidth_bytes_cum_total` | counter | `rank`,`operation`=`batch_put`\|`batch_get` | `BandwidthMetricData::cumTotalBytes` | Cumulative number of bytes transferred (cumulative since startup) |
+| `memcache_bandwidth_duration_ms_cum_total` | counter | `rank`,`operation`=`batch_put`\|`batch_get`\|`batch_exist` | `BandwidthMetricData::cumTotalDurationMs` | Accumulated time (ms, accumulated since startup) |
+# HELP memcache_bandwidth_latency_seconds Client bandwidth operation latency in seconds
+| `memcache_bandwidth_bytes_per_sec` | gauge | `rank`,`operation`=`batch_put`\|`batch_get` | `BandwidthMetricData::bytesPerSec` | Instantaneous bandwidth (B/s) |
+| `memcache_ubs_io_disk_capacity_bytes` | gauge | `rank` | `UbsIoMetricData::diskCap` | SSD total capacity |
+| `memcache_ubs_io_disk_used_bytes` | gauge | `rank` | `UbsIoMetricData::diskUsed` | SSD used capacity |
+| `memcache_ubs_io_mem_capacity_bytes` | gauge | `rank` | `UbsIoMetricData::memCap` | Total memory capacity |
+| `memcache_ubs_io_mem_used_bytes` | gauge | `rank` | `UbsIoMetricData::memUsed` | Memory used capacity |
+| `memcache_ubs_io_disk_num` | gauge | `rank` | `UbsIoMetricData::diskNum` | Total number of disks |
+| `memcache_ubs_io_fault_disk_num` | gauge | `rank` | `UbsIoMetricData::faultDiskNum` | Number of failed disks |
+| `memcache_ubs_io_disk_status` | gauge | `rank`,`disk_path` | `UbsIoPerDiskMetric::status` | Single disk status (0=normal) |
+| `memcache_ubs_io_disk_read_bandwidth_bytes_per_sec` | gauge | `rank`, `disk_path` | `UbsIoPerDiskMetric::readBandwidth` | Single disk read bandwidth |
+| `memcache_ubs_io_disk_write_bandwidth_bytes_per_sec` | gauge | `rank`, `disk_path` | `UbsIoPerDiskMetric::writeBandwidth` | Single disk write bandwidth |
+| `memcache_ubs_io_disk_total_bandwidth_bytes_per_sec` | gauge | `rank`,`disk_path` | `UbsIoPerDiskMetric::totalBandwidth` | Total bandwidth of single disk |
 
-### 错误示例
+### Error example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -476,21 +476,21 @@ memcache_ubs_io_disk_total_bandwidth_bytes_per_sec{rank="0",disk_path="/data/dis
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 请求是否成功；错误场景固定为 `false` | 全局统一错误返回规则 |
-| `error_message` | 实际错误原因；此处仅为格式示例 | 全局错误返回格式规则 |
-| `timestamp` | 错误返回格式中的时间戳字段 | 全局错误返回格式规则 |
+| `success` | Whether the request is successful; the error scenario is fixed to `false` | Global unified error return rule |
+| `error_message` | Actual error cause; here is only a format example | Global error return format rules |
+| `timestamp` | Timestamp field in error return format | Global error return format rules |
 
 ## 6 `GET /metrics/summary`
 
-### 作用
+### Purpose
 
-返回固定字段顺序的单行文本摘要。属于统计汇总接口，当前无法提供的字段允许按降级策略返回占位值。
+Returns a single-line text summary in fixed field order. It belongs to the statistics summary interface. Fields that are currently unavailable allow return of placeholder values ​​according to the downgrade policy.
 
-返回格式为单行文本，使用空格分隔的 `key=value` 片段组成；字段顺序固定，不换行，不做 JSON 包装。
+The return format is a single line of text, consisting of `key=value` fragments separated by spaces; the field order is fixed, no line breaks, and no JSON packaging.
 
 ### curl
 
@@ -498,59 +498,59 @@ memcache_ubs_io_disk_total_bandwidth_bytes_per_sec{rank="0",disk_path="/data/dis
 curl "http://127.0.0.1:8000/metrics/summary"
 ```
 
-### 请求参数
+### Request parameters
 
-无
+none
 
-### 成功示例
+### Successful Examples
 
-`text/plain; charset=utf-8`：
+`text/plain; charset=utf-8`:
 
 ```text
 keys=2 evict=0 rewarm=0 rewarm_fail=0 rewarm_bytes_total=0 rewarm_bytes_current=0 flush_blobs=0 flush_bytes=0 get_hit_dram=0 get_hit_ssd=0 query_hit_keys=0 hbm_used=360KiB/5.0GiB (0.01%) dram_used=0B/5.0GiB (0.00%) ssd_used=0B/0B alloc_req=68 alloc_success=68 alloc_fail=0 batch_alloc_req=0 batch_alloc_success=0 batch_alloc_fail=0 get_req=68 get_success=68 get_fail=0 get_not_found=0 batch_get_req=0 batch_get_success=0 batch_get_fail=0 batch_get_not_found=0 remove_req=0 remove_success=0 remove_fail=0 remove_not_found=0 batch_remove_req=0 batch_remove_success=0 batch_remove_fail=0 batch_remove_not_found=0 remove_all_req=0 remove_all_success=0 remove_all_fail=0 update_state_req=0 update_state_success=0 update_state_fail=0 update_state_not_found=0 batch_update_state_req=0 batch_update_state_success=0 batch_update_state_fail=0 batch_update_state_not_found=0 query_req=12 query_success=11 query_fail=0 query_not_found=1 batch_query_req=3 batch_query_success=3 batch_query_fail=0 batch_query_not_found=1 get_all_keys_req=4 get_all_keys_success=4 get_all_keys_fail=0 exist_key_req=0 exist_key_success=0 exist_key_fail=0 exist_key_not_found=0 batch_exist_key_req=0 batch_exist_key_success=0 batch_exist_key_fail=0 batch_exist_key_not_found=0 mount_req=0 mount_success=0 mount_fail=0 unmount_req=0 unmount_success=0 unmount_fail=0
 ```
 
-**解释**
+**Explanation**
 
-| 内容 | 含义 | 来源 |
+| Content | Meaning | Source |
 |---|---|---|
-| 单行文本 | 成功时必须为单行，不能换行拆分 | 接口成功返回约定 |
-| 格式 | 以空格分隔的 `key=value` 串，字段顺序固定 | 统计摘要接口契约 |
-| 成功示例字段 | 成功示例应包含当前约定的全部字段 | 统计摘要接口契约 |
-| 字段顺序固定 | 依次为 `keys`、`evict`、`rewarm`、`rewarm_fail`、`rewarm_bytes_total`、`rewarm_bytes_current`、`flush_blobs`、`flush_bytes`、`get_hit_dram`、`get_hit_ssd`、`query_hit_keys`、`hbm_used`、`dram_used`、`ssd_used`、`alloc_req`、`alloc_success`、`alloc_fail`、`batch_alloc_req`、`batch_alloc_success`、`batch_alloc_fail`、`get_req`、`get_success`、`get_fail`、`get_not_found`、`batch_get_req`、`batch_get_success`、`batch_get_fail`、`batch_get_not_found`、`remove_req`、`remove_success`、`remove_fail`、`remove_not_found`、`batch_remove_req`、`batch_remove_success`、`batch_remove_fail`、`batch_remove_not_found`、`remove_all_req`、`remove_all_success`、`remove_all_fail`、`update_state_req`、`update_state_success`、`update_state_fail`、`update_state_not_found`、`batch_update_state_req`、`batch_update_state_success`、`batch_update_state_fail`、`batch_update_state_not_found`、`query_req`、`query_success`、`query_fail`、`query_not_found`、`batch_query_req`、`batch_query_success`、`batch_query_fail`、`batch_query_not_found`、`get_all_keys_req`、`get_all_keys_success`、`get_all_keys_fail`、`exist_key_req`、`exist_key_success`、`exist_key_fail`、`exist_key_not_found`、`batch_exist_key_req`、`batch_exist_key_success`、`batch_exist_key_fail`、`batch_exist_key_not_found`、`mount_req`、`mount_success`、`mount_fail`、`unmount_req`、`unmount_success`、`unmount_fail` | 统计摘要接口契约 |
-| 容量字段 | `hbm_used` / `dram_used` / `ssd_used` 格式为 `used/total (xx.xx%)`：`used`/`total` 为人类可读容量（`B`/`KiB`/`MiB`/`GiB`/`TiB`/`PiB`/`EiB`，1024 进制，数值 <10 保留 1 位小数、否则取整），`(xx.xx%)` 为使用率（2 位小数）；`total` 为 0（未配置 SSD）时只输出 `0B/0B`、不带百分比；需要精确字节请使用 `/metrics` 的 `memcache_total_capacity_bytes` / `memcache_allocated_bytes` | 统计摘要接口契约 |
-| per-rank 字段 | 开启 `MmcMetaMetricManager::IsPerRankEnabled()` 时，在上述固定字段后以 `<base>_by_rank_<rank>=<val>` 形式追加 per-rank 字段（每个 rank 一项），覆盖驱逐/回温/flush/命中：`evict_by_rank`、`get_hit_dram_by_rank`、`get_hit_ssd_by_rank`、`rewarm_by_rank`、`rewarm_fail_by_rank`、`rewarm_bytes_by_rank`、`rewarm_bytes_current_by_rank`、`flush_blobs_by_rank`、`flush_bytes_by_rank`| per-rank 统计契约 |
-| 结果口径 | `*_success` 表示 `MMC_OK`；`*_fail` 表示真实错误（包括 `MMC_DUPLICATED_OBJECT`）；`*_not_found` 表示 `MMC_UNMATCHED_KEY`，不计入 fail；Batch 字段为接口调用级统计，Batch 子项同时累计到对应非 Batch 字段；Batch 调用级统计中真实错误优先，只有无真实错误且存在子项 `MMC_UNMATCHED_KEY` 时才增加 Batch `*_not_found` | 统计摘要接口契约 |
-| 占位值策略 | 当前无法提供真实值的字段仍保留在成功体中，可使用 `0`、`0B/0B` 或空值占位 | 降级规则 |
+| Single line of text | Must be a single line when successful and cannot be split by line breaks | The interface successfully returns |
+| format | `key=value` string separated by spaces, field order is fixed | Statistical summary interface contract |
+| Successful example fields | Successful example should contain all fields of the current contract | Statistical summary interface contract |
+| Fixed field order | in this order: `keys`,`evict`,`rewarm`,`rewarm_fail`,`rewarm_bytes_total`,`rewarm_bytes_current`,`flush_blobs`,`flush_bytes`,`get_hit_dram`,`get_hit_ssd`,`query_hit_keys`,`hbm_used`,`dram_used`,`ssd_used`,`alloc_req`,`alloc_success`,`alloc_fail`,`batch_alloc_req`,`batch_alloc_success`,`batch_alloc_fail`,`get_req`,`get_success`,`get_fail`,`get_not_found`,`batch_get_req`,`batch_get_success`,`batch_get_fail`,`batch_get_not_found`,`remove_req`,`remove_success`,`remove_fail`,`remove_not_found`,`batch_remove_req`,`batch_remove_success`,`batch_remove_fail`,`batch_remove_not_found`,`remove_all_req`,`remove_all_success`,`remove_all_fail`,`update_state_req`,`update_state_success`,`update_state_fail`,`update_state_not_found`,`batch_update_state_req`,`batch_update_state_success`,`batch_update_state_fail`,`batch_update_state_not_found`,`query_req`,`query_success`,`query_fail`,`query_not_found`,`batch_query_req`,`batch_query_success`,`batch_query_fail`,`batch_query_not_found`,`get_all_keys_req`,`get_all_keys_success`,`get_all_keys_fail`,`exist_key_req`,`exist_key_success`,`exist_key_fail`,`exist_key_not_found`,`batch_exist_key_req`,`batch_exist_key_success`,`batch_exist_key_fail`,`batch_exist_key_not_found`,`mount_req`,`mount_success`,`mount_fail`,`unmount_req`,`unmount_success`,`unmount_fail` | Statistical summary interface contract |
+| capacity field | `hbm_used` / `dram_used` / `ssd_used` use `used/total (xx.xx%)`. Capacities use human-readable base-1024 units (`B`/`KiB`/`MiB`/`GiB`/`TiB`/`PiB`/`EiB`), with one decimal place for values below 10 and whole numbers otherwise. Utilization has two decimal places. When `total` is 0 (no SSD configured), the output is `0B/0B` without a percentage. For exact byte counts, use `memcache_total_capacity_bytes` / `memcache_allocated_bytes` from `/metrics`. | Statistics summary interface contract |
+| per-rank field | When `MmcMetaMetricManager::IsPerRankEnabled()` is turned on, the per-rank field is appended in the form of `<base>_by_rank_<rank>=<val>` after the above fixed field (each rank One item), covering evictions/warming/flush/hits: `evict_by_rank`, `get_hit_dram_by_rank`, `get_hit_ssd_by_rank`, `rewarm_by_rank`, `rewarm_fail_by_rank`, `rewarm_bytes_by_rank`, `rewarm_bytes_current_by_rank`, `flush_blobs_by_rank`, `flush_bytes_by_rank`| per-rank statistical contract |
+| Result semantics | `*_success` indicates `MMC_OK`; `*_fail` indicates a real error (including `MMC_DUPLICATED_OBJECT`); `*_not_found` indicates `MMC_UNMATCHED_KEY` and is excluded from failures. Batch fields count API calls, while batch sub-operations also contribute to the corresponding non-batch fields. For a batch call, real errors take precedence; increment Batch `*_not_found` only when there is no real error and a sub-operation returns `MMC_UNMATCHED_KEY`. | Statistical summary interface contract |
+| placeholder value strategy | Fields that currently cannot provide real values ​​are still retained in the success body, and `0`, `0B/0B` or null value placeholders can be used | Downgrade rule |
 
-**字段说明**
+**Field description**
 
-下表按输出顺序逐字段说明。
+The following table explains field by field in output order.
 
-| 字段 | 格式 | 数据来源 | 含义 |
+| field | format | data source | meaning |
 |---|---|---|---|
-| `keys` | uint | `MmcMetaMetricSnapshot::keyCount` | 当前已存储 key 数量 |
-| `evict` | uint | `MmcMetaMetricSnapshot::evictCount` | 驱逐操作总数 |
-| `rewarm` | uint | `MmcMetaMetricSnapshot::rewarmCount` | SSD→DRAM 回温操作总数 |
-| `rewarm_fail` | uint | `MmcMetaMetricSnapshot::rewarmFailCount` | 失败的回温操作数 |
-| `rewarm_bytes_total` | uint (bytes) | `MmcMetaMetricSnapshot::rewarmBytesCount` | 累计回温字节数 |
-| `rewarm_bytes_current` | uint (bytes) | `MmcMetaMetricSnapshot::rewarmBytesCurrent` | 当前在途回温字节数 |
-| `flush_blobs` | uint | `MmcMetaMetricSnapshot::asyncFlushBlobAdded` | 异步 flush 写入 SSD 的 blob 总数 |
-| `flush_bytes` | uint (bytes) | `MmcMetaMetricSnapshot::asyncFlushBlobBytes` | 异步 flush 写入 SSD 的字节总数 |
-| `get_hit_dram` | uint | `MmcMetaMetricSnapshot::getHitDramCount` | Get 直接命中可读块（HBM/DRAM）返回的 key 数，不触发回温 |
-| `get_hit_ssd` | uint | `MmcMetaMetricSnapshot::getHitSsdCount` | Get 命中 SSD 且回温成功后由回温目标块返回的 key 数；回温失败不计入（计入 `rewarm_fail`） |
-| `query_hit_keys` | uint | `MmcMetaMetricSnapshot::queryHitKeysCount` | Query/BatchQuery 成功返回有效查询结果的 key 数 |
-| `hbm_used` | `used/total (xx.xx%)`（人类可读，如 `360KiB/5.0GiB (0.01%)`） | `RestUsageSnapshot`(hbm) | HBM 已用/总容量及使用率 |
-| `dram_used` | `used/total (xx.xx%)`（人类可读，如 `26GiB/4.1TiB (0.62%)`） | `RestUsageSnapshot`(dram) | DRAM 已用/总容量及使用率 |
-| `ssd_used` | `used/total (xx.xx%)`（人类可读，如 `0B/0B`） | `RestUsageSnapshot`(ssd) | SSD 已用/总容量及使用率；未配置 SSD 时为 `0B/0B`（无百分比） |
-| `<op>_req` | uint | `MmcMetaMetricSnapshot::<op>RequestCount` | `<op>` 接口调用总次数 |
-| `<op>_success` | uint | `MmcMetaMetricSnapshot::<op>SuccessCount` | `<op>` 成功次数（`MMC_OK`） |
-| `<op>_fail` | uint | `MmcMetaMetricSnapshot::<op>FailureCount` | `<op>` 失败次数（真实错误，含 `MMC_DUPLICATED_OBJECT`） |
-| `<op>_not_found` | uint | `MmcMetaMetricSnapshot::<op>NotFoundCount` | `<op>` 未命中次数（`MMC_UNMATCHED_KEY`），不计入 fail |
+| `keys` | uint | `MmcMetaMetricSnapshot::keyCount` | Currently stored key number |
+| `evict` | uint | `MmcMetaMetricSnapshot::evictCount` | Total number of eviction operations |
+| `rewarm` | uint | `MmcMetaMetricSnapshot::rewarmCount` | Total number of SSD→DRAM rewarming operations |
+| `rewarm_fail` | uint | `MmcMetaMetricSnapshot::rewarmFailCount` | Number of failed warm-up operations |
+| `rewarm_bytes_total` | uint (bytes) | `MmcMetaMetricSnapshot::rewarmBytesCount` | Cumulative number of temperature recovery bytes |
+| `rewarm_bytes_current` | uint (bytes) | `MmcMetaMetricSnapshot::rewarmBytesCurrent` | The number of bytes currently in transit |
+| `flush_blobs` | uint | `MmcMetaMetricSnapshot::asyncFlushBlobAdded` | Asynchronous flush Total number of blobs written to SSD |
+| `flush_bytes` | uint (bytes) | `MmcMetaMetricSnapshot::asyncFlushBlobBytes` | Asynchronous flush Total number of bytes written to SSD |
+| `get_hit_dram` | uint | `MmcMetaMetricSnapshot::getHitDramCount` | Get The number of keys returned by directly hitting the readable block (HBM/DRAM) without triggering recovery |
+| `get_hit_ssd` | uint | `MmcMetaMetricSnapshot::getHitSsdCount` | Get The number of keys returned by the rewarming target block after the SSD is hit and the rewarming is successful; the rewarming failure is not counted (counted into `rewarm_fail`) |
+| `query_hit_keys` | uint | `MmcMetaMetricSnapshot::queryHitKeysCount` | Number of keys for which Query/BatchQuery successfully returns a valid query result |
+| `hbm_used` | `used/total (xx.xx%)` (human-readable, e.g. `360KiB/5.0GiB (0.01%)`) | `RestUsageSnapshot`(hbm) | HBM used/total capacity and utilization |
+| `dram_used` | `used/total (xx.xx%)` (human-readable, e.g. `26GiB/4.1TiB (0.62%)`) | `RestUsageSnapshot`(dram) | DRAM used/total capacity and utilization |
+| `ssd_used` | `used/total (xx.xx%)` (human-readable, e.g. `0B/0B`) | `RestUsageSnapshot`(ssd) | SSD used/total capacity and utilization; `0B/0B` without a percentage when no SSD is configured |
+| `<op>_req` | uint | `MmcMetaMetricSnapshot::<op>RequestCount` | `<op>` Total number of interface calls |
+| `<op>_success` | uint | `MmcMetaMetricSnapshot::<op>SuccessCount` | `<op>` Number of successes (`MMC_OK`) |
+| `<op>_fail` | uint | `MmcMetaMetricSnapshot::<op>FailureCount` | `<op>` Number of failures (real errors, including `MMC_DUPLICATED_OBJECT`) |
+| `<op>_not_found` | uint | `MmcMetaMetricSnapshot::<op>NotFoundCount` | `<op>` Number of misses (`MMC_UNMATCHED_KEY`), not included in fail |
 
-### 错误示例
+### Error example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -560,19 +560,19 @@ keys=2 evict=0 rewarm=0 rewarm_fail=0 rewarm_bytes_total=0 rewarm_bytes_current=
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 请求是否成功；错误场景固定为 `false` | 全局统一错误返回规则 |
-| `error_message` | 实际错误原因；此处仅为格式示例 | 全局错误返回格式规则 |
-| `timestamp` | 错误返回格式中的时间戳字段 | 全局错误返回格式规则 |
+| `success` | Whether the request is successful; the error scenario is fixed to `false` | Global unified error return rule |
+| `error_message` | Actual error cause; here is only a format example | Global error return format rules |
+| `timestamp` | Timestamp field in error return format | Global error return format rules |
 
 ## 7 `GET /metrics/ptracer`
 
-### 作用
+### Purpose
 
-导出当前 ptracer 原始文本输出。
+Export the current ptracer raw text output.
 
 ### curl
 
@@ -580,13 +580,13 @@ keys=2 evict=0 rewarm=0 rewarm_fail=0 rewarm_bytes_total=0 rewarm_bytes_current=
 curl "http://127.0.0.1:8000/metrics/ptracer"
 ```
 
-### 请求参数
+### Request parameters
 
-无
+none
 
-### 成功示例
+### Successful Examples
 
-`text/plain; charset=utf-8`：
+`text/plain; charset=utf-8`:
 
 ```text
 TIME                   NAME                                    BEGIN          GOOD_END       BAD_END        ON_FLY         P50(us)        P99(us)        P999(us)       AVG(us)        MAX(us)
@@ -594,16 +594,16 @@ TIME                   NAME                                    BEGIN          GO
 2026-01-05 14:57:03    TP_MMC_META_GET                         8              8              0              0              14.820         55.000         62.020         31.398         62.020
 ```
 
-**解释**
+**Explanation**
 
-| 内容 | 含义 | 来源 |
+| Content | Meaning | Source |
 |---|---|---|
-| ptracer 文本 | 成功时保持当前 ptracer 文本输出格式 | 接口成功返回约定 |
-| alloc/free 打点 | 如新增 alloc/free 打点，也通过该接口暴露 | ptracer 输出范围 |
+| ptracer text | Keep the current ptracer text output format when successful | The interface returns successfully |
+| alloc/free dot | If alloc/free dot is added, it will also be exposed through this interface | ptracer output range |
 
-### 错误示例
+### Error example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -613,19 +613,19 @@ TIME                   NAME                                    BEGIN          GO
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 请求是否成功；错误场景固定为 `false` | 全局统一错误返回规则 |
-| `error_message` | 实际错误原因；此处仅为格式示例 | 全局错误返回格式规则 |
-| `timestamp` | 错误返回格式中的时间戳字段 | 全局错误返回格式规则 |
+| `success` | Whether the request is successful; the error scenario is fixed to `false` | Global unified error return rule |
+| `error_message` | Actual error cause; here is only a format example | Global error return format rules |
+| `timestamp` | Timestamp field in error return format | Global error return format rules |
 
 ## 8 `GET /role`
 
-### 作用
+### Purpose
 
-返回当前角色文本。
+Returns the current character text.
 
 ### curl
 
@@ -633,27 +633,27 @@ TIME                   NAME                                    BEGIN          GO
 curl "http://127.0.0.1:8000/role"
 ```
 
-### 请求参数
+### Request parameters
 
-无
+none
 
-### 成功示例
+### Successful Examples
 
-`text/plain; charset=utf-8`：
+`text/plain; charset=utf-8`:
 
 ```text
 leader
 ```
 
-**解释**
+**Explanation**
 
-| 内容 | 含义 | 来源 |
+| Content | Meaning | Source |
 |---|---|---|
-| `leader` / `standby` / `unknown` | 当前角色文本 | HA 状态映射结果 |
+| `leader` / `standby` / `unknown` | Current role text | HA status mapping result |
 
-### 错误示例
+### Error example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -663,19 +663,19 @@ leader
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 请求是否成功；错误场景固定为 `false` | 全局统一错误返回规则 |
-| `error_message` | 实际错误原因；此处仅为格式示例 | 全局错误返回格式规则 |
-| `timestamp` | 错误返回格式中的时间戳字段 | 全局错误返回格式规则 |
+| `success` | Whether the request is successful; the error scenario is fixed to `false` | Global unified error return rule |
+| `error_message` | Actual error cause; here is only a format example | Global error return format rules |
+| `timestamp` | Timestamp field in error return format | Global error return format rules |
 
 ## 9 `GET /ha_status`
 
-### 作用
+### Purpose
 
-返回当前 HA 状态文本。无法稳定映射时返回 `unknown`。
+Returns the current HA status text. Returns `unknown` when mapping cannot be stabilized.
 
 ### curl
 
@@ -683,27 +683,27 @@ leader
 curl "http://127.0.0.1:8000/ha_status"
 ```
 
-### 请求参数
+### Request parameters
 
-无
+none
 
-### 成功示例
+### Successful Examples
 
-`text/plain; charset=utf-8`：
+`text/plain; charset=utf-8`:
 
 ```text
 serving
 ```
 
-**解释**
+**Explanation**
 
-| 内容 | 含义 | 来源 |
+| Content | Meaning | Source |
 |---|---|---|
-| `starting` / `standby` / `serving` / `unknown` | 当前 HA 状态文本 | HA 状态快照 |
+| `starting` / `standby` / `serving` / `unknown` | Current HA status text | HA status snapshot |
 
-### 错误示例
+### Error example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -713,19 +713,19 @@ serving
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 请求是否成功；错误场景固定为 `false` | 全局统一错误返回规则 |
-| `error_message` | 实际错误原因；此处仅为格式示例 | 全局错误返回格式规则 |
-| `timestamp` | 错误返回格式中的时间戳字段 | 全局错误返回格式规则 |
+| `success` | Whether the request is successful; the error scenario is fixed to `false` | Global unified error return rule |
+| `error_message` | Actual error cause; here is only a format example | Global error return format rules |
+| `timestamp` | Timestamp field in error return format | Global error return format rules |
 
 ## 10 `GET /leader`
 
-### 作用
+### Purpose
 
-返回 leader 是否存在及其地址和视图版本。响应中不包含 `role` 字段；当前无法提供稳定值的字段允许返回默认值。
+Returns whether the leader exists, its address and view version. The `role` field is not included in the response; fields that cannot currently provide stable values ​​are allowed to return default values.
 
 ### curl
 
@@ -733,13 +733,13 @@ serving
 curl "http://127.0.0.1:8000/leader"
 ```
 
-### 请求参数
+### Request parameters
 
-无
+none
 
-### 成功示例
+### Successful Examples
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -749,17 +749,17 @@ curl "http://127.0.0.1:8000/leader"
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `present` | 当前是否能确认 leader 存在 | HA 状态快照 |
-| `leader_address` | leader 地址；无稳定来源时固定 `unknown` | HA 状态快照 |
-| `view_version` | 视图版本；无稳定来源时固定 `0` | HA 状态快照 |
+| `present` | Whether the existence of the leader can be confirmed currently | HA status snapshot |
+| `leader_address` | leader address; fixed when there is no stable source `unknown` | HA status snapshot |
+| `view_version` | View version; fixed when no stable source `0` | HA state snapshot |
 
-### 错误示例
+### Error example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -769,19 +769,19 @@ curl "http://127.0.0.1:8000/leader"
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 请求是否成功；错误场景固定为 `false` | 全局统一错误返回规则 |
-| `error_message` | 实际错误原因；此处仅为格式示例 | 全局错误返回格式规则 |
-| `timestamp` | 错误返回格式中的时间戳字段 | 全局错误返回格式规则 |
+| `success` | Whether the request is successful; the error scenario is fixed to `false` | Global unified error return rule |
+| `error_message` | Actual error cause; here is only a format example | Global error return format rules |
+| `timestamp` | Timestamp field in error return format | Global error return format rules |
 
 ## 11 `GET /query_key?key=...`
 
-### 作用
+### Purpose
 
-查询单个 key 的元数据信息，包括对象大小、访问属性和 blob 分布信息。
+Query the metadata information of a single key, including object size, access attributes, and blob distribution information.
 
 ### curl
 
@@ -789,15 +789,15 @@ curl "http://127.0.0.1:8000/leader"
 curl "http://127.0.0.1:8000/query_key?key=key_a"
 ```
 
-### 请求参数
+### Request parameters
 
-| 参数名 | 类型 | 必填 | 描述 |
+| Parameter name | Type | Required | Description |
 |---|---|---|---|
-| `key` | String | 是 | 要查询的键名 |
+| `key` | String | Yes | The key name to be queried |
 
-### 成功示例
+### Successful Examples
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -825,25 +825,25 @@ curl "http://127.0.0.1:8000/query_key?key=key_a"
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `key` | 当前查询的 key | HTTP 接口返回字段 |
-| `size` | 对象总大小 | `MemObjQueryInfo::size_` |
-| `prot` | 对象访问属性 | `MemObjQueryInfo::prot_` |
-| `numBlobs` | 当前对象对应的 blob 数量 | `MemObjQueryInfo::numBlobs_` |
-| `valid` | 当前 key 是否有效 | `MemObjQueryInfo::valid_` |
-| `blobs` | blob 描述信息列表 | `MemObjQueryInfo::blobs_` |
-| `blobs[].rank` | blob 所在 rank | `MmcMemBlobDesc::rank_` |
-| `blobs[].medium` | blob 所在介质类型字符串 | `MmcMemBlobDesc::mediaType_` |
-| `blobs[].gva` | blob 的全局虚拟地址 | `MmcMemBlobDesc::gva_` |
-| `blobs[].state` | blob 在 meta 侧的状态 | `MmcMemBlobDesc::state_` |
-| `blobs[].leaseTimeoutTtlMs` | 剩余读租约 TTL，单位毫秒 | `MmcMemBlobDesc::leaseTimeoutTtlMs_` |
+| `key` | Current query key | HTTP interface return field |
+| `size` | Total object size | `MemObjQueryInfo::size_` |
+| `prot` | Object access property | `MemObjQueryInfo::prot_` |
+| `numBlobs` | Number of blobs corresponding to the current object | `MemObjQueryInfo::numBlobs_` |
+| `valid` | Is the current key valid? | `MemObjQueryInfo::valid_` |
+| `blobs` | blob description information list | `MemObjQueryInfo::blobs_` |
+| `blobs[].rank` | blob is in rank | `MmcMemBlobDesc::rank_` |
+| `blobs[].medium` | The media type string where the blob is located | `MmcMemBlobDesc::mediaType_` |
+| `blobs[].gva` | Global virtual address of the blob | `MmcMemBlobDesc::gva_` |
+| `blobs[].state` | The status of the blob on the meta side | `MmcMemBlobDesc::state_` |
+| `blobs[].leaseTimeoutTtlMs` | Remaining read lease TTL, in milliseconds | `MmcMemBlobDesc::leaseTimeoutTtlMs_` |
 
-### 错误示例
+### Error example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -853,19 +853,19 @@ curl "http://127.0.0.1:8000/query_key?key=key_a"
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 请求是否成功；错误场景固定为 `false` | 全局统一错误返回规则 |
-| `error_message` | 实际错误原因；此处仅为格式示例 | 全局错误返回格式规则 |
-| `timestamp` | 错误返回格式中的时间戳字段 | 全局错误返回格式规则 |
+| `success` | Whether the request is successful; the error scenario is fixed to `false` | Global unified error return rule |
+| `error_message` | Actual error cause; here is only a format example | Global error return format rules |
+| `timestamp` | Timestamp field in error return format | Global error return format rules |
 
 ## 12 `GET /batch_query_keys?keys=...`
 
-### 作用
+### Purpose
 
-批量查询多个 key 的元数据信息；单个 key 的字段定义与 `/query_key` 保持一致。
+Query the metadata information of multiple keys in batches; the field definition of a single key is consistent with `/query_key`.
 
 ### curl
 
@@ -873,15 +873,15 @@ curl "http://127.0.0.1:8000/query_key?key=key_a"
 curl "http://127.0.0.1:8000/batch_query_keys?keys=key_a,key_b"
 ```
 
-### 请求参数
+### Request parameters
 
-| 参数名 | 类型 | 必填 | 描述 |
+| Parameter name | Type | Required | Description |
 |---|---|---|---|
-| `keys` | String | 是 | 逗号分隔的 key 列表 |
+| `keys` | String | Yes | comma separated key list |
 
-### 成功示例
+### Successful Examples
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -915,27 +915,27 @@ curl "http://127.0.0.1:8000/batch_query_keys?keys=key_a,key_b"
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 接口级调用是否成功；成功示例中为 `true` | 成功体契约 |
-| `data` | 按请求顺序返回的查询结果数组 | 成功体契约 |
-| `data[].key` | 当前结果对应的 key | 与 `/query_key` 保持一致 |
-| `data[].size` | 对象总大小 | 与 `/query_key` 保持一致 |
-| `data[].prot` | 对象访问属性 | 与 `/query_key` 保持一致 |
-| `data[].numBlobs` | 当前对象对应的 blob 数量 | 与 `/query_key` 保持一致 |
-| `data[].valid` | 当前 key 是否有效 | 与 `/query_key` 保持一致 |
-| `data[].blobs` | blob 描述信息列表 | 与 `/query_key` 保持一致 |
-| `data[].blobs[].rank` | blob 所在 rank | 与 `/query_key` 保持一致 |
-| `data[].blobs[].medium` | blob 所在介质类型字符串 | 与 `/query_key` 保持一致 |
-| `data[].blobs[].gva` | blob 的全局虚拟地址 | 与 `/query_key` 保持一致 |
-| `data[].blobs[].state` | blob 在 meta 侧的状态 | 与 `/query_key` 保持一致 |
-| `data[].blobs[].leaseTimeoutTtlMs` | 剩余读租约 TTL，单位毫秒 | 与 `/query_key` 保持一致 |
+| `success` | Whether the interface level call is successful; in the successful example, it is `true` | Success body contract |
+| `data` | Query result array returned in request order | Success body contract |
+| `data[].key` | The key | corresponding to the current result is consistent with `/query_key` |
+| `data[].size` | The total size of the object | is consistent with `/query_key` |
+| `data[].prot` | Object access properties | are consistent with `/query_key` |
+| `data[].numBlobs` | The number of blobs corresponding to the current object | is consistent with `/query_key` |
+| `data[].valid` | Is the current key valid? | is consistent with `/query_key` |
+| `data[].blobs` | blob description information list | is consistent with `/query_key` |
+| `data[].blobs[].rank` | blob is in rank | consistent with `/query_key` |
+| `data[].blobs[].medium` | The media type string where the blob is located | is consistent with `/query_key` |
+| `data[].blobs[].gva` | The global virtual address of the blob | is consistent with `/query_key` |
+| `data[].blobs[].state` | The status of the blob on the meta side | is consistent with `/query_key` |
+| `data[].blobs[].leaseTimeoutTtlMs` | Remaining read lease TTL, in milliseconds | is consistent with `/query_key` |
 
-### 错误示例
+### Error example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -945,19 +945,19 @@ curl "http://127.0.0.1:8000/batch_query_keys?keys=key_a,key_b"
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 接口级请求是否成功；错误场景固定为 `false` | 全局统一错误返回规则 |
-| `error_message` | 实际错误原因；此处仅为格式示例 | 全局错误返回格式规则 |
-| `timestamp` | 错误返回格式中的时间戳字段 | 全局错误返回格式规则 |
+| `success` | Whether the interface level request is successful; the error scenario is fixed to `false` | Global unified error return rules |
+| `error_message` | Actual error cause; here is only a format example | Global error return format rules |
+| `timestamp` | Timestamp field in error return format | Global error return format rules |
 
 ## 13 `DELETE /key?key=...`
 
-### 作用
+### Purpose
 
-删除指定业务 KV Cache key 及其关联数据。
+Delete the specified business KV Cache key and its associated data.
 
 ### curl
 
@@ -965,15 +965,15 @@ curl "http://127.0.0.1:8000/batch_query_keys?keys=key_a,key_b"
 curl -X DELETE "http://127.0.0.1:8000/key?key=demo_key"
 ```
 
-### 请求参数
+### Request parameters
 
-| 参数名 | 类型 | 必填 | 描述 |
+| Parameter name | Type | Required | Description |
 |---|---|---|---|
-| `key` | String | 是 | 要删除的业务 KV Cache key |
+| `key` | String | Yes | The business to be deleted KV Cache key |
 
-### 成功示例
+### Successful Examples
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -982,16 +982,16 @@ curl -X DELETE "http://127.0.0.1:8000/key?key=demo_key"
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 请求是否成功；成功场景固定为 `true` | 接口成功返回约定 |
-| `message` | 成功提示信息 | 接口成功返回约定 |
+| `success` | Whether the request is successful; the success scenario is fixed as `true` | The interface successfully returns the convention |
+| `message` | Success prompt information | Interface success return convention |
 
-### 错误示例
+### Error example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -1001,19 +1001,19 @@ curl -X DELETE "http://127.0.0.1:8000/key?key=demo_key"
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 请求是否成功；错误场景固定为 `false` | 全局统一错误返回规则 |
-| `error_message` | 实际错误原因；此处仅为格式示例 | 全局错误返回格式规则 |
-| `timestamp` | 错误返回格式中的时间戳字段 | 全局错误返回格式规则 |
+| `success` | Whether the request is successful; the error scenario is fixed to `false` | Global unified error return rule |
+| `error_message` | Actual error cause; here is only a format example | Global error return format rules |
+| `timestamp` | Timestamp field in error return format | Global error return format rules |
 
 ## 14 `DELETE /all_keys`
 
-### 作用
+### Purpose
 
-删除所有业务 KV Cache key 及其关联数据。
+Delete all business KV Cache keys and their associated data.
 
 ### curl
 
@@ -1021,13 +1021,13 @@ curl -X DELETE "http://127.0.0.1:8000/key?key=demo_key"
 curl -X DELETE "http://127.0.0.1:8000/all_keys"
 ```
 
-### 请求参数
+### Request parameters
 
-无
+none
 
-### 成功示例
+### Successful Examples
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -1036,16 +1036,16 @@ curl -X DELETE "http://127.0.0.1:8000/all_keys"
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 请求是否成功；成功场景固定为 `true` | 接口成功返回约定 |
-| `message` | 成功提示信息 | 接口成功返回约定 |
+| `success` | Whether the request is successful; the success scenario is fixed as `true` | The interface successfully returns the convention |
+| `message` | Success prompt information | Interface success return convention |
 
-### 错误示例
+### Error example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -1055,19 +1055,19 @@ curl -X DELETE "http://127.0.0.1:8000/all_keys"
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 请求是否成功；错误场景固定为 `false` | 全局统一错误返回规则 |
-| `error_message` | 实际错误原因；此处仅为格式示例 | 全局错误返回格式规则 |
-| `timestamp` | 错误返回格式中的时间戳字段 | 全局错误返回格式规则 |
+| `success` | Whether the request is successful; the error scenario is fixed to `false` | Global unified error return rule |
+| `error_message` | Actual error cause; here is only a format example | Global error return format rules |
+| `timestamp` | Timestamp field in error return format | Global error return format rules |
 
 ## 15 `GET /get_all_keys`
 
-### 作用
+### Purpose
 
-列出全部对象 key 列表。
+List all object keys.
 
 ### curl
 
@@ -1075,28 +1075,28 @@ curl -X DELETE "http://127.0.0.1:8000/all_keys"
 curl "http://127.0.0.1:8000/get_all_keys"
 ```
 
-### 请求参数
+### Request parameters
 
-无
+none
 
-### 成功示例
+### Successful Examples
 
-`text/plain; charset=utf-8`：
+`text/plain; charset=utf-8`:
 
 ```text
 key_1
 key_2
 ```
 
-**解释**
+**Explanation**
 
-| 内容 | 含义 | 来源 |
+| Content | Meaning | Source |
 |---|---|---|
-| 每行一个 key | 返回 key 列表；逐行拼接，末尾可带换行；列表为空时 body 也可为空 | 接口成功返回约定 |
+| One key per line | Returns the key list; spliced ​​line by line, with a newline at the end; when the list is empty, the body can also be empty | The interface successfully returns the convention |
 
-### 错误示例
+### Error example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -1106,19 +1106,19 @@ key_2
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 请求是否成功；错误场景固定为 `false` | 全局统一错误返回规则 |
-| `error_message` | 实际错误原因；此处仅为格式示例 | 全局错误返回格式规则 |
-| `timestamp` | 错误返回格式中的时间戳字段 | 全局错误返回格式规则 |
+| `success` | Whether the request is successful; the error scenario is fixed to `false` | Global unified error return rule |
+| `error_message` | Actual error cause; here is only a format example | Global error return format rules |
+| `timestamp` | Timestamp field in error return format | Global error return format rules |
 
 ## 16 `GET /get_all_segments`
 
-### 作用
+### Purpose
 
-列出全部 `segment_id`。当前版本逐行返回文本，不返回 JSON 数组。
+List all `segment_id`. The current version returns text line by line and does not return a JSON array.
 
 ### curl
 
@@ -1126,13 +1126,13 @@ key_2
 curl "http://127.0.0.1:8000/get_all_segments"
 ```
 
-### 请求参数
+### Request parameters
 
-无
+none
 
-### 成功示例
+### Successful Examples
 
-`text/plain; charset=utf-8`：
+`text/plain; charset=utf-8`:
 
 ```text
 rank-0-hbm
@@ -1141,16 +1141,16 @@ rank-0-dram
 rank-1-dram
 ```
 
-**解释**
+**Explanation**
 
-| 内容 | 含义 | 来源 |
+| Content | Meaning | Source |
 |---|---|---|
-| 每行一个 `segment_id` | 成功时逐行返回 `segment_id` 文本 | 固定成功体形态 |
-| `segment_id` 命名 | 命名格式为 `rank-<rank>-<medium-lower>` | 全局字段规则 |
+| One per line `segment_id` | Returns line by line when successful `segment_id` text | Fixed successful body shape |
+| `segment_id` naming | naming format is `rank-<rank>-<medium-lower>` | global field rule |
 
-### 错误示例
+### Error example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -1160,19 +1160,19 @@ rank-1-dram
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 请求是否成功；错误场景固定为 `false` | 全局统一错误返回规则 |
-| `error_message` | 实际错误原因；此处仅为格式示例 | 全局错误返回格式规则 |
-| `timestamp` | 错误返回格式中的时间戳字段 | 全局错误返回格式规则 |
+| `success` | Whether the request is successful; the error scenario is fixed to `false` | Global unified error return rule |
+| `error_message` | Actual error cause; here is only a format example | Global error return format rules |
+| `timestamp` | Timestamp field in error return format | Global error return format rules |
 
 ## 17 `GET /query_segment?segment=...`
 
-### 作用
+### Purpose
 
-查询指定 segment 的容量占用信息。
+Query the capacity usage information of the specified segment.
 
 ### curl
 
@@ -1180,15 +1180,15 @@ rank-1-dram
 curl "http://127.0.0.1:8000/query_segment?segment=rank-0-hbm"
 ```
 
-### 请求参数
+### Request parameters
 
-| 参数名 | 类型 | 必填 | 描述 |
+| Parameter name | Type | Required | Description |
 |---|---|---|---|
-| `segment` | String | 是 | 目标 `segment_id` |
+| `segment` | String | Yes | target `segment_id` |
 
-### 成功示例
+### Successful Examples
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -1202,21 +1202,21 @@ curl "http://127.0.0.1:8000/query_segment?segment=rank-0-hbm"
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `segment` | 查询到的 `segment_id` | 接口成功返回约定 |
-| `medium`=`HBM`\|`DRAM`\|`SSD` | segment 介质类型，示例为 `HBM` 或 `DRAM` | segment 信息 |
-| `total_bytes` | segment 总容量，单位 `bytes` | segment 信息 |
-| `used_bytes` | 已使用容量，单位 `bytes` | segment 信息 |
-| `remaining_bytes` | 剩余容量，单位 `bytes` | 由总量与已用量计算 |
-| `fragmentation_bytes` | 内部碎片，单位 `bytes`（切块总量减活跃 blob 逻辑请求字节之和） | segment 信息 |
-| `remaining_ratio` | 剩余比例，范围 `[0,1]` | 由容量计算 |
+| `segment` | The queried `segment_id` | interface successfully returns the convention |
+| `medium`=`HBM`\|`DRAM`\|`SSD` | segment media type, example is `HBM` or `DRAM` | segment information |
+| `total_bytes` | segment total capacity, unit `bytes` | segment information |
+| `used_bytes` | Used capacity, unit `bytes` | segment information |
+| `remaining_bytes` | Remaining capacity, unit `bytes` | Calculated from total amount and used amount |
+| `fragmentation_bytes` | Internal fragmentation, unit `bytes` (total block size minus the sum of active blob logical request bytes) | segment information |
+| `remaining_ratio` | Remaining proportion, range `[0,1]` | Calculated from capacity |
 
-### 错误示例
+### Error example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -1226,19 +1226,19 @@ curl "http://127.0.0.1:8000/query_segment?segment=rank-0-hbm"
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 请求是否成功；错误场景固定为 `false` | 全局统一错误返回规则 |
-| `error_message` | 实际错误原因；此处仅为格式示例 | 全局错误返回格式规则 |
-| `timestamp` | 错误返回格式中的时间戳字段 | 全局错误返回格式规则 |
+| `success` | Whether the request is successful; the error scenario is fixed to `false` | Global unified error return rule |
+| `error_message` | Actual error cause; here is only a format example | Global error return format rules |
+| `timestamp` | Timestamp field in error return format | Global error return format rules |
 
 ## 18 `POST /api/v1/drain_jobs`
 
-### 作用
+### Purpose
 
-目标契约为返回固定字段顺序的单行文本摘要；当前源码尚未按该契约实现。
+The target contract is to return a single-line text summary in a fixed field order; the current source code has not yet been implemented according to this contract.
 
 ### curl
 
@@ -1246,17 +1246,17 @@ curl "http://127.0.0.1:8000/query_segment?segment=rank-0-hbm"
 curl -X POST "http://127.0.0.1:8000/api/v1/drain_jobs"
 ```
 
-### 请求参数
+### Request parameters
 
-无
+none
 
-### 成功示例
+### Successful Examples
 
-无；该接口当前版本不提供成功返回。
+None; the current version of this interface does not provide successful return.
 
-### 错误示例
+### Error example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -1266,19 +1266,19 @@ curl -X POST "http://127.0.0.1:8000/api/v1/drain_jobs"
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 请求是否成功；该接口当前固定返回 `false` | “不实现，统一错误格式”要求 |
-| `error_message` | 实际错误原因；该接口当前为 `Not supported` | 未实现接口约定 |
-| `timestamp` | 错误返回格式中的时间戳字段 | 统一错误格式 |
+| `success` | Whether the request is successful; the interface currently returns `false` | "Not implemented, unified error format" requirement |
+| `error_message` | Actual error reason; the interface is currently `Not supported` | The interface convention is not implemented |
+| `timestamp` | Timestamp field in error return format | Unified error format |
 
 ## 19 `GET /api/v1/drain_jobs/query?job_id=...`
 
-### 作用
+### Purpose
 
-目标契约为返回固定字段顺序的单行文本摘要；当前源码尚未按该契约实现。
+The target contract is to return a single-line text summary in a fixed field order; the current source code has not yet been implemented according to this contract.
 
 ### curl
 
@@ -1286,19 +1286,19 @@ curl -X POST "http://127.0.0.1:8000/api/v1/drain_jobs"
 curl "http://127.0.0.1:8000/api/v1/drain_jobs/query?job_id=job_1"
 ```
 
-### 请求参数
+### Request parameters
 
-| 参数名 | 类型 | 必填 | 描述 |
+| Parameter name | Type | Required | Description |
 |---|---|---|---|
-| `job_id` | String | 是 | drain job 标识 |
+| `job_id` | String | Yes | drain job identification |
 
-### 成功示例
+### Successful Examples
 
-无；该接口当前版本不提供成功返回。
+None; the current version of this interface does not provide successful return.
 
-### 错误示例
+### Error example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -1308,19 +1308,19 @@ curl "http://127.0.0.1:8000/api/v1/drain_jobs/query?job_id=job_1"
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 请求是否成功；该接口当前固定返回 `false` | “不实现，统一错误格式”要求 |
-| `error_message` | 实际错误原因；该接口当前为 `Not supported` | 未实现接口约定 |
-| `timestamp` | 错误返回格式中的时间戳字段 | 统一错误格式 |
+| `success` | Whether the request is successful; the interface currently returns `false` | "Not implemented, unified error format" requirement |
+| `error_message` | Actual error reason; the interface is currently `Not supported` | The interface convention is not implemented |
+| `timestamp` | Timestamp field in error return format | Unified error format |
 
 ## 20 `POST /api/v1/drain_jobs/cancel?job_id=...`
 
-### 作用
+### Purpose
 
-当前版本不实现该接口；返回统一错误格式，实际 `error_message` 为 `Not supported`。
+The current version does not implement this interface; it returns a unified error format, and the actual `error_message` is `Not supported`.
 
 ### curl
 
@@ -1328,19 +1328,19 @@ curl "http://127.0.0.1:8000/api/v1/drain_jobs/query?job_id=job_1"
 curl -X POST "http://127.0.0.1:8000/api/v1/drain_jobs/cancel?job_id=job_1"
 ```
 
-### 请求参数
+### Request parameters
 
-| 参数名 | 类型 | 必填 | 描述 |
+| Parameter name | Type | Required | Description |
 |---|---|---|---|
-| `job_id` | String | 是 | drain job 标识 |
+| `job_id` | String | Yes | drain job identification |
 
-### 成功示例
+### Successful Examples
 
-无；该接口当前版本不提供成功返回。
+None; the current version of this interface does not provide successful return.
 
-### 错误示例
+### Error example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -1350,19 +1350,19 @@ curl -X POST "http://127.0.0.1:8000/api/v1/drain_jobs/cancel?job_id=job_1"
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 请求是否成功；该接口当前固定返回 `false` | “不实现，统一错误格式”要求 |
-| `error_message` | 实际错误原因；该接口当前为 `Not supported` | 未实现接口约定 |
-| `timestamp` | 错误返回格式中的时间戳字段 | 统一错误格式 |
+| `success` | Whether the request is successful; the interface currently returns `false` | "Not implemented, unified error format" requirement |
+| `error_message` | Actual error reason; the interface is currently `Not supported` | The interface convention is not implemented |
+| `timestamp` | Timestamp field in error return format | Unified error format |
 
 ## 21 `GET /api/v1/segments/status?segment=...`
 
-### 作用
+### Purpose
 
-查询指定 segment 的状态。当前版本仅返回 `OK`。
+Query the status of the specified segment. The current version only returns `OK`.
 
 ### curl
 
@@ -1370,15 +1370,15 @@ curl -X POST "http://127.0.0.1:8000/api/v1/drain_jobs/cancel?job_id=job_1"
 curl "http://127.0.0.1:8000/api/v1/segments/status?segment=rank-0-hbm"
 ```
 
-### 请求参数
+### Request parameters
 
-| 参数名 | 类型 | 必填 | 描述 |
+| Parameter name | Type | Required | Description |
 |---|---|---|---|
-| `segment` | String | 是 | 目标 `segment_id` |
+| `segment` | String | Yes | target `segment_id` |
 
-### 成功示例
+### Successful Examples
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -1389,18 +1389,18 @@ curl "http://127.0.0.1:8000/api/v1/segments/status?segment=rank-0-hbm"
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 接口调用成功标记；成功时为 `true` | 成功体契约 |
-| `segment` | 查询到的 `segment_id` | 请求参数回显 |
-| `status` | 当前状态码；当前版本固定为 `1` | 当前接口行为 |
-| `status_name` | 当前状态名称；当前版本固定为 `OK` | 当前接口行为 |
+| `success` | Interface call success mark; when successful, it is `true` | Success body contract |
+| `segment` | Queryed `segment_id` | Request parameter echo |
+| `status` | Current status code; the current version is fixed to `1` | Current interface behavior |
+| `status_name` | Current state name; current version is fixed to `OK` | Current interface behavior |
 
-### 错误示例
+### Error example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -1410,19 +1410,19 @@ curl "http://127.0.0.1:8000/api/v1/segments/status?segment=rank-0-hbm"
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 请求是否成功；错误场景固定为 `false` | 全局统一错误返回规则 |
-| `error_message` | 实际错误原因；此处仅为格式示例 | 全局错误返回格式规则 |
-| `timestamp` | 错误返回格式中的时间戳字段 | 全局错误返回格式规则 |
+| `success` | Whether the request is successful; the error scenario is fixed to `false` | Global unified error return rule |
+| `error_message` | Actual error cause; here is only a format example | Global error return format rules |
+| `timestamp` | Timestamp field in error return format | Global error return format rules |
 
 ## 22 `GET /api/v1/capacity/usage`
 
-### 作用
+### Purpose
 
-返回整体容量使用情况。介质映射关系为 `HBM -> npu`、`DRAM -> cpu`；无对应介质时返回 `0`，不视为错误。
+Returns overall capacity usage. The media mapping relationship is `HBM -> npu`, `DRAM -> cpu`; if there is no corresponding media, `0` is returned and is not considered an error.
 
 ### curl
 
@@ -1430,13 +1430,13 @@ curl "http://127.0.0.1:8000/api/v1/segments/status?segment=rank-0-hbm"
 curl "http://127.0.0.1:8000/api/v1/capacity/usage"
 ```
 
-### 请求参数
+### Request parameters
 
-无
+none
 
-### 成功示例
+### Successful Examples
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -1458,21 +1458,21 @@ curl "http://127.0.0.1:8000/api/v1/capacity/usage"
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `timestamp` | 成功响应时间戳；示例中的 `0` 为占位值，错误响应中同名字段表示错误响应生成时间 | 扩展接口通用字段 |
-| `data_source_ready` | 底层数据源是否已准备就绪 | 统计接口降级规则 |
-| `degraded` | 当前是否为降级返回 | 统计接口降级规则 |
-| `npu` | HBM 维度容量统计 | `HBM -> npu` 映射规则 |
-| `cpu` | DRAM 维度容量统计 | `DRAM -> cpu` 映射规则 |
-| `*_bytes` | 容量字段单位均为 `bytes` | 全局单位规则 |
-| `usage_ratio` | 使用比例，范围 `[0,1]` | 全局单位规则 |
+| `timestamp` | Successful response timestamp; `0` in the example is a placeholder value, and the field with the same name in the error response indicates the error response generation time | Extended interface common field |
+| `data_source_ready` | Whether the underlying data source is ready | Statistics interface downgrade rules |
+| `degraded` | Return whether it is currently downgraded | Statistical interface downgrade rule |
+| `npu` | HBM dimension capacity statistics | `HBM -> npu` Mapping rules |
+| `cpu` | DRAM dimension capacity statistics | `DRAM -> cpu` Mapping rules |
+| `*_bytes` | Capacity field units are all `bytes` | Global unit rule |
+| `usage_ratio` | Use scale, range `[0,1]` | Global unit rules |
 
-### 错误示例
+### Error example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -1482,19 +1482,19 @@ curl "http://127.0.0.1:8000/api/v1/capacity/usage"
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 请求是否成功；错误场景固定为 `false` | 全局统一错误返回规则 |
-| `error_message` | 实际错误原因；此处仅为格式示例 | 全局错误返回格式规则 |
-| `timestamp` | 错误返回格式中的时间戳字段 | 全局错误返回格式规则 |
+| `success` | Whether the request is successful; the error scenario is fixed to `false` | Global unified error return rule |
+| `error_message` | Actual error cause; here is only a format example | Global error return format rules |
+| `timestamp` | Timestamp field in error return format | Global error return format rules |
 
 ## 23 `GET /api/v1/capacity/segment_remaining`
 
-### 作用
+### Purpose
 
-返回各 segment 的剩余容量情况。
+Returns the remaining capacity of each segment.
 
 ### curl
 
@@ -1502,13 +1502,13 @@ curl "http://127.0.0.1:8000/api/v1/capacity/usage"
 curl "http://127.0.0.1:8000/api/v1/capacity/segment_remaining"
 ```
 
-### 请求参数
+### Request parameters
 
-无
+none
 
-### 成功示例
+### Successful Examples
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -1529,21 +1529,21 @@ curl "http://127.0.0.1:8000/api/v1/capacity/segment_remaining"
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `timestamp` | 成功响应时间戳；示例中的 `0` 为占位值，错误响应中同名字段表示错误响应生成时间 | 扩展接口通用字段 |
-| `data_source_ready` | 底层数据源是否已准备就绪 | 统计接口降级规则 |
-| `degraded` | 当前是否为降级返回 | 统计接口降级规则 |
-| `segments` | segment 剩余容量列表 | 接口成功返回约定 |
-| `segment_name` | segment 名称，格式 `rank-<rank>-<medium-lower>` | 全局字段规则 |
-| `total_bytes` / `used_bytes` / `remaining_bytes` / `fragmentation_bytes` | 容量字段单位均为 `bytes` | 全局单位规则 |
-| `remaining_ratio` | 剩余比例，范围 `[0,1]` | 全局单位规则 |
+| `timestamp` | Successful response timestamp; `0` in the example is a placeholder value, and the field with the same name in the error response indicates the error response generation time | Extended interface common field |
+| `data_source_ready` | Whether the underlying data source is ready | Statistics interface downgrade rules |
+| `degraded` | Return whether it is currently downgraded | Statistical interface downgrade rule |
+| `segments` | segment remaining capacity list | interface successful return agreement |
+| `segment_name` | segment name, format `rank-<rank>-<medium-lower>` | global field rule |
+| `total_bytes` / `used_bytes` / `remaining_bytes` / `fragmentation_bytes` | Capacity field units are `bytes` | Global unit rule |
+| `remaining_ratio` | Remaining proportion, range `[0,1]` | Global unit rule |
 
-### 错误示例
+### Error example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -1553,19 +1553,19 @@ curl "http://127.0.0.1:8000/api/v1/capacity/segment_remaining"
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 请求是否成功；错误场景固定为 `false` | 全局统一错误返回规则 |
-| `error_message` | 实际错误原因；此处仅为格式示例 | 全局错误返回格式规则 |
-| `timestamp` | 错误返回格式中的时间戳字段 | 全局错误返回格式规则 |
+| `success` | Whether the request is successful; the error scenario is fixed to `false` | Global unified error return rule |
+| `error_message` | Actual error cause; here is only a format example | Global error return format rules |
+| `timestamp` | Timestamp field in error return format | Global error return format rules |
 
 ## 24 `GET /api/v1/analysis/alloc_free_latency`
 
-### 作用
+### Purpose
 
-返回 alloc/free 延迟相关的 ptracer 文本结果。该接口展示 alloc/free 相关统计行，数据来源与 `/metrics/ptracer` 保持一致。
+Returns ptracer text results related to alloc/free latency. This interface displays alloc/free related statistical rows, and the data source is consistent with `/metrics/ptracer`.
 
 ### curl
 
@@ -1573,13 +1573,13 @@ curl "http://127.0.0.1:8000/api/v1/capacity/segment_remaining"
 curl "http://127.0.0.1:8000/api/v1/analysis/alloc_free_latency"
 ```
 
-### 请求参数
+### Request parameters
 
-无
+none
 
-### 成功示例
+### Successful Examples
 
-`text/plain; charset=utf-8`：
+`text/plain; charset=utf-8`:
 
 ```text
 TIME                   NAME                                    BEGIN          GOOD_END       BAD_END        ON_FLY         P50(us)        P99(us)        P999(us)       AVG(us)        MAX(us)
@@ -1587,17 +1587,17 @@ TIME                   NAME                                    BEGIN          GO
 2026-01-05 14:57:03    TP_MMC_META_REMOVE                         8              8              0              0              14.820         55.000         62.020         31.398         62.020
 ```
 
-**解释**
+**Explanation**
 
-| 内容 | 含义 | 来源 |
+| Content | Meaning | Source |
 |---|---|---|
-| alloc/free 相关 ptracer 行 | 返回 alloc/free 相关统计行，文本格式与 ptracer 输出保持一致 | 接口成功返回约定 |
-| `TP_MMC_META_ALLOC` / `TP_MMC_META_REMOVE` | 示例中的 ptracer 打点名称 | ptracer 输出 |
-| `P50(us)` / `P99(us)` / `P999(us)` / `AVG(us)` / `MAX(us)` | 延迟统计字段，单位均为 `us` | ptracer 输出 |
+| alloc/free related ptracer rows | returns alloc/free related statistical rows, the text format is consistent with ptracer output | The interface successfully returns the convention |
+| `TP_MMC_META_ALLOC` / `TP_MMC_META_REMOVE` | ptracer dotted names in the example | ptracer output |
+| `P50(us)` / `P99(us)` / `P999(us)` / `AVG(us)` / `MAX(us)` | Delay statistics field, the units are `us` | ptracer output |
 
-### 错误示例
+### Error example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -1607,19 +1607,19 @@ TIME                   NAME                                    BEGIN          GO
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 请求是否成功；错误场景固定为 `false` | 全局统一错误返回规则 |
-| `error_message` | 实际错误原因；此处仅为格式示例 | 全局错误返回格式规则 |
-| `timestamp` | 错误返回格式中的时间戳字段 | 全局错误返回格式规则 |
+| `success` | Whether the request is successful; the error scenario is fixed to `false` | Global unified error return rule |
+| `error_message` | Actual error cause; here is only a format example | Global error return format rules |
+| `timestamp` | Timestamp field in error return format | Global error return format rules |
 
 ## 25 `GET /kv_events/status`
 
-### 作用
+### Purpose
 
-返回 KV Event Publisher 的运行状态和统计信息。
+Returns the running status and statistics of KV Event Publisher.
 
 ### curl
 
@@ -1627,13 +1627,13 @@ TIME                   NAME                                    BEGIN          GO
 curl "http://127.0.0.1:8000/kv_events/status"
 ```
 
-### 请求参数
+### Request parameters
 
-无
+none
 
-### 成功示例
+### Successful Examples
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -1663,27 +1663,27 @@ curl "http://127.0.0.1:8000/kv_events/status"
 
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `enabled` | KV Event 功能是否启用（配置 + 构建开关） | 运行时状态 |
-| `publisher_active` | 发布线程是否正常运行 | 实时状态 |
-| `published_batches` | 已发布的批次总数 | 累计统计 |
-| `published_events` | 已发布的事件总数 | 累计统计 |
-| `published_by_type` | 按事件类型（stored / removed / cleared）分组的发布统计 | 累计统计 |
-| `published_by_medium` | 按存储介质（hbm / dram / ssd / unknown）分组的发布统计 | 累计统计 |
-| `last_sequence` | 最后发布的 ZMQ 序列号 | 实时状态 |
-| `dropped_events` | 因队列满丢弃的事件总数 | 累计统计 |
-| `dropped_stored_events` | 丢弃的 stored 类型事件数 | 累计统计 |
-| `dropped_high_priority_events` | 丢弃的高优先级事件数（removed / cleared） | 累计统计 |
-| `skipped_unparsed_keys` | 无法解析为 hash 的 key 数量 | 累计统计 |
-| `queue_size` | 当前队列中的事件数量 | 实时状态 |
-| `queue_capacity` | 队列最大容量（配置值） | 配置参数 |
+| `enabled` | KV Event function is enabled (configuration + build switch) | Runtime status |
+| `publisher_active` | Whether the publishing thread is running normally | Real-time status |
+| `published_batches` | Total number of batches released | Cumulative statistics |
+| `published_events` | Total number of published events | Cumulative statistics |
+| `published_by_type` | Release statistics grouped by event type (stored / removed / cleared) | Cumulative statistics |
+| `published_by_medium` | Release statistics grouped by storage medium (hbm/dram/ssd/unknown) | Cumulative statistics |
+| `last_sequence` | Last released ZMQ serial number | Real-time status |
+| `dropped_events` | Total number of events discarded due to queue full | Cumulative statistics |
+| `dropped_stored_events` | Number of discarded stored type events | Cumulative statistics |
+| `dropped_high_priority_events` | Number of discarded high priority events (removed/cleared) | Cumulative statistics |
+| `skipped_unparsed_keys` | Number of keys that cannot be parsed into hash | Cumulative statistics |
+| `queue_size` | Number of events in the current queue | Real-time status |
+| `queue_capacity` | Maximum queue capacity (configuration value) | Configuration parameters |
 
-### 错误示例
+### Error example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -1693,49 +1693,49 @@ curl "http://127.0.0.1:8000/kv_events/status"
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 请求是否成功；错误场景固定为 `false` | 全局统一错误返回规则 |
-| `error_message` | 实际错误原因；此处仅为格式示例 | 全局错误返回格式规则 |
-| `timestamp` | 错误返回格式中的时间戳字段 | 全局错误返回格式规则 |
+| `success` | Whether the request is successful; the error scenario is fixed to `false` | Global unified error return rule |
+| `error_message` | Actual error cause; here is only a format example | Global error return format rules |
+| `timestamp` | Timestamp field in error return format | Global error return format rules |
 
 ## 26 `POST /memory/evict`
 
-### 作用
+### Purpose
 
-驱逐指定的 KV cache。根据 `locations` 字段决定行为：
+Evict the specified KV cache. Determine behavior based on the `locations` field:
 
-- **未指定 `locations` 或 `locations` 为 `null`**：全局删除 key（所有层级）
-- **指定了 `locations`**：将 key 从当前层级向下移动一层（如 DRAM → SSD）
+- **`locations` or `locations` is not specified as `null`**: Delete key globally (all levels)
+- **`locations` is specified**: Move the key down one level from the current level (such as DRAM → SSD)
 
 ### curl
 
 ```bash
-# 全局删除（不指定 locations）
+# Delete globally (without specifying locations)
 curl -X POST "http://127.0.0.1:8000/memory/evict" \
   -H "Content-Type: application/json" \
   -d '{"chunk_hashes": ["a1b2c3d4..."]}'
 
-# 向下移动一层（指定 locations）
+# Move down one level (specified locations)
 curl -X POST "http://127.0.0.1:8000/memory/evict" \
   -H "Content-Type: application/json" \
   -d '{"chunk_hashes": ["a1b2c3d4..."], "locations": ["LocalCPUBackend"]}'
 ```
 
-### 请求参数
+### Request parameters
 
-请求体为 JSON 格式：
+The request body is in JSON format:
 
-| 参数名 | 类型 | 必填 | 描述 |
+| Parameter name | Type | Required | Description |
 |---|---|---|---|
-| `chunk_hashes` | Array[String] | 是 | 要驱逐的 chunk hash 列表 |
-| `locations` | Array[String] | 否 | 目标位置列表；不指定或为 `null` 时执行全局删除 |
+| `chunk_hashes` | Array[String] | Yes | The chunk hash list to be evicted |
+| `locations` | Array[String] | No | Target location list; perform global deletion if not specified or `null` |
 
-### 成功示例
+### Successful Examples
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -1744,16 +1744,16 @@ curl -X POST "http://127.0.0.1:8000/memory/evict" \
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `status` | 操作状态；成功时固定为 `success` | 接口成功返回约定 |
-| `num_evicted` | 本次驱逐的 chunk 数量 | 接口成功返回约定 |
+| `status` | Operation status; fixed to `success` when successful | The interface successfully returns |
+| `num_evicted` | The number of chunks evicted this time | The interface successfully returns the agreement |
 
-### 错误示例
+### Error example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -1763,19 +1763,19 @@ curl -X POST "http://127.0.0.1:8000/memory/evict" \
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 请求是否成功；错误场景固定为 `false` | 全局统一错误返回规则 |
-| `error_message` | 实际错误原因；如 `Invalid JSON body`、`Missing 'chunk_hashes' in request body` 等 | 全局错误返回格式规则 |
-| `timestamp` | 错误返回格式中的时间戳字段 | 全局错误返回格式规则 |
+| `success` | Whether the request is successful; the error scenario is fixed to `false` | Global unified error return rule |
+| `error_message` | Actual error cause; such as `Invalid JSON body`, `Missing 'chunk_hashes' in request body`, etc. | Global error return format rules |
+| `timestamp` | Timestamp field in error return format | Global error return format rules |
 
 ## 27 `POST /memory/prefetch`
 
-### 作用
+### Purpose
 
-预取指定的 KV cache。将数据从低层级（如 SSD）提前加载到高层级（如 DRAM），以加速后续访问。
+Prefetch the specified KV cache. Front-load data from lower tiers (such as SSD) to higher tiers (such as DRAM) to speed subsequent access.
 
 ### curl
 
@@ -1785,18 +1785,18 @@ curl -X POST "http://127.0.0.1:8000/memory/prefetch" \
   -d '{"chunk_hashes": ["a1b2c3d4...", "e5f6g7h8..."], "lookup_id": "req_001"}'
 ```
 
-### 请求参数
+### Request parameters
 
-请求体为 JSON 格式：
+The request body is in JSON format:
 
-| 参数名 | 类型 | 必填 | 描述 |
+| Parameter name | Type | Required | Description |
 |---|---|---|---|
-| `chunk_hashes` | Array[String] | 是 | 要预取的 chunk hash 列表 |
-| `lookup_id` | String | 否 | 预取请求标识符，用于追踪；不指定时返回空字符串 |
+| `chunk_hashes` | Array[String] | Yes | Chunk hash list to be prefetched |
+| `lookup_id` | String | No | Prefetch request identifier, used for tracking; if not specified, returns an empty string |
 
-### 成功示例
+### Successful Examples
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -1806,17 +1806,17 @@ curl -X POST "http://127.0.0.1:8000/memory/prefetch" \
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `status` | 操作状态；成功时固定为 `prefetch_started` | 接口成功返回约定 |
-| `lookup_id` | 请求标识符，回显客户端传入的值 | 请求参数回显 |
-| `num_chunks` | 本次预取的 chunk 数量 | 接口成功返回约定 |
+| `status` | Operation status; fixed to `prefetch_started` when successful | The interface successfully returns |
+| `lookup_id` | Request identifier, echo the value passed in by the client | Request parameter echo |
+| `num_chunks` | The number of chunks prefetched this time | The interface successfully returns the convention |
 
-### 错误示例
+### Error example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -1826,19 +1826,19 @@ curl -X POST "http://127.0.0.1:8000/memory/prefetch" \
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段 | 含义 | 来源 |
+| Field | Meaning | Source |
 |---|---|---|
-| `success` | 请求是否成功；错误场景固定为 `false` | 全局统一错误返回规则 |
-| `error_message` | 实际错误原因；如 `Invalid JSON body`、`Missing 'chunk_hashes' in request body` 等 | 全局错误返回格式规则 |
-| `timestamp` | 错误返回格式中的时间戳字段 | 全局错误返回格式规则 |
+| `success` | Whether the request is successful; the error scenario is fixed to `false` | Global unified error return rule |
+| `error_message` | Actual error cause; such as `Invalid JSON body`, `Missing 'chunk_hashes' in request body`, etc. | Global error return format rules |
+| `timestamp` | Timestamp field in error return format | Global error return format rules |
 
 ## 28 `GET /livez`
 
-### 作用
+### Purpose
 
-轻量存活探针，专供 Kubernetes 探针（exec + curl）使用。仅判断进程存活且 HTTP server 能处理请求，不做 HA 状态查询、不加锁、不序列化 JSON。进程被 `SIGSTOP` 冻结时该 handler 无法执行，探针超时失败 → 触发容器重启。
+Lightweight survival probe, designed for Kubernetes probes (exec + curl). It only determines that the process is alive and that the HTTP server can handle the request. It does not perform HA status query, lock, or serialize JSON. When the process is frozen by `SIGSTOP`, the handler cannot be executed, and the probe times out and fails → triggers a container restart.
 
 ### curl
 
@@ -1846,62 +1846,62 @@ curl -X POST "http://127.0.0.1:8000/memory/prefetch" \
 curl "http://127.0.0.1:8000/livez"
 ```
 
-### 请求参数
+### Request parameters
 
-无
+none
 
-### 成功示例
+### Successful Examples
 
-`text/plain; charset=utf-8`：
+`text/plain; charset=utf-8`:
 
 ```text
 ok
 ```
 
-**解释**
+**Explanation**
 
-| 内容 | 含义 | 来源 |
+| Content | Meaning | Source |
 |---|---|---|
-| `ok` | 进程存活且 HTTP server 正常处理请求时固定返回的 body | 接口成功返回约定 |
-| 成功 `Content-Type` | `text/plain; charset=utf-8` | 接口成功返回约定 |
-| HTTP 状态码 | 固定 `200` | 接口成功返回约定 |
+| `ok` | The body returned is fixed when the process is alive and the HTTP server processes the request normally. | The interface successfully returns the convention |
+| success `Content-Type` | `text/plain; charset=utf-8` | The interface successfully returns the convention |
+| HTTP status code | Fixed `200` | Interface successful return convention |
 
-### 错误示例
+### Error example
 
-无 JSON 错误响应。进程异常（如被 `SIGSTOP`、死锁、崩溃）时无法返回响应，探针侧表现为超时或连接失败，不返回上述 body。
+No JSON error response. When the process is abnormal (such as `SIGSTOP`, deadlock, crash), a response cannot be returned. The probe side will show a timeout or connection failure, and the above body will not be returned.
 
 ## 29 `GET /api/v1/mf/cluster_status`
 
-### 作用
+### Purpose
 
-返回 MemFabric 集群状态视图：config store server 状态机、存活/重连 rank 集合、心跳新鲜度与
-group manager 链路摘要。默认响应为**折叠视图**（仅 `linkSummary` 计数摘要，不含异常明细），
-不输出全量链路矩阵，规模为 O(N)，可支撑 Prometheus/看板 30s 级常驻轮询；
-`linkSummary.abnormalLinks > 0` 时可追加 `?unstable=true` 下钻获取 `unstableLinks` 异常明细。
+Returns a MemFabric cluster status view: the config store server state machine, sets of live and reconnected ranks, heartbeat freshness, and
+a group manager link summary. The default response is a **summary view** (`linkSummary` counts only, without abnormal-link details).
+It omits the full link matrix and has O(N) output size, supporting continuous polling by Prometheus or dashboards at 30-second intervals.
+When `linkSummary.abnormalLinks > 0`, append `?unstable=true` to retrieve abnormal-link details in `unstableLinks`.
 
-- 可选查询参数 `unstable`：仅精确 `true` 生效，其余取值（`false`/拼写错误等）一律视为不带参数，**不报错**；其他未知 query
-  参数同样忽略
-- `mf_cluster` 为空数组（`[]`）表示本进程内无 config store，属正常语义（`status: "ok"`），与错误响应可区分
+- Optional query parameter `unstable`: only the exact value `true` takes effect. Other values (`false`, misspellings, etc.) are treated as if the parameter were absent, **without an error**. Other unknown query
+  parameters are also ignored.
+- An empty `mf_cluster` array (`[]`) means this process has no config store. This is a normal response (`status: "ok"`), distinct from an error response.
 
 ### curl
 
 ```bash
-# 默认：折叠视图（无 unstableLinks 明细）
+# Default: summary view (without unstableLinks details)
 curl "http://127.0.0.1:8000/api/v1/mf/cluster_status"
 
-# 下钻：异常链路明细（abnormalLinks > 0 时才有价值）
+# Drill down: abnormal-link details (useful when abnormalLinks > 0)
 curl "http://127.0.0.1:8000/api/v1/mf/cluster_status?unstable=true"
 ```
 
-### 请求参数
+### Request parameters
 
-| 参数         | 类型     | 必选 | 含义                                                                                          |
+| Parameter | Type | Required | Description |
 |------------|--------|----|---------------------------------------------------------------------------------------------|
-| `unstable` | string | 否  | 仅精确 `true` 时在 `groupManager` 内追加 `unstableLinks` 明细及（发生截断时的）`unstableTruncated`；其余取值等价于不带参数 |
+| `unstable` | string | No | Only the exact value `true` adds `unstableLinks` details and, if truncated, `unstableTruncated` to `groupManager`. Other values are equivalent to omitting the parameter. |
 
-### 成功示例
+### Successful example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -1955,57 +1955,57 @@ curl "http://127.0.0.1:8000/api/v1/mf/cluster_status?unstable=true"
 }
 ```
 
-**解释**
+**Explanation**
 
-server 级字段：
+Server-level fields:
 
-| 字段                         | 含义                                                                                     |
+| Field | Meaning |
 |----------------------------|----------------------------------------------------------------------------------------|
-| `status`                   | 恒为 `ok`；错误场景见下方错误示例                                                                    |
-| `mf_cluster`               | store 数组；可能为空数组（无 store，非错误）                                                           |
-| `server.state`             | server 主状态机：`SS_INITED` / `SS_RECOVERING` / `SS_RECOVERED` / `SS_NORMAL` / `SS_EXITED` |
-| `server.worldSize`         | 集群约定规模（首个 rank 连接时固定）；未固定时为 `4294967295`（`UINT32_MAX`，序列化为 `-1` 为暂缓规划项）                |
-| `server.listen`            | config store server 监听地址（`ip:port`）                                                    |
-| `server.backendAliveRanks` | backend 层存活的 rank 集合（升序）                                                               |
-| `server.aliveRanks`        | 连接层存活的 rank 集合（升序）；与 `backendAliveRanks` 不一致即为"连接在但 backend 死"的半死状态                    |
-| `server.reconnectedRanks`  | 启动后发生过重连的 rank 集合                                                                      |
-| `server.lastHeartbeat[]`   | 每 rank 心跳新鲜度，元素 `{"rank": uint, "sinceLastMs": int64}`（距上次心跳的毫秒间隔，按 rank 升序）           |
-| `groupManager`             | 进程内无 group manager 时为 `null`                                                           |
+| `status` | Always `ok`; see the error example below for error scenarios |
+| `mf_cluster` | Array of stores; may be empty (no store, not an error) |
+| `server.state` | Main server state machine: `SS_INITED` / `SS_RECOVERING` / `SS_RECOVERED` / `SS_NORMAL` / `SS_EXITED` |
+| `server.worldSize` | Agreed cluster size, fixed when the first rank connects. Before it is fixed, the value is `4294967295` (`UINT32_MAX`); serialization as `-1` is deferred. |
+| `server.listen` | Config store server listening address (`ip:port`) |
+| `server.backendAliveRanks` | Live ranks at the backend layer, in ascending order |
+| `server.aliveRanks` | Live ranks at the connection layer, in ascending order. A mismatch with `backendAliveRanks` indicates a partially failed state where the connection exists but the backend is dead. |
+| `server.reconnectedRanks` | Ranks that have reconnected since startup |
+| `server.lastHeartbeat[]` | Heartbeat freshness per rank: `{"rank": uint, "sinceLastMs": int64}`. The interval is in milliseconds since the last heartbeat; entries are sorted by rank in ascending order. |
+| `groupManager` | `null` when this process has no group manager |
 
-groupManager 级字段：
+groupManager-level fields:
 
-| 字段                           | 含义                                                                                                     |
+| Field | Meaning |
 |------------------------------|--------------------------------------------------------------------------------------------------------|
-| `maxRanks`                   | GM 矩阵容量                                                                                                |
-| `ranks[]`                    | 非 IDLE rank 状态，元素 `{"rank": uint, "state": "RANK_CHECKED_IN"/"RANK_ACTIVE"}`，按 rank 升序                 |
-| `linkSummary.activeRanks`    | 处于 `RANK_ACTIVE` 的 rank 数                                                                              |
-| `linkSummary.connectedLinks` | 状态为 `LINK_CONNECTED` 的链路数（有序对计）                                                                        |
-| `linkSummary.expectedLinks`  | 期望链路数 = `activeRanks × (activeRanks − 1)`；基数为 activeRanks，未 join 完成时不用 worldSize 压低完成率                 |
-| `linkSummary.completionRate` | `connectedLinks / expectedLinks`，范围 `[0,1]`；`expectedLinks` 为 0 时输出 `1.0`                              |
-| `linkSummary.abnormalLinks`  | 两端 rank 均存活（∈ `aliveRanks`）但链路非 `LINK_CONNECTED` 的数量；不含对端已死的 IDLE（那是预期状态）；大于 0 即值得 `?unstable=true` 下钻 |
-| `unstableLinks[]`            | 异常链路明细，**仅 `?unstable=true` 时出现**（默认响应不含此字段）；收录规则见下                                                    |
+| `maxRanks` | Group manager matrix capacity |
+| `ranks[]` | Non-IDLE rank states: `{"rank": uint, "state": "RANK_CHECKED_IN"/"RANK_ACTIVE"}`, sorted by rank in ascending order |
+| `linkSummary.activeRanks` | Number of ranks in `RANK_ACTIVE` |
+| `linkSummary.connectedLinks` | Number of links in `LINK_CONNECTED`, counted as ordered pairs |
+| `linkSummary.expectedLinks` | Expected link count: `activeRanks × (activeRanks − 1)`. Uses activeRanks rather than worldSize so incomplete joins do not reduce the completion rate. |
+| `linkSummary.completionRate` | `connectedLinks / expectedLinks`, in `[0,1]`; returns `1.0` when `expectedLinks` is 0 |
+| `linkSummary.abnormalLinks` | Number of links whose endpoint ranks are both live (in `aliveRanks`) but whose state is not `LINK_CONNECTED`. Excludes expected IDLE links with a dead peer. Values above 0 warrant drilling down with `?unstable=true`. |
+| `unstableLinks[]` | Abnormal-link details, **included only with `?unstable=true`**. Absent from the default response; inclusion rules follow. |
 
-unstableLinks 收录规则（取并集，在 server 侧对链路矩阵单次遍历判定）：
+unstableLinks inclusion rules (the union of these conditions, evaluated in a single server-side traversal of the link matrix):
 
-- 条件①：链路处于中间态 `LINK_EXCHANGING` / `LINK_EXCHANGED` / `LINK_CONNECTING`（正在建立、可能卡住；`EXCHANGED` 停留即异常）
-- 条件②：链路为 `LINK_IDLE` 且**双端 rank 均存活**（该有链路却没有的真正断链；单端已死的 IDLE 属预期状态，不收录）
-- `LINK_CONNECTED` 不收录（抖动检测属事件层/日志，快照层无历史）
+- Condition 1: The link is in an intermediate state: `LINK_EXCHANGING` / `LINK_EXCHANGED` / `LINK_CONNECTING` (being established or potentially stuck; remaining in `EXCHANGED` is abnormal).
+- Condition 2: The link is `LINK_IDLE` and **both endpoint ranks are live** (a missing expected connection). IDLE links with a dead endpoint are expected and excluded.
+- `LINK_CONNECTED` links are excluded. Link-flapping detection belongs to the event/log layer; snapshots have no history.
 
-每项元素：
+Each entry contains:
 
-| 字段            | 含义                                                                           |
+| Field | Meaning |
 |---------------|------------------------------------------------------------------------------|
-| `src` / `dst` | 源/目的 rankId                                                                  |
-| `state`       | 当前链路态：`LINK_IDLE` / `LINK_EXCHANGING` / `LINK_EXCHANGED` / `LINK_CONNECTING` |
-| `retry`       | 当前转换已重试次数                                                                    |
-| `elapsedMs`   | 当前状态已持续毫秒数；IDLE 断链（无活跃转换）时为 `-1`                                             |
+| `src` / `dst` | Source/destination rankId |
+| `state` | Current link state: `LINK_IDLE` / `LINK_EXCHANGING` / `LINK_EXCHANGED` / `LINK_CONNECTING` |
+| `retry` | Retry count for the current transition |
+| `elapsedMs` | Milliseconds spent in the current state; `-1` for an IDLE disconnected link with no active transition |
 
-**输出规模控制**：`unstableLinks` 输出条目上限为 **256**（`kUnstableLinksMaxEntries`，定义于
-memfabric `smem_tcp_config_store_server.h`）。超出时按 `(retry 降序, elapsedMs 降序)` 截断
-（最可能卡死的排最前），并在响应追加 `"unstableTruncated": <被截掉的数量>`（仅在截断实际发生时出现）。
-该阈值是对外行为契约，修改需走文档变更。
+**Output size limit**: `unstableLinks` contains at most **256** entries (`kUnstableLinksMaxEntries`, defined in
+MemFabric `smem_tcp_config_store_server.h`). Excess entries are truncated after sorting by `(retry descending, elapsedMs descending)`
+(links most likely to be stuck come first). The response adds `"unstableTruncated": <number of omitted entries>` only when truncation occurs.
+This limit is part of the public behavior contract; changes require a documentation update.
 
-`?unstable=true` 时 `groupManager` 内追加的字段示例：
+Example fields added to `groupManager` with `?unstable=true`:
 
 ```json
 "unstableLinks": [
@@ -2014,9 +2014,9 @@ memfabric `smem_tcp_config_store_server.h`）。超出时按 `(retry 降序, ela
 "unstableTruncated": 127
 ```
 
-### 错误示例
+### Error example
 
-`application/json; charset=utf-8`：
+`application/json; charset=utf-8`:
 
 ```json
 {
@@ -2026,12 +2026,12 @@ memfabric `smem_tcp_config_store_server.h`）。超出时按 `(retry 降序, ela
 }
 ```
 
-**解释**
+**Explanation**
 
-| 字段              | 含义                                                                                           | 来源         |
+| Field | Meaning | Source |
 |-----------------|----------------------------------------------------------------------------------------------|------------|
-| `success`       | 请求是否成功；错误场景固定为 `false`                                                                       | 全局统一错误返回规则 |
-| `error_message` | 实际错误原因；本接口在下层调用失败（非 `SMEM_OK` 且非 `SMEM_NOT_EXIST` 返回码）或 JSON 解析失败时返回 `internal server error` | 全局错误返回格式规则 |
-| `timestamp`     | 错误响应生成时间；示例中的 `0` 仅为占位值                                                                      | 全局错误返回格式规则 |
+| `success` | Whether the request succeeded; always `false` for errors | Global error response rules |
+| `error_message` | Actual error reason. Returns `internal server error` when an underlying call returns a code other than `SMEM_OK` or `SMEM_NOT_EXIST`, or JSON parsing fails. | Global error response format rules |
+| `timestamp` | Error response generation time; `0` in this example is a placeholder | Global error response format rules |
 
-注意：本进程内无 config store **不是错误**，返回 `status: "ok"` + `mf_cluster: []`。
+Note: No config store in this process **is not an error**. The response is `status: "ok"` with `mf_cluster: []`.

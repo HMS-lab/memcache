@@ -1,97 +1,97 @@
-# MemCache Python API 文档
+# MemCache Python API documentation
 
-## 概述
+## Overview
 
-MemCache Python API 是一个高性能的分布式内存缓存客户端，提供了丰富的接口用于数据的存储、检索和管理。该API基于C++核心实现，通过Python绑定提供了简洁易用的接口，支持多种数据传输协议和内存管理模式，适用于大规模分布式计算环境。
+MemCache Python API is a high-performance distributed memory cache client that provides rich interfaces for data storage, retrieval and management. The API is based on C++ core implementation, provides a simple and easy-to-use interface through Python binding, supports multiple data transmission protocols and memory management modes, and is suitable for large-scale distributed computing environments.
 
-### 主要特性
+### Main features
 
-- 支持多种传输协议（TCP、RDMA、SDMA等）。
-- 支持主机内存（DRAM）和设备内存（HBM）。
-- 提供批量操作接口，提高处理效率。
-- 支持数据副本和分层存储。
-- 提供灵活的配置选项。
-- 支持TLS加密通信。
+- Supports multiple transmission protocols (TCP, RDMA, SDMA, etc.).
+- Supports host memory (DRAM) and device memory (HBM).
+- Provides a batch operation interface to improve processing efficiency.
+- Supports data copies and tiered storage.
+- Provides flexible configuration options.
+- Support TLS encrypted communication.
 
-### 适用场景
+### Applicable scenarios
 
-- 大规模分布式训练中的数据共享。
-- 高性能计算环境中的数据缓存。
-- 需要低延迟数据访问的应用场景。
-- 跨进程、跨节点的数据交换。
+- Data sharing in large-scale distributed training.
+- Data caching in high performance computing environments.
+- Application scenarios that require low-latency data access.
+- Cross-process and cross-node data exchange.
 
-## 安装指南
+## Installation guide
 
-### 前提条件
+### Prerequisites
 
-- Python >= 3.8 环境（支持源码编译）
-- 支持的操作系统：Linux
+- Python >= 3.8 environment (supports source code compilation)
+- Supported operating systems: Linux
 
-### 安装步骤
+### Installation steps
 
-从PyPI安装memcache_hybrid包，该包包含了完整的Python绑定。
+Install the memcache_hybrid package from PyPI, which contains complete Python bindings.
 
 ```bash
 pip install memcache_hybrid
 ```
 
-📦 包详情：<https://pypi.org/project/memcache_hybrid/>
+📦 Package details: <https://pypi.org/project/memcache_hybrid/>
 
-## 核心接口
+## core interface
 
-### 接口概述
+### Interface overview
 
-Python接口封装了MemCache的客户端功能，使用前需要配置并启动独立的meta service进程。
+The Python interface encapsulates the client function of MemCache. Before use, you need to configure and start an independent meta service process.
 
-### MetaConfig 类
+### MetaConfig class
 
-MetaConfig是元数据服务的启动配置类，用于设置MetaService的监听地址、日志参数、HA开关以及TLS相关参数。
+MetaConfig is the startup configuration class of the metadata service, which is used to set the listening address, log parameters, HA switch and TLS related parameters of the MetaService.
 
-**功能**
+**Function**
 
-创建和管理元数据服务启动配置。
+Create and manage metadata service startup configurations.
 
-**参数说明**
+**Parameter description**
 
-| 参数名称 | 类型 | 默认值 | 说明 |
+| Parameter name | Type | Default value | Description |
 | --------- | ------ | ------- | ------ |
-| meta_service_url | str | "tcp://127.0.0.1:5000" | 元数据服务启动地址 |
-| config_store_url | str | "tcp://127.0.0.1:6000" | Config store地址 |
-| metrics_url | str | `"http://127.0.0.1:8000"` | Metrics HTTP服务地址 |
-| ha_enable | bool | false | 是否启用高可用部署 |
-| log_level | str | "info" | 日志级别：debug, info, warn, error |
-| log_path | str | "/var/log/memcache_hybrid" | 日志目录 |
-| log_rotation_file_size | int | 20 | 日志滚动文件大小，单位MB |
-| log_rotation_file_count | int | 50 | 日志滚动文件数量 |
-| log_output_target | str | "file" | 日志输出目标：screen（仅stdout），file（仅滚动文件），both（stdout + 滚动文件） |
-| evict_threshold_high | int | 90 | 驱逐高水位百分比 |
-| evict_threshold_low | int | 80 | 驱逐低水位百分比 |
-| evict_check_interval_seconds | int | 5 | 周期驱逐检查间隔，单位秒；设置为0时禁用周期检查；HA模式下仅选举出的Master执行周期检查，Standby和角色未知节点不执行 |
-| net_pool_base | int | 16 | MetaService网络异步线程池线程数，范围[4, 256]，MetaService重启后生效 |
-| ubs_io_enable | bool | false | 是否启用UBS_IO |
-| tls_enable | bool | false | 是否为metaservice启用TLS |
-| tls_ca_path | str | "" | TLS CA证书路径 |
-| tls_ca_crl_path | str | "" | TLS CA CRL路径 |
-| tls_cert_path | str | "" | TLS证书路径 |
-| tls_key_path | str | "" | TLS私钥路径 |
-| tls_key_pass_path | str | "" | TLS私钥密码路径 |
-| tls_package_path | str | "" | TLS包路径 |
-| tls_decrypter_path | str | "" | TLS解密库路径 |
-| config_store_tls_enable | bool | false | 是否为config_store启用TLS |
-| config_store_tls_ca_path | str | "" | Config store TLS CA证书路径 |
-| config_store_tls_ca_crl_path | str | "" | Config store TLS CA CRL路径 |
-| config_store_tls_cert_path | str | "" | Config store TLS证书路径 |
-| config_store_tls_key_path | str | "" | Config store TLS私钥路径 |
-| config_store_tls_key_pass_path | str | "" | Config store TLS私钥密码路径 |
-| config_store_tls_package_path | str | "" | Config store TLS包路径 |
-| config_store_tls_decrypter_path | str | "" | Config store TLS解密库路径 |
+| meta_service_url | str | "tcp://127.0.0.1:5000" | Metadata service startup address |
+| config_store_url | str | "tcp://127.0.0.1:6000" | Config store address |
+| metrics_url | str | `"http://127.0.0.1:8000"` | Metrics HTTP service address |
+| ha_enable | bool | false | Whether to enable high availability deployment |
+| log_level | str | "info" | Log level: debug, info, warn, error |
+| log_path | str | "/var/log/memcache_hybrid" | Log directory |
+| log_rotation_file_size | int | 20 | Log rotation file size, unit MB |
+| log_rotation_file_count | int | 50 | Number of log rotation files |
+| log_output_target | str | "file" | Log output target: screen (stdout only), file (rolling file only), both (stdout + rolling file) |
+| evict_threshold_high | int | 90 | evict high water mark percentage |
+| evict_threshold_low | int | 80 | evict low water level percentage |
+| evict_check_interval_seconds | int | 5 | Periodic eviction check interval, in seconds; when set to 0, periodic checking is disabled; in HA mode, only the elected Master performs periodic checking, Standby and nodes with unknown roles do not perform |
+| net_pool_base | int | 16 | Number of threads in the MetaService asynchronous network thread pool; range [4, 256]. Takes effect after MetaService restarts. |
+| ubs_io_enable | bool | false | Whether to enable UBS_IO |
+| tls_enable | bool | false | Whether to enable TLS for metaservice |
+| tls_ca_path | str | "" | TLS CA certificate path |
+| tls_ca_crl_path | str | "" | TLS CA CRL path |
+| tls_cert_path | str | "" | TLS certificate path |
+| tls_key_path | str | "" | TLS private key path |
+| tls_key_pass_path | str | "" | TLS private key password path |
+| tls_package_path | str | "" | TLS package path |
+| tls_decrypter_path | str | "" | TLS decryption library path |
+| config_store_tls_enable | bool | false | Whether to enable TLS for config_store |
+| config_store_tls_ca_path | str | "" | Config store TLS CA certificate path |
+| config_store_tls_ca_crl_path | str | "" | Config store TLS CA CRL path |
+| config_store_tls_cert_path | str | "" | Config store TLS certificate path |
+| config_store_tls_key_path | str | "" | Config store TLS private key path |
+| config_store_tls_key_pass_path | str | "" | Config store TLS private key password path |
+| config_store_tls_package_path | str | "" | Config store TLS package path |
+| config_store_tls_decrypter_path | str | "" | Config store TLS decryption library path |
 
-**示例**
+**Example**
 
 ```python
 from memcache_hybrid import MetaConfig
 
-# 创建元数据服务配置对象
+# Create a metadata service configuration object
 config = MetaConfig()
 config.meta_service_url = "tcp://127.0.0.1:5000"
 config.config_store_url = "tcp://127.0.0.1:6000"
@@ -107,9 +107,9 @@ config.evict_threshold_low = 80
 config.evict_check_interval_seconds = 5
 ```
 
-### MetaService 类
+### MetaService class
 
-MetaService是MemCache的元数据服务类，用于在Python进程中直接启动元数据服务。通常先通过MetaConfig构造配置，再调用MetaService.setup(config)设置启动参数，最后调用MetaService.main()阻塞启动服务。
+MetaService is the metadata service class of MemCache, which is used to start the metadata service directly in the Python process. Usually, the configuration is constructed through MetaConfig first, then MetaService.setup(config) is called to set the startup parameters, and finally MetaService.main() is called to block the startup service.
 
 #### setup
 
@@ -117,20 +117,20 @@ MetaService是MemCache的元数据服务类，用于在Python进程中直接启�
 MetaService.setup(config)
 ```
 
-**功能**
+**Function**
 
-设置当前进程中MetaService.main()使用的启动配置。
+Set the startup configuration used by MetaService.main() in the current process.
 
-**参数**
+**parameter**
 
-`config`：MetaConfig对象，包含元数据服务的启动配置
+`config`: MetaConfig object, containing the startup configuration of the metadata service
 
-**返回值**
+**return value**
 
-- `0`：成功
-- 其他：失败
+- `0`: Success
+- Others: failed
 
-**使用示例**
+**Usage Example**
 
 ```python
 from memcache_hybrid import MetaConfig, MetaService
@@ -150,25 +150,25 @@ MetaService.setup(config)
 MetaService.main()
 ```
 
-**功能**
+**Function**
 
-直接启动元数据服务进程。这是一个阻塞调用，直到服务收到退出信号后才会返回。
+Start the metadata service process directly. This is a blocking call and will not return until the service receives an exit signal.
 
-**参数**
+**parameter**
 
-无
+none
 
-**返回值**
+**return value**
 
-无返回值。服务正常运行时会一直阻塞，服务异常退出时会抛出异常。
+No return value. The service will always be blocked when it is running normally, and an exception will be thrown when the service exits abnormally.
 
-**异常处理**
+**Exception handling**
 
-- 服务启动失败时会抛出RuntimeError异常，包含具体错误信息。
-- 服务运行过程中遇到致命错误时会抛出RuntimeError异常。
-- 服务被信号中断时会抛出KeyboardInterrupt异常。
+- When the service fails to start, a RuntimeError exception will be thrown, including specific error information.
+- A RuntimeError exception will be thrown when a fatal error is encountered while the service is running.
+- A KeyboardInterrupt exception will be thrown when the service is interrupted by a signal.
 
-**使用示例**
+**Usage Example**
 
 ```python
 from memcache_hybrid import MetaConfig, MetaService
@@ -188,69 +188,69 @@ except RuntimeError as e:
     print(f"MetaService failed to start or encountered an error: {e}")
 ```
 
-**注意事项**
+**Notes**
 
-- `MetaService.main()` 是阻塞调用，建议在单独的进程中运行。
-- 如果未调用 `MetaService.setup(config)`，服务会尝试读取环境变量 `MMC_META_CONFIG_PATH` 指向的配置文件。
-- 服务停止后，所有依赖该服务的客户端连接将失效。
+- `MetaService.main()` is a blocking call and is recommended to be run in a separate process.
+- If `MetaService.setup(config)` is not called, the service attempts to read the configuration file pointed to by the environment variable `MMC_META_CONFIG_PATH`.
+- After the service is stopped, all client connections that rely on the service will become invalid.
 
-### LocalConfig 类
+### LocalConfig class
 
-LocalConfig是分布式内存缓存的配置类，用于设置客户端的各种参数。
+LocalConfig is the configuration class of distributed memory cache, used to set various parameters of the client.
 
-**功能**
+**Function**
 
-创建和管理客户端配置。
+Create and manage client configurations.
 
-**参数说明**
+**Parameter description**
 
-| 参数名称 | 类型 | 默认值 | 说明 |
+| Parameter name | Type | Default value | Description |
 | --------- | ------ | ------- | ------ |
-| meta_service_url | str | "tcp://127.0.0.1:5000" | Meta service的URL地址，格式如"tcp://192.168.1.1:5000" |
-| config_store_url | str | "tcp://127.0.0.1:6000" | Config store的URL地址 |
-| log_level | str | "info" | 日志级别：debug, info, warn, error |
-| world_size | int | 256 | 最大支持的rank数量 |
-| protocol | str | "host_rdma" | 数据传输协议：host_rdma, host_urma, host_tcp, host_shm, device_rdma, device_urma, device_sdma |
+| meta_service_url | str | "tcp://127.0.0.1:5000" | The URL address of Meta service, in the format of "tcp://192.168.1.1:5000" |
+| config_store_url | str | "tcp://127.0.0.1:6000" | Config store URL address |
+| log_level | str | "info" | Log level: debug, info, warn, error |
+| world_size | int | 256 | Maximum number of ranks supported |
+| protocol | str | "host_rdma" | Data transmission protocol: host_rdma, host_urma, host_tcp, host_shm, device_rdma, device_urma, device_sdma |
 | hcom_url | str | "tcp://127.0.0.1:7000" | HCOM URL for RDMA network |
-| dram_size | str | "1GB" | DRAM空间使用，支持格式如1GB，2MB等 |
-| hbm_size | str | "0" | HBM空间使用 |
-| max_dram_size | str | "1TB" | 所有本地进程中dram_size的最大值 |
-| max_hbm_size | str | "0" | 所有本地进程中hbm_size的最大值 |
-| client_retry_milliseconds | int | 0 | 客户端请求meta service时的总重试时间（毫秒） |
-| client_timeout_seconds | int | 60 | 客户端请求超时时间(秒) |
-| read_thread_pool_size | int | 4 | 读线程池大小 |
-| write_thread_pool_size | int | 4 | 写线程池大小 |
-| aggregate_io | bool | true | 是否启用读/写聚合 |
-| aggregate_num | int | 122 | 聚合数量 |
-| ubs_io_enable | bool | false | 是否启用UBS_IO |
-| tls_enable | bool | false | 是否为metaservice启用TLS |
-| tls_ca_path | str | "" | TLS CA证书路径 |
-| tls_ca_crl_path | str | "" | TLS CA CRL路径 |
-| tls_cert_path | str | "" | TLS证书路径 |
-| tls_key_path | str | "" | TLS密钥路径 |
-| tls_key_pass_path | str | "" | TLS密钥密码路径 |
-| tls_package_path | str | "" | TLS包路径 |
-| tls_decrypter_path | str | "" | TLS解密库路径 |
-| config_store_tls_enable | bool | false | 是否为config_store启用TLS |
-| config_store_tls_ca_path | str | "" | Config store TLS CA证书路径 |
-| config_store_tls_ca_crl_path | str | "" | Config store TLS CA CRL路径 |
-| config_store_tls_cert_path | str | "" | Config store TLS证书路径 |
-| config_store_tls_key_path | str | "" | Config store TLS密钥路径 |
-| config_store_tls_key_pass_path | str | "" | Config store TLS密钥密码路径 |
-| config_store_tls_package_path | str | "" | Config store TLS包路径 |
-| config_store_tls_decrypter_path | str | "" | Config store TLS解密库路径 |
-| hcom_tls_enable | bool | false | 是否为HCOM启用TLS |
-| hcom_tls_ca_path | str | "" | HCOM TLS CA证书路径 |
-| hcom_tls_ca_crl_path | str | "" | HCOM TLS CA CRL路径 |
-| hcom_tls_cert_path | str | "" | HCOM TLS证书路径 |
-| hcom_tls_key_path | str | "" | HCOM TLS密钥路径 |
-| hcom_tls_key_pass_path | str | "" | HCOM TLS密钥密码路径 |
-| hcom_tls_decrypter_path | str | "" | HCOM TLS解密库路径 |
+| dram_size | str | "1GB" | DRAM space usage, supported formats such as 1GB, 2MB, etc. |
+| hbm_size | str | "0" | HBM space usage |
+| max_dram_size | str | "1TB" | Maximum dram_size among all local processes |
+| max_hbm_size | str | "0" | Maximum value of hbm_size among all local processes |
+| client_retry_milliseconds | int | 0 | Total retry time (milliseconds) when the client requests meta service |
+| client_timeout_seconds | int | 60 | Client request timeout (seconds) |
+| read_thread_pool_size | int | 4 | Read thread pool size |
+| write_thread_pool_size | int | 4 | Write thread pool size |
+| aggregate_io | bool | true | Whether to enable read/write aggregation |
+| aggregate_num | int | 122 | Aggregation number |
+| ubs_io_enable | bool | false | Whether to enable UBS_IO |
+| tls_enable | bool | false | Whether to enable TLS for metaservice |
+| tls_ca_path | str | "" | TLS CA certificate path |
+| tls_ca_crl_path | str | "" | TLS CA CRL path |
+| tls_cert_path | str | "" | TLS certificate path |
+| tls_key_path | str | "" | TLS key path |
+| tls_key_pass_path | str | "" | TLS key password path |
+| tls_package_path | str | "" | TLS package path |
+| tls_decrypter_path | str | "" | TLS decryption library path |
+| config_store_tls_enable | bool | false | Whether to enable TLS for config_store |
+| config_store_tls_ca_path | str | "" | Config store TLS CA certificate path |
+| config_store_tls_ca_crl_path | str | "" | Config store TLS CA CRL path |
+| config_store_tls_cert_path | str | "" | Config store TLS certificate path |
+| config_store_tls_key_path | str | "" | Config store TLS key path |
+| config_store_tls_key_pass_path | str | "" | Config store TLS key password path |
+| config_store_tls_package_path | str | "" | Config store TLS package path |
+| config_store_tls_decrypter_path | str | "" | Config store TLS decryption library path |
+| hcom_tls_enable | bool | false | Whether to enable TLS for HCOM |
+| hcom_tls_ca_path | str | "" | HCOM TLS CA certificate path |
+| hcom_tls_ca_crl_path | str | "" | HCOM TLS CA CRL path |
+| hcom_tls_cert_path | str | "" | HCOM TLS certificate path |
+| hcom_tls_key_path | str | "" | HCOM TLS key path |
+| hcom_tls_key_pass_path | str | "" | HCOM TLS key password path |
+| hcom_tls_decrypter_path | str | "" | HCOM TLS decrypter library path |
 
-**示例**
+**Example**
 
 ```python
-# 创建配置对象
+# Create configuration object
 config = LocalConfig()
 config.meta_service_url = "tcp://192.168.1.1:5000"
 config.protocol = "device_sdma"
@@ -259,9 +259,9 @@ config.hbm_size = "8GB"
 config.client_timeout_seconds = 30
 ```
 
-### DistributedObjectStore 类
+### DistributedObjectStore class
 
-DistributedObjectStore是分布式对象存储的Python接口封装类，提供了完整的分布式内存缓存操作接口。
+DistributedObjectStore is a Python interface encapsulation class of distributed object storage, providing a complete distributed memory cache operation interface.
 
 #### \_\_init\_\_
 
@@ -269,9 +269,9 @@ DistributedObjectStore是分布式对象存储的Python接口封装类，提供�
 store = DistributedObjectStore()
 ```
 
-**功能**
+**Function**
 
-创建DistributedObjectStore实例。
+Create a DistributedObjectStore instance.
 
 #### setup
 
@@ -279,18 +279,18 @@ store = DistributedObjectStore()
 result = store.setup(config)
 ```
 
-**功能**
+**Function**
 
-设置分布式内存缓存客户端配置。
+Set up the distributed memory cache client configuration.
 
-**参数**
+**parameter**
 
-`config`：LocalConfig对象，包含客户端的所有配置参数。
+`config`: LocalConfig object, containing all configuration parameters of the client.
 
-**返回值**
+**return value**
 
-- `0`：成功
-- 其他：失败
+- `0`: Success
+- Others: failed
 
 #### init
 
@@ -298,19 +298,19 @@ result = store.setup(config)
 result = store.init(device_id, init_bm=True)
 ```
 
-**功能**
+**Function**
 
-初始化分布式内存缓存客户端。
+Initialize the distributed memory cache client.
 
-**参数**
+**parameter**
 
-- `device_id`：使用HBM时的NPU卡用户ID（支持ASCEND_RT_VISIBLE_DEVICES映射）。
-- `init_bm`：是否初始化BM提供内存，默认值为 True。设 False 时将启动纯client模式，不支持数据读写操作。
+- `device_id`: NPU card user ID when using HBM (supports ASCEND_RT_VISIBLE_DEVICES mapping).
+- `init_bm`: Whether to initialize BM to provide memory, the default value is True. When set to False, pure client mode will be enabled and data reading and writing operations will not be supported.
 
-**返回值**
+**return value**
 
-- `0`：成功
-- 其他：失败
+- `0`: Success
+- Others: failed
 
 #### get_local_service_id
 
@@ -318,9 +318,9 @@ result = store.init(device_id, init_bm=True)
 store.get_local_service_id()
 ```
 
-**功能**
+**Function**
 
-获取本地服务ID。
+Get the local service ID.
 
 #### close
 
@@ -328,9 +328,9 @@ store.get_local_service_id()
 store.close()
 ```
 
-**功能**
+**Function**
 
-关闭并清理分布式内存缓存客户端。
+Shut down and clean the distributed memory cache client.
 
 #### put
 
@@ -338,20 +338,20 @@ store.close()
 result = store.put(key, buf, replicateConfig=defaultConfig)
 ```
 
-**功能**
+**Function**
 
-将指定key的数据写入分布式内存缓存中。
+Write the data of the specified key into the distributed memory cache.
 
-**参数**
+**parameter**
 
-- `key`：数据的键，字符串类型
-- `buf`：要存储的字节数据
-- `replicateConfig`：复制配置，具体请参考ReplicateConfig数据结构
+- `key`: key of data, string type
+- `buf`: Bytes of data to be stored
+- `replicateConfig`: Replication configuration, please refer to the ReplicateConfig data structure for details.
 
-**返回值**
+**return value**
 
-- `0`：成功
-- 其他：失败
+- `0`: Success
+- Others: failed
 
 #### put_batch
 
@@ -359,21 +359,21 @@ result = store.put(key, buf, replicateConfig=defaultConfig)
 def put_batch(self, keys: List[str], values: List[bytes], replicateConfig: ReplicateConfig = defaultConfig) -> int
 ```
 
-**功能**
+**Function**
 
-在单个批处理操作中存储多个对象，提高处理效率。
+Store multiple objects in a single batch operation to increase processing efficiency.
 
-**参数**
+**parameter**
 
-- `keys` (List[str])：对象标识符列表。
-- `values` (List[bytes])：要存储的二进制数据列表。
-- `replicateConfig` (ReplicateConfig, optional)：所有对象的复制配置。
+- `keys` (List[str]): List of object identifiers.
+- `values` (List[bytes]): List of binary data to be stored.
+- `replicateConfig` (ReplicateConfig, optional): Replication configuration for all objects.
 
-**返回值**
+**return value**
 
-`int`：状态码 (0：成功；非零：失败错误码)
+`int`: status code (0: success; non-zero: failure error code)
 
-**示例**
+**Example**
 
 ```python
 keys = ["key1", "key2", "key3"]
@@ -388,24 +388,24 @@ assert result == 0, f"put_batch failed: {result}"
 result = store.put_from(key, buffer_ptr, size, direct=memcache_hybrid.H2G, replicateConfig=defaultConfig)
 ```
 
-**功能**
+**Function**
 
-从预分配的缓冲区中写入数据，适用于需要高效内存管理的场景。
+Write data from a pre-allocated buffer, suitable for scenarios that require efficient memory management.
 
-**参数**
+**parameter**
 
-- `key`：数据的键。
-- `buffer_ptr`：缓冲区指针。
-- `size`：数据大小。
-- `direct`：数据拷贝方向，可选值：
-    - `memcache_hybrid.H2G`：从主机内存到全局内存（默认）。
-    - `memcache_hybrid.L2G`：从卡上内存到全局内存。
-- `replicateConfig`：复制配置，具体请参考ReplicateConfig数据结构。
+- `key`: The key of the data.
+- `buffer_ptr`: buffer pointer.
+- `size`: data size.
+- `direct`: Data copy direction, optional values:
+    - `memcache_hybrid.H2G`: from host memory to global memory (default).
+    - `memcache_hybrid.L2G`: From card memory to global memory.
+- `replicateConfig`: Replication configuration, please refer to the ReplicateConfig data structure for details.
 
-**返回值**
+**return value**
 
-- `0`：成功
-- 其他：失败
+- `0`: Success
+- Others: failed
 
 #### batch_put_from
 
@@ -413,26 +413,26 @@ result = store.put_from(key, buffer_ptr, size, direct=memcache_hybrid.H2G, repli
 result = store.batch_put_from(keys, buffer_ptrs, sizes, direct=memcache_hybrid.H2G, replicateConfig=defaultConfig)
 ```
 
-**功能**
+**Function**
 
-从预分配的缓冲区中批量写入数据，提高处理效率。
+Write data in batches from pre-allocated buffers to improve processing efficiency.
 
-**参数**
+**parameter**
 
-- `keys`：键列表。
-- `buffer_ptrs`：缓冲区指针列表。
-- `sizes`：数据大小列表。
-- `direct`：数据拷贝方向，可选值：
-    - `memcache_hybrid.H2G`：从主机内存到全局内存（默认）。
-    - `memcache_hybrid.L2G`：从卡上内存到全局内存。
-- `replicateConfig`：复制配置，具体请参考ReplicateConfig数据结构。
+- `keys`: Key list.
+- `buffer_ptrs`: List of buffer pointers.
+- `sizes`: Data size list.
+- `direct`: Data copy direction, optional values:
+    - `memcache_hybrid.H2G`: from host memory to global memory (default).
+    - `memcache_hybrid.L2G`: From card memory to global memory.
+- `replicateConfig`: Replication configuration, please refer to the ReplicateConfig data structure for details.
 
-**返回值**
+**return value**
 
-结果列表，每个元素表示对应写入操作的结果：
+Result list, each element represents the result of the corresponding write operation:
 
-- `0`：成功
-- 其他：错误
+- `0`: Success
+- Other: Error
 
 #### put_from_layers
 
@@ -440,24 +440,24 @@ result = store.batch_put_from(keys, buffer_ptrs, sizes, direct=memcache_hybrid.H
 result = store.put_from_layers(key, buffer_ptrs, sizes, direct=memcache_hybrid.H2G, replicateConfig=defaultConfig)
 ```
 
-**功能**
+**Function**
 
-从多个预分配的缓冲区中写入分层数据，适用于复杂数据结构的存储。
+Write hierarchical data from multiple pre-allocated buffers, suitable for storage of complex data structures.
 
-**参数**
+**parameter**
 
-- `key`：数据的键。
-- `buffer_ptrs`：缓冲区指针列表，每个指针对应一个数据层。
-- `sizes`：数据大小列表，每个元素对应一个数据层的大小。
-- `direct`：数据拷贝方向，可选值：
-    - `memcache_hybrid.H2G`：从主机内存到全局内存（默认）。
-    - `memcache_hybrid.L2G`：从卡上内存到全局内存。
-- `replicateConfig`：复制配置，具体请参考ReplicateConfig数据结构。
+- `key`: The key of the data.
+- `buffer_ptrs`: List of buffer pointers, each pointer corresponds to a data layer.
+- `sizes`: Data size list, each element corresponds to the size of a data layer.
+- `direct`: Data copy direction, optional values:
+    - `memcache_hybrid.H2G`: from host memory to global memory (default).
+    - `memcache_hybrid.L2G`: From card memory to global memory.
+- `replicateConfig`: Replication configuration, please refer to the ReplicateConfig data structure for details.
 
-**返回值**
+**return value**
 
-- `0`：成功
-- 其他：失败
+- `0`: Success
+- Others: failed
 
 #### batch_put_from_layers
 
@@ -466,26 +466,26 @@ result = store.batch_put_from_layers(keys, buffer_ptrs_list, sizes_list, direct=
                                      replicateConfig=defaultConfig)
 ```
 
-**功能**
+**Function**
 
-从多个预分配的缓冲区中批量写入分层数据，提高处理效率。
+Write hierarchical data in batches from multiple pre-allocated buffers to improve processing efficiency.
 
-**参数**
+**parameter**
 
-- `keys`：数据键列表，每个键对应一个分层数据对象。
-- `buffer_ptrs_list`：缓冲区指针二维列表，外层列表对应每个键，内层列表对应每个键的各个数据层指针。
-- `sizes_list`：数据大小二维列表，外层列表对应每个键，内层列表对应每个键的各个数据层大小。
-- `direct`：数据拷贝方向，可选值：
-    - `memcache_hybrid.H2G`：从主机内存到全局内存（默认）。
-    - `memcache_hybrid.L2G`：从卡上内存到全局内存。
-- `replicateConfig`：复制配置，具体请参考ReplicateConfig数据结构。
+- `keys`: List of data keys, each key corresponds to a hierarchical data object.
+- `buffer_ptrs_list`: A two-dimensional list of buffer pointers. The outer list corresponds to each key, and the inner list corresponds to each data layer pointer of each key.
+- `sizes_list`: A two-dimensional list of data sizes. The outer list corresponds to each key, and the inner list corresponds to the size of each data layer for each key.
+- `direct`: Data copy direction, optional values:
+    - `memcache_hybrid.H2G`: from host memory to global memory (default).
+    - `memcache_hybrid.L2G`: From card memory to global memory.
+- `replicateConfig`: Replication configuration, please refer to the ReplicateConfig data structure for details.
 
-**返回值**
+**return value**
 
-结果列表，每个元素表示对应写入操作的结果：
+Result list, each element represents the result of the corresponding write operation:
 
-  - `0`：成功
-  - 其他：错误
+  - `0`: Success
+  - Other: Error
 
 #### get
 
@@ -493,18 +493,18 @@ result = store.batch_put_from_layers(keys, buffer_ptrs_list, sizes_list, direct=
 data = store.get(key)
 ```
 
-**功能**
+**Function**
 
-获取指定key的数据。
+Get the data of the specified key.
 
-**参数**
+**parameter**
 
-`key`：数据的键。
+`key`: The key of the data.
 
-**返回值**
+**return value**
 
-- 成功时返回数据字节串。
-- 失败时返回空字节串。
+- Returns a data byte string on success.
+- Returns an empty byte string on failure.
 
 #### get_batch
 
@@ -512,20 +512,20 @@ data = store.get(key)
 def get_batch(self, keys: List[str]) -> List[bytes]
 ```
 
-**功能**
+**Function**
 
-在单个批处理操作中检索多个对象，提高处理效率。
+Retrieve multiple objects in a single batch operation to improve processing efficiency.
 
-**参数**
+**parameter**
 
-`keys`(List[str])：要检索的对象标识符列表。
+`keys`(List[str]): List of object identifiers to retrieve.
 
-**返回值**
+**return value**
 
-- `List[bytes]`：检索到的二进制数据列表。
-- 成功时返回二进制数据列表，失败时返回空二进制数据列表。
+- `List[bytes]`: Retrieved list of binary data.
+- Returns a binary data list on success and an empty binary data list on failure.
 
-**示例**
+**Example**
 
 ```python
 keys = ["key1", "key2", "key3"]
@@ -540,23 +540,23 @@ for key, value in zip(keys, values):
 result = store.get_into(key, buffer_ptr, size, direct=memcache_hybrid.G2H)
 ```
 
-**功能**
+**Function**
 
-将数据直接获取到预分配的缓冲区中，适用于需要高效内存管理的场景。
+Get data directly into a pre-allocated buffer, suitable for scenarios that require efficient memory management.
 
-**参数**
+**parameter**
 
-- `key`：数据的键。
-- `buffer_ptr`：目标缓冲区指针。
-- `size`：缓冲区大小。
-- `direct`：数据拷贝方向，可选值：
-    - `memcache_hybrid.G2H`：从全局内存到主机内存（默认）。
-    - `memcache_hybrid.G2L`：从全局内存到卡上内存。
+- `key`: The key of the data.
+- `buffer_ptr`: Destination buffer pointer.
+- `size`: buffer size.
+- `direct`: Data copy direction, optional values:
+    - `memcache_hybrid.G2H`: from global memory to host memory (default).
+    - `memcache_hybrid.G2L`: From global memory to on-card memory.
 
-**返回值**
+**return value**
 
-- `0`：成功
-- 其他：失败
+- `0`: Success
+- Others: failed
 
 #### batch_get_into
 
@@ -564,25 +564,25 @@ result = store.get_into(key, buffer_ptr, size, direct=memcache_hybrid.G2H)
 results = store.batch_get_into(keys, buffer_ptrs, sizes, direct=memcache_hybrid.G2H)
 ```
 
-**功能**
+**Function**
 
-批量将数据获取到预分配的缓冲区中，提高处理效率。
+Get data into pre-allocated buffers in batches to improve processing efficiency.
 
-**参数**
+**parameter**
 
-- `keys`：键列表。
-- `buffer_ptrs`：缓冲区指针列表。
-- `sizes`：缓冲区大小列表。
-- `direct`：数据拷贝方向，可选值：
-    - `memcache_hybrid.G2H`：从全局内存到主机内存（默认）。
-    - `memcache_hybrid.G2L`：从全局内存到卡上内存。
+- `keys`: Key list.
+- `buffer_ptrs`: List of buffer pointers.
+- `sizes`: List of buffer sizes.
+- `direct`: Data copy direction, optional values:
+    - `memcache_hybrid.G2H`: from global memory to host memory (default).
+    - `memcache_hybrid.G2L`: From global memory to on-card memory.
 
-**返回值**
+**return value**
 
-结果列表，每个元素表示对应操作的结果：
+Result list, each element represents the result of the corresponding operation:
 
-- `0`：成功
-- 其他：错误
+- `0`: Success
+- Other: Error
 
 #### get_into_layers
 
@@ -590,23 +590,23 @@ results = store.batch_get_into(keys, buffer_ptrs, sizes, direct=memcache_hybrid.
 result = store.get_into_layers(key, buffer_ptrs, sizes, direct=memcache_hybrid.G2H)
 ```
 
-**功能**
+**Function**
 
-将数据分层获取到预分配的缓冲区中，适用于复杂数据结构的读取。
+Obtain data hierarchically into pre-allocated buffers, suitable for reading complex data structures.
 
-**参数**
+**parameter**
 
-- `key`：数据的键。
-- `buffer_ptrs`：目标缓冲区指针列表，每个指针对应一个数据层。
-- `sizes`：缓冲区大小列表，每个元素对应一个数据层的大小。
-- `direct`：数据拷贝方向，可选值：
-    - `memcache_hybrid.G2H`：从全局内存到主机内存（默认）。
-    - `memcache_hybrid.G2L`：从全局内存到卡上内存。
+- `key`: The key of the data.
+- `buffer_ptrs`: List of target buffer pointers, each pointer corresponds to a data layer.
+- `sizes`: Buffer size list, each element corresponds to the size of a data layer.
+- `direct`: Data copy direction, optional values:
+    - `memcache_hybrid.G2H`: from global memory to host memory (default).
+    - `memcache_hybrid.G2L`: From global memory to on-card memory.
 
-**返回值**
+**return value**
 
-- `0`：成功
-- 其他：失败
+- `0`: Success
+- Others: failed
 
 #### batch_get_into_layers
 
@@ -614,25 +614,25 @@ result = store.get_into_layers(key, buffer_ptrs, sizes, direct=memcache_hybrid.G
 results = store.batch_get_into_layers(keys, buffer_ptrs_list, sizes_list, direct=memcache_hybrid.G2H)
 ```
 
-**功能**
+**Function**
 
-批量将分层数据获取到预分配的缓冲区中，提高处理效率。
+Get hierarchical data into pre-allocated buffers in batches to improve processing efficiency.
 
-**参数**
+**parameter**
 
-- `keys`：数据键列表，每个键对应一个分层数据对象。
-- `buffer_ptrs_list`：缓冲区指针二维列表，外层列表对应每个键，内层列表对应每个键的各个目标数据层指针。
-- `sizes_list`：缓冲区大小二维列表，外层列表对应每个键，内层列表对应每个键的各个数据层大小。
-- `direct`：数据拷贝方向，可选值：
-    - `memcache_hybrid.G2H`：从全局内存到主机内存（默认）。
-    - `memcache_hybrid.G2L`：从全局内存到卡上内存。
+- `keys`: List of data keys, each key corresponds to a hierarchical data object.
+- `buffer_ptrs_list`: A two-dimensional list of buffer pointers. The outer list corresponds to each key, and the inner list corresponds to each target data layer pointer of each key.
+- `sizes_list`: A two-dimensional list of buffer sizes. The outer list corresponds to each key, and the inner list corresponds to the size of each data layer for each key.
+- `direct`: Data copy direction, optional values:
+    - `memcache_hybrid.G2H`: from global memory to host memory (default).
+    - `memcache_hybrid.G2L`: From global memory to on-card memory.
 
-**返回值**
+**return value**
 
-结果列表，每个元素表示对应操作的结果：
+Result list, each element represents the result of the corresponding operation:
 
-- `0`：成功
-- 其他：错误
+- `0`: Success
+- Other: Error
 
 #### remove
 
@@ -640,18 +640,18 @@ results = store.batch_get_into_layers(keys, buffer_ptrs_list, sizes_list, direct
 result = store.remove(key)
 ```
 
-**功能**
+**Function**
 
-删除指定key的数据。
+Delete the data of the specified key.
 
-**参数**
+**parameter**
 
-`key`：要删除的数据键。
+`key`: The data key to be deleted.
 
-**返回值**
+**return value**
 
-- `0`：成功
-- 其他：失败
+- `0`: Success
+- Others: failed
 
 #### remove_batch
 
@@ -659,20 +659,20 @@ result = store.remove(key)
 results = store.remove_batch(keys)
 ```
 
-**功能**
+**Function**
 
-批量删除数据，提高处理效率。
+Delete data in batches to improve processing efficiency.
 
-**参数**
+**parameter**
 
-`keys`：要删除的键列表。
+`keys`: List of keys to delete.
 
-**返回值**
+**return value**
 
-结果列表，每个元素表示对应删除操作的结果：
+Result list, each element represents the result of the corresponding delete operation:
 
-- `0`：成功
-- 其他：错误
+- `0`: Success
+- Other: Error
 
 #### remove_all
 
@@ -680,14 +680,14 @@ results = store.remove_batch(keys)
 result = store.remove_all()
 ```
 
-**功能**
+**Function**
 
-删除内存池中所有的键值对。
+Delete all key-value pairs in the memory pool.
 
-**返回值**
+**return value**
 
-- `0`：成功
-- 其他：失败
+- `0`: Success
+- Others: failed
 
 #### is_exist
 
@@ -695,19 +695,19 @@ result = store.remove_all()
 result = store.is_exist(key)
 ```
 
-**功能**
+**Function**
 
-检查指定key是否存在。
+Check whether the specified key exists.
 
-**参数**
+**parameter**
 
-`key`：要检查的键。
+`key`: The key to check.
 
-**返回值**
+**return value**
 
-- `1`：存在
-- `0`：不存在
-- 其他：错误
+- `1`: exists
+- `0`: does not exist
+- Other: Error
 
 #### batch_is_exist
 
@@ -715,21 +715,21 @@ result = store.is_exist(key)
 results = store.batch_is_exist(keys)
 ```
 
-**功能**
+**Function**
 
-批量检查键是否存在，提高处理效率。
+Check whether keys exist in batches to improve processing efficiency.
 
-**参数**
+**parameter**
 
-`keys`：要检查的键列表。
+`keys`: List of keys to check.
 
-**返回值**
+**return value**
 
-结果列表，每个元素表示对应键的存在状态：
+The result list, each element represents the existence status of the corresponding key:
 
-- `1`：存在
-- `0`：不存在
-- 其他：错误
+- `1`: exists
+- `0`: does not exist
+- Other: Error
 
 #### get_key_info
 
@@ -737,24 +737,24 @@ results = store.batch_is_exist(keys)
 key_info = store.get_key_info(key, flag=0)
 ```
 
-**功能**
+**Function**
 
-获取指定key的数据信息。
+Get the data information of the specified key.
 
-**参数**
+**parameter**
 
-- `key`: 数据的键
-- `flag`: 查询标志，Python 接口默认值为 `GET_KEY_INFO_FOR_LAYER_WISE`（LayerWise模式查询，无 DRAM 时从 SSD 回温）。
+- `key`: key of data
+- `flag`: Query flag, the default value of the Python interface is `GET_KEY_INFO_FOR_LAYER_WISE` (LayerWise mode query, recovery from SSD when there is no DRAM).
 
-**返回值**
+**return value**
 
-`KeyInfo`对象，包含以下方法：
+`KeyInfo` object, including the following methods:
 
-  - `size()`：获取数据大小。
-  - `loc_list()`：获取数据位置列表。
-  - `type_list()`：获取数据类型列表。
-  - `gva_list()`：获取每个 blob 对应的 GVA 列表。
-  - `__str__()`：获取信息的字符串表示。
+  - `size()`: Get the data size.
+  - `loc_list()`: Get a list of data locations.
+  - `type_list()`: Get a list of data types.
+  - `gva_list()`: Get the GVA list corresponding to each blob.
+  - `__str__()`: Get the string representation of the information.
 
 #### batch_get_key_info
 
@@ -762,24 +762,24 @@ key_info = store.get_key_info(key, flag=0)
 key_infos = store.batch_get_key_info(keys, flag=0)
 ```
 
-**功能**
+**Function**
 
-批量获取多个key的数据信息，提高处理效率。
+Obtain data information of multiple keys in batches to improve processing efficiency.
 
-**参数**
+**parameter**
 
-- `keys`: 数据键列表
-- `flag`: 查询标志，Python 接口默认值为 `GET_KEY_INFO_FOR_LAYER_WISE`（LayerWise模式查询，无 DRAM 时从 SSD 回温）。
+- `keys`: Data key list
+- `flag`: Query flag, the default value of the Python interface is `GET_KEY_INFO_FOR_LAYER_WISE` (LayerWise mode query, recovery from SSD when there is no DRAM).
 
-**返回值**
+**return value**
 
-`KeyInfo`对象列表，每个对象包含以下方法：
+List of `KeyInfo` objects, each object contains the following methods:
 
-  - `size()`：获取数据大小。
-  - `loc_list()`：获取数据位置列表。
-  - `type_list()`：获取数据类型列表。
-  - `gva_list()`：获取每个 blob 对应的 GVA 列表。
-  - `__str__()`：获取信息的字符串表示。
+  - `size()`: Get the data size.
+  - `loc_list()`: Get a list of data locations.
+  - `type_list()`: Get a list of data types.
+  - `gva_list()`: Get the GVA list corresponding to each blob.
+  - `__str__()`: Get the string representation of the information.
 
 #### prefetch
 
@@ -787,22 +787,22 @@ key_infos = store.batch_get_key_info(keys, flag=0)
 result = store.prefetch(keys, src_media=2, dst_media=1, flags=0)
 ```
 
-**功能**
+**Function**
 
-将指定 keys 从源介质回温到目标介质。当前仅支持 SSD→DRAM（`src_media=2, dst_media=1`），其他组合暂不支持。
+Rewarm specified keys from source media to target media. Currently only SSD→DRAM (`src_media=2, dst_media=1`) is supported, other combinations are not supported yet.
 
-**参数**
+**parameter**
 
-- `keys`：要回温的 key 列表。
-- `src_media`：源介质类型（0=HBM，1=DRAM，2=SSD），默认 `2`（SSD），预留参数。
-- `dst_media`：目标介质类型，默认 `1`（DRAM），预留参数。
-- `flags`：预留标志，必须为 `0`。
+- `keys`: Key list to be warmed up.
+- `src_media`: Source media type (0=HBM, 1=DRAM, 2=SSD), default `2` (SSD), reserved parameters.
+- `dst_media`: Target media type, default `1` (DRAM), reserved parameters.
+- `flags`: reserved flag, must be `0`.
 
-**返回值**
+**return value**
 
-- `int`：`0` 表示成功，其他值表示失败。
+- `int`: `0` indicates success, other values ​​indicate failure.
 
-**示例**
+**Example**
 
 ```python
 result = store.prefetch(["key1", "key2"])
@@ -815,34 +815,34 @@ assert result == 0
 result = store.evict(keys, src_media=1, dst_media=2, flags=0)
 ```
 
-**功能**
+**Function**
 
-将指定 keys 从源介质驱逐到目标介质。当前仅支持 DRAM→SSD（`src_media=1, dst_media=2`），其他组合暂不支持。当 SSD 不可用或 DRAM 使用率高于回温水线时，DRAM 上的数据会被直接删除。
+Deports the specified keys from the source media to the target media. Currently only DRAM→SSD (`src_media=1, dst_media=2`) is supported, other combinations are not supported yet. When the SSD is unavailable or the DRAM usage is higher than the recovery waterline, the data on the DRAM will be deleted directly.
 
-**参数**
+**parameter**
 
-- `keys`：要驱逐的 key 列表。
-- `src_media`：源介质类型（0=HBM，1=DRAM，2=SSD），默认 `1`（DRAM），预留参数。
-- `dst_media`：目标介质类型，默认 `2`（SSD），预留参数。
-- `flags`：预留标志，必须为 `0`。
+- `keys`: List of keys to be evicted.
+- `src_media`: Source media type (0=HBM, 1=DRAM, 2=SSD), default `1` (DRAM), reserved parameters.
+- `dst_media`: Target media type, default `2` (SSD), reserved parameters.
+- `flags`: reserved flag, must be `0`.
 
-**返回值**
+**return value**
 
-- `int`：`0` 表示成功，其他值表示失败。
+- `int`: `0` indicates success, other values ​​indicate failure.
 
-**示例**
+**Example**
 
 ```python
 result = store.evict(["key1", "key2"])
 assert result == 0
 ```
 
-#### GVA 相关接口与常量
+#### GVA related interfaces and constants
 
-#### get_key_info / batch_get_key_info 补充说明
+#### get_key_info / batch_get_key_info additional instructions
 
-- 这两个接口的实际签名分别为 `store.get_key_info(key, flag=0)` 和 `store.batch_get_key_info(keys, flag=0)`。
-- `KeyInfo` 除 `size()`、`loc_list()`、`type_list()` 外，还提供 `gva_list()`，用于返回每个 blob 对应的 GVA 列表。
+- The actual signatures of these two interfaces are `store.get_key_info(key, flag=0)` and `store.batch_get_key_info(keys, flag=0)` respectively.
+- `KeyInfo` In addition to `size()`, `loc_list()`, and `type_list()`, `gva_list()` is also provided to return the GVA list corresponding to each blob.
 
 ```python
 key_info = store.get_key_info(key)
@@ -856,30 +856,30 @@ gvas = key_info.gva_list()
 results = store.batch_add_lease(keys, leaseTtlMs=0)
 ```
 
-**功能**
+**Function**
 
-批量为多个 key 增加读租约，并记录后续 GVA 读取所需的读租约状态。
+Add read leases for multiple keys in batches, and record the read lease status required for subsequent GVA reads.
 
-**参数**
+**parameter**
 
-- `keys`：要增加读租约的 key 列表，不能为空。
-- `leaseTtlMs`：要增加的租约时间，单位为毫秒，默认为 `0`。为 `0` 时使用 meta 侧配置项
-  `ock.mmc.meta.lease_ttl_ms`。
+- `keys`: The key list to be added to the read lease cannot be empty.
+- `leaseTtlMs`: The lease time to be increased, in milliseconds, the default is `0`. Use the meta-side configuration item when it is `0`
+  `ock.mmc.meta.lease_ttl_ms`.
 
-**返回值**
+**return value**
 
-`List[int]`：每个元素表示对应 key 的处理结果，`0` 表示成功，其他值表示失败。返回列表长度与 `keys` 一致。
+`List[int]`: Each element represents the processing result of the corresponding key. `0` represents success, and other values ​​represent failure. The length of the returned list is consistent with `keys`.
 
-**使用说明**
+**Instructions for use**
 
-- 该接口返回每个 key 的错误码，不返回 `KeyInfo`。
-- 该接口为非事务接口；某个 key 失败不会回滚其他 key 已经成功增加的读租约。
-- `leaseTtlMs` 为 `0` 时，meta 侧使用配置项 `ock.mmc.meta.lease_ttl_ms` 的值增加租约。
-- 调用方应只对返回值为 `0` 的 key 继续执行后续基于 GVA 的读取流程。
-- 典型用法是先通过 `batch_get_key_info(keys, flag=0)` 获取 GVA，再调用 `batch_add_lease(keys)`
-  为后续基于 GVA 的读取流程建立读租约状态。
-- 同一进程对同一 key 重复调用时，会复用当前进程中已有的读租约并在 meta 侧续租；
-  完成读取后调用一次 `batch_remove_lease` 即可释放。
+- This interface returns the error code of each key and does not return `KeyInfo`.
+- This interface is a non-transactional interface; the failure of a certain key will not roll back the read leases that have been successfully added to other keys.
+- When `leaseTtlMs` is `0`, the meta side uses the value of the configuration item `ock.mmc.meta.lease_ttl_ms` to increase the lease.
+- The caller should only continue to perform subsequent GVA-based reading processes for keys whose return value is `0`.
+- Typical usage is to first obtain GVA through `batch_get_key_info(keys, flag=0)`, and then call `batch_add_lease(keys)`
+  Establish read lease status for subsequent GVA-based read processes.
+- When the same process calls the same key repeatedly, the existing read lease in the current process will be reused and renewed on the meta side;
+  Call `batch_remove_lease` once after finishing reading to release it.
 
 ```python
 key_infos = store.batch_get_key_info(keys, flag=0)
@@ -901,22 +901,22 @@ store.batch_remove_lease([keys[idx] for idx in valid_indices])
 ret = store.batch_remove_lease(keys)
 ```
 
-**功能**
+**Function**
 
-批量移除多个 key 的读租约，并清理当前进程中对应的 GVA 读取状态。
+Remove the read leases of multiple keys in batches and clear the corresponding GVA read status in the current process.
 
-**参数**
+**parameter**
 
-`keys`：要移除读租约的 key 列表，不能为空。
+`keys`: The key list to remove the read lease, cannot be empty.
 
-**返回值**
+**return value**
 
-- `int`：`0` 表示本地读租约检查通过并已触发移除租约请求发送流程。
-- 其他值表示失败。
+- `int`: `0` indicates that the local read lease check has passed and the lease removal request sending process has been triggered.
+- Other values ​​indicate failure.
 
-**使用说明**
+**Instructions for use**
 
-调用方完成基于 GVA 的读取后，应调用该接口显式释放由 `batch_add_lease` 建立的读租约。
+After the caller completes the GVA-based read, it should call this interface to explicitly release the read lease established by `batch_add_lease`.
 
 #### batch_alloc
 
@@ -924,23 +924,23 @@ ret = store.batch_remove_lease(keys)
 gvas = store.batch_alloc(keys, sizes, media=1, leaseTtlMs=0)
 ```
 
-**功能**
+**Function**
 
-批量为多个 key 申请全局内存，并返回每个 key 对应的起始 GVA。
+Apply for global memory for multiple keys in batches and return the starting GVA corresponding to each key.
 
-**参数**
+**parameter**
 
-- `keys`：要申请内存的 key 列表。
-- `sizes`：每个 key 对应的数据大小列表，长度必须与 `keys` 一致。
-- `media`：申请的介质类型，默认值为 `1`（`MEDIA_DRAM`）；`0` 表示 `MEDIA_HBM`。
-- `leaseTtlMs`：要增加的租约时间，单位为毫秒，默认为 `0`。为 `0` 时使用 meta 侧配置项 `ock.mmc.meta.lease_ttl_ms`。
+- `keys`: Key list to apply for memory.
+- `sizes`: The data size list corresponding to each key, the length must be consistent with `keys`.
+- `media`: The requested media type, the default value is `1` (`MEDIA_DRAM`); `0` represents `MEDIA_HBM`.
+- `leaseTtlMs`: The lease time to be increased, in milliseconds, the default is `0`. When it is `0`, use the meta-side configuration item `ock.mmc.meta.lease_ttl_ms`.
 
-**返回值**
+**return value**
 
-- `List[int]`：每个元素为一个 key 对应的起始 GVA。
-- 可读 SSD 命中且没有可用内存 GVA 时，对应元素为 `2**64 - 1`（`UINT64_MAX`），调用方跳过该 key 的写入。
-- 申请失败或参数非法时，对应元素为 `0`。
-- 调用方必须过滤这两个值，再转换为 NumPy 整数数组或执行拷贝和写完成通知。
+- `List[int]`: Each element is the starting GVA corresponding to a key.
+- On a readable SSD hit with no available memory GVA, the corresponding element is `2**64 - 1` (`UINT64_MAX`). The caller skips writing that key.
+- When allocation fails or the parameters are invalid, the corresponding element is `0`.
+- The caller must filter out both sentinel values before converting to a NumPy integer array, copying data, or sending write-completion notifications.
 
 #### batch_copy
 
@@ -948,29 +948,29 @@ gvas = store.batch_alloc(keys, sizes, media=1, leaseTtlMs=0)
 result = store.batch_copy(gva_ptrs, buffer_ptrs, sizes, direct=SMEMB_COPY_G2L, flag=0)
 ```
 
-**功能**
+**Function**
 
-批量在 GVA 地址与本地缓冲区之间执行数据拷贝。
+Performs data copies between GVA addresses and local buffers in batches.
 
-> [!NOTE] 说明
-> 写方向（`SMEMB_COPY_L2G`/`SMEMB_COPY_H2G`）只拷贝数据，**不会**将 GVA 对应的 blob 状态翻转为 READABLE；调用方必须再调用 `batch_write_finish` 显式通知写完成。
+> [!NOTE] Description
+> The write direction (`SMEMB_COPY_L2G`/`SMEMB_COPY_H2G`) only copies data and does not flip the blob status corresponding to GVA to READABLE; the caller must call `batch_write_finish` again to explicitly notify the write completion.
 
-**参数**
+**parameter**
 
-- `gva_ptrs`：GVA 地址列表。
-- `buffer_ptrs`：本地缓冲区指针列表，必须与 `gva_ptrs` 一一对应。
-- `sizes`：每次拷贝的大小列表，长度必须与 `gva_ptrs` 一致。
-- `direct`：数据拷贝方向，常用值包括：
-    - `SMEMB_COPY_L2G`（`0`）：本地 HBM -> 全局内存。
-    - `SMEMB_COPY_G2L`（`1`）：全局内存 -> 本地 HBM。
-    - `SMEMB_COPY_G2H`（`2`）：全局内存 -> 本地 Host DRAM。
-    - `SMEMB_COPY_H2G`（`3`）：本地 Host DRAM -> 全局内存。
-- `flag`：拷贝标志位，默认 0。读方向设置 `GET_DATA_FOR_LAYER_WISE` 可跳过 GVA tracker 合法性校验，直接执行 DMA 拷贝。
+- `gva_ptrs`: GVA address list.
+- `buffer_ptrs`: A list of local buffer pointers, which must correspond to `gva_ptrs` one-to-one.
+- `sizes`: The size list of each copy, the length must be consistent with `gva_ptrs`.
+- `direct`: Data copy direction, common values ​​include:
+    - `SMEMB_COPY_L2G` (`0`): Local HBM -> Global Memory.
+    - `SMEMB_COPY_G2L` (`1`): Global Memory -> Local HBM.
+    - `SMEMB_COPY_G2H` (`2`): Global Memory -> Local Host DRAM.
+    - `SMEMB_COPY_H2G` (`3`): Local Host DRAM -> Global Memory.
+- `flag`: copy flag, default 0. The read direction setting `GET_DATA_FOR_LAYER_WISE` can skip the GVA tracker validity check and directly perform DMA copy.
 
-**返回值**
+**return value**
 
-- `0`：成功
-- 其他：失败
+- `0`: Success
+- Others: failed
 
 #### batch_copy_layers
 
@@ -978,27 +978,27 @@ result = store.batch_copy(gva_ptrs, buffer_ptrs, sizes, direct=SMEMB_COPY_G2L, f
 result = store.batch_copy_layers(gva_ptrs, buffer_ptrs, sizes, direct=SMEMB_COPY_G2L, flag=0)
 ```
 
-**功能**
+**Function**
 
-以分层数据的形式批量在 GVA 地址与本地缓冲区之间执行拷贝。
+Performs batch copies of hierarchical data between GVA addresses and local buffers.
 
-> [!NOTE] 说明
-> 与 `batch_copy` 一致，写方向只拷贝数据，不翻转 blob 状态；写完后需调用 `batch_write_finish`。
+> [!NOTE] Description
+> Consistent with `batch_copy`, the writing direction only copies data and does not flip the blob state; `batch_write_finish` needs to be called after writing.
 
-**参数**:
+**parameter**:
 
-- `gva_ptrs`：每个对象的起始 GVA 列表。
-- `buffer_ptrs`：二维缓冲区指针列表，外层对应对象，内层对应该对象的各层缓冲区。
-- `sizes`：二维大小列表，每层大小会从对应起始 GVA 开始按顺序累加。
-- `direct`：数据拷贝方向，含义与 `batch_copy` 一致。
-- `flag`：拷贝标志位，含义与 `batch_copy` 一致。
+- `gva_ptrs`: List of starting GVAs for each object.
+- `buffer_ptrs`: Two-dimensional buffer pointer list, the outer layer corresponds to the object, and the inner layer corresponds to the buffers of each layer of the object.
+- `sizes`: Two-dimensional size list, the size of each layer will be accumulated sequentially starting from the corresponding starting GVA.
+- `direct`: Data copy direction, the meaning is consistent with `batch_copy`.
+- `flag`: copy flag, the meaning is the same as `batch_copy`.
 
-`gva_ptrs`、`buffer_ptrs` 和 `sizes` 的外层长度必须相等，且每个对象的 `buffer_ptrs[i]` 与 `sizes[i]` 长度必须相等；不匹配时返回失败，不执行数据拷贝。
+The outer lengths of `gva_ptrs`, `buffer_ptrs` and `sizes` must be equal, and the lengths of `buffer_ptrs[i]` and `sizes[i]` of each object must be equal; if they do not match, a failure is returned and no data copy is performed.
 
-**返回值**
+**return value**
 
-- `0`：成功
-- 其他：失败
+- `0`: Success
+- Others: failed
 
 #### batch_write_finish
 
@@ -1006,30 +1006,30 @@ result = store.batch_copy_layers(gva_ptrs, buffer_ptrs, sizes, direct=SMEMB_COPY
 results = store.batch_write_finish(keys, res)
 ```
 
-**功能**
+**Function**
 
-显式通知 meta service 给定 key 的写入已完成。
+Explicitly notify the meta service that writing for the given key is complete.
 
-> [!NOTE] 说明
+> [!NOTE] Description
 >
-> - 调用方在 `batch_copy` / `batch_copy_layers` 写方向完成后必须调用此接口，meta service 才会将对应 blob 从 `ALLOCATED` 翻转为 `READABLE`，此后其他进程才能通过 `batch_get_key_info` / `batch_copy` 读方向读到数据。
-> - 对于已处于 `READABLE` 的 key，再次调用为幂等并直接返回成功。
-> - 对未分配过的 key 返回 `MMC_UNMATCHED_KEY`。
+> - The caller must call this interface after the `batch_copy` / `batch_copy_layers` write direction is completed, so that the meta service will flip the corresponding blob from `ALLOCATED` to `READABLE`. After that, other processes can read the data through the `batch_get_key_info` / `batch_copy` read direction.
+> - For a key that is already at `READABLE`, calling it again is idempotent and returns success directly.
+> - Returns `MMC_UNMATCHED_KEY` for unallocated keys.
 
-**参数**
+**parameter**
 
-- `keys`：已写入完成的 key 列表。
-- `res`：与 `keys` 等长的每 key 写入结果，`0` 表示成功（对应 `MMC_WRITE_OK`，blob 翻为 `READABLE`），非 `0` 表示失败（对应 `MMC_WRITE_FAIL`，meta service 会移除该 blob）。
+- `keys`: The completed key list has been written.
+- `res`: The writing result of each key is the same length as `keys`. `0` means success (corresponding to `MMC_WRITE_OK`, the blob is translated to `READABLE`), non-`0` means failure (corresponding to `MMC_WRITE_FAIL`, the meta service will remove the blob).
 
-**返回值**
+**return value**
 
-- `List[int]`：与 `keys` 等长，每个元素为 meta service 对该 key 的实际更新结果。
-- `0` 表示成功。
+- `List[int]`: The same length as `keys`. Each element is the actual update result of the meta service for the key.
+- `0` indicates success.
 
-> [!NOTE] 典型 GVA 跨进程读取流程：
+> [!NOTE] Typical GVA cross-process reading process:
 >
-> - 写进程：`batch_alloc` -> `batch_copy` / `batch_copy_layers`（写入数据）-> `batch_write_finish` 显式通知写完成，blob 翻为 READABLE。
-> - 读进程：`batch_get_key_info(...)` 获取 GVA -> `batch_add_lease(...)` 增加读租约并准备 GVA 读取状态 -> `batch_copy` / `batch_copy_layers`（读取）-> `batch_remove_lease(...)` 显式释放读租约。
+> - Writing process: `batch_alloc` -> `batch_copy` / `batch_copy_layers` (writing data) -> `batch_write_finish` explicitly notifies the writing completion, and the blob is converted to READABLE.
+> - Read process: `batch_get_key_info(...)` acquires GVA -> `batch_add_lease(...)` adds read lease and prepares GVA read status -> `batch_copy` / `batch_copy_layers` (read) -> `batch_remove_lease(...)` explicitly releases read lease.
 
 #### register_buffer
 
@@ -1037,19 +1037,19 @@ results = store.batch_write_finish(keys, res)
 result = store.register_buffer(buffer_ptr, size)
 ```
 
-**功能**
+**Function**
 
-注册内存缓冲区，用于Device RDMA的加速操作。
+Register a memory buffer for accelerated operation of Device RDMA.
 
-**参数**
+**parameter**
 
-- `buffer_ptr`：缓冲区指针
-- `size`：缓冲区大小
+- `buffer_ptr`: buffer pointer
+- `size`: buffer size
 
-**返回值**:
+**return value**:
 
-- `0`：成功
-- 其他：失败
+- `0`: Success
+- Others: failed
 
 #### unregister_buffer
 
@@ -1057,30 +1057,30 @@ result = store.register_buffer(buffer_ptr, size)
 result = store.unregister_buffer(buffer_ptr, size)
 ```
 
-**功能**
+**Function**
 
-注销内存缓冲区，用于Device RDMA的加速操作。
+Unregister the memory buffer for accelerated operation of Device RDMA.
 
-**参数**
+**parameter**
 
-- `buffer_ptr`：缓冲区指针
-- `size`：缓冲区大小
+- `buffer_ptr`: buffer pointer
+- `size`: buffer size
 
-**返回值**
+**return value**
 
-- `0`：成功
-- 其他：失败
+- `0`: Success
+- Others: failed
 
-## 使用示例
+## Usage example
 
-### 基本使用示例（推荐）
+### Basic usage examples (recommended)
 
-以下示例展示了如何使用LocalConfig配置并使用DistributedObjectStore：
+The following example shows how to configure and use DistributedObjectStore using LocalConfig:
 
 ```python
 from memcache_hybrid import LocalConfig, DistributedObjectStore, ReplicateConfig
 
-# 创建配置对象
+# Create configuration object
 config = LocalConfig()
 config.meta_service_url = "tcp://192.168.1.1:5000"
 config.config_store_url = "tcp://192.168.1.1:6000"
@@ -1089,9 +1089,9 @@ config.dram_size = "10GB"
 config.hbm_size = "5GB"
 config.client_timeout_seconds = 30
 
-# 初始化存储客户端
+# Initialize storage client
 store = DistributedObjectStore()
-result = store.setup(config)  # 设置配置
+result = store.setup(config)  # Set configuration
 if result != 0:
     raise Exception(f"Failed to setup store: {result}")
 
@@ -1099,38 +1099,38 @@ result = store.init(device_id=0, init_bm=True)
 if result != 0:
     raise Exception(f"Failed to init store: {result}")
 
-# 执行数据操作
-# 创建复制配置
+# Perform data operations
+# Create a replication configuration
 replica_cfg = ReplicateConfig()
 replica_cfg.replicaNum = 3
 replica_cfg.preferredLocalServiceIDs = [101, 102, 103]
 
-# 存储数据
+# Store data
 buffer = bytearray(b"example_data")
 result = store.put("key1", buffer, replica_cfg)
 if result != 0:
     raise Exception(f"Failed to put data: {result}")
 
-# 检索数据
+# Retrieve data
 data = store.get("key1")
 print(f"Retrieved data: {data}")
 
-# 检查数据是否存在
+# Check if the data exists
 exists = store.is_exist("key1")
 print(f"Data exists: {exists}")
 
-# 删除数据
+# Delete data
 result = store.remove("key1")
 if result != 0:
     raise Exception(f"Failed to remove data: {result}")
 
-# 关闭连接
+# close connection
 store.close()
 ```
 
-### 使用环境变量进行配置
+### Configure using environment variables
 
-以下示例展示了如何使用环境变量配置客户端（兼容原有方式）：
+The following example shows how to configure the client using environment variables (compatible with legacy methods):
 
 `export MMC_LOCAL_CONFIG_PATH=/path/to/local_config.conf`
 
@@ -1138,34 +1138,34 @@ store.close()
 import os
 from memcache_hybrid import DistributedObjectStore
 
-# 创建并初始化客户端
+# Create and initialize the client
 store = DistributedObjectStore()
 result = store.init(device_id=0)
 if result != 0:
     raise Exception(f"Failed to init store: {result}")
 
-# 执行数据操作
+# Perform data operations
 buffer = bytearray(b"example_data")
 result = store.put("key1", buffer)
 if result != 0:
     raise Exception(f"Failed to put data: {result}")
 
-# 检索数据
+# Retrieve data
 data = store.get("key1")
 print(f"Retrieved data: {data}")
 
-# 关闭连接
+# close connection
 store.close()
 ```
 
-### 批量操作示例
+### Batch operation example
 
-以下示例展示了如何使用批量操作提高处理效率：
+The following example shows how to use batch operations to improve processing efficiency:
 
 ```python
 from memcache_hybrid import LocalConfig, DistributedObjectStore
 
-# 创建配置和客户端
+# Create configuration and client
 config = LocalConfig()
 config.meta_service_url = "tcp://192.168.1.1:5000"
 config.protocol = "device_sdma"
@@ -1174,90 +1174,90 @@ store = DistributedObjectStore()
 store.setup(config)
 store.init(device_id=0, init_bm=True)
 
-# 批量存储数据
+# Store data in batches
 keys = ["key1", "key2", "key3", "key4", "key5"]
 values = [b"value1", b"value2", b"value3", b"value4", b"value5"]
 result = store.put_batch(keys, values)
 if result != 0:
     raise Exception(f"Failed to put batch: {result}")
 
-# 批量检索数据
+# Retrieve data in batches
 retrieved_values = store.get_batch(keys)
 for key, value in zip(keys, retrieved_values):
     print(f"{key}: {value}")
 
-# 批量检查数据是否存在
+# Check whether data exists in batches
 existence = store.batch_is_exist(keys)
 print(f"Existence: {existence}")
 
-# 批量删除数据
+# Delete data in batches
 results = store.remove_batch(keys)
 print(f"Remove results: {results}")
 
-# 关闭连接
+# close connection
 store.close()
 ```
 
-## 数据结构与枚举类型
+## Data structures and enumeration types
 
-### BmCopyType 枚举类型
+### BmCopyType enumeration type
 
-用于指定数据拷贝方向的枚举类型：
+Enumeration type used to specify the data copy direction:
 
-- `H2G`：从主机内存到全局内存。
-- `L2G`：从卡上内存到全局内存。
-- `G2H`：从全局内存到主机内存。
-- `G2L`：从全局内存到卡上内存。
-- `AUTO`：根据内存类型自动选择拷贝方向。
+- `H2G`: from host memory to global memory.
+- `L2G`: From card memory to global memory.
+- `G2H`: from global memory to host memory.
+- `G2L`: From global memory to on-card memory.
+- `AUTO`: Automatically select the copy direction according to the memory type.
 
-### LocalConfig 配置类
+### LocalConfig configuration class
 
-客户端配置结构体，用于设置分布式内存缓存客户端的各种参数。详情请参考[LocalConfig 类](#localconfig-类)的参数说明。
+Client configuration structure for distributed memory cache client settings. See the [LocalConfig class](#localconfig-class) parameter reference.
 
-### ReplicateConfig 配置类
+### ReplicateConfig configuration class
 
-客户端复制配置结构体，用于设置数据复制策略：
+Client replication configuration structure, used to set data replication strategy:
 
-- `replicaNum`：副本数，最大为8，默认为1。
-- `preferredLocalServiceIDs`：强制分配的实例ID列表，列表大小必须小于或等于replicaNum。
+- `replicaNum`: The number of copies, the maximum is 8, the default is 1.
+- `preferredLocalServiceIDs`: Forcibly allocated instance ID list, the list size must be less than or equal to replicaNum.
 
-## 错误码
+## error code
 
-| 错误码   | 说明        |
+| Error code | Description |
 |-------|-----------|
-| 0     | 操作成功      |
-| -1    | 一般错误      |
-| -3000 | 参数无效      |
-| -3001 | 内存分配失败    |
-| -3002 | 对象创建失败    |
-| -3003 | 服务未启动     |
-| -3004 | 操作超时      |
-| -3005 | 重复调用      |
-| -3006 | 对象已存在     |
-| -3007 | 对象不存在     |
-| -3008 | 未初始化      |
-| -3009 | 网络序列号重复   |
-| -3010 | 网络序列号未找到  |
-| -3011 | 已通知       |
-| -3012 | 内部错误      |
-| -3013 | 超出容量限制    |
-| -3014 | 连接未找到     |
-| -3015 | 网络请求句柄未找到 |
-| -3016 | 内存不足      |
-| -3017 | 未连接到元数据服务 |
-| -3018 | 未连接到本地服务  |
-| -3019 | 客户端未初始化   |
-| -3101 | 状态不匹配     |
-| -3102 | 键不匹配      |
-| -3103 | 返回值不匹配    |
-| -3104 | 租约未到期     |
-| -3105 | 元数据备份失败 |
+| 0 | Operation successful |
+| -1 | General error |
+| -3000 | invalid parameter |
+| -3001 | memory allocation failure |
+| -3002 | object creation failed |
+| -3003 | service is not started |
+| -3004 | operation timeout |
+| -3005 | Repeated call |
+| -3006 | object already exists |
+| -3007 | object does not exist |
+| -3008 | not initialized |
+| -3009 | Duplicate network serial number |
+| -3010 | Network serial number not found |
+| -3011 | has notified |
+| -3012 | internal error |
+| -3013 | exceeds capacity limit |
+| -3014 | connection not found |
+| -3015 | Network request handle not found |
+| -3016 | Insufficient memory |
+| -3017 | is not connected to the metadata service |
+| -3018 | is not connected to the local service |
+| -3019 | client is not initialized |
+| -3101 | status does not match |
+| -3102 | key does not match |
+| -3103 | return value does not match |
+| -3104 | The lease has not expired |
+| -3105 | Metadata backup failed |
 
-## 注意事项
+## Things to note
 
-- 所有键的长度必须小于256字节。
-- 支持同步和异步两种操作模式。
-- 批量操作可以显著提高处理效率，建议在大量数据操作时使用。
-- TLS配置需要确保证书路径和权限正确。
-- 客户端需要与meta service保持网络连通性。
-- 初始化时设置init_bm为False将启动纯client模式，不支持数据读写操作。
+- All keys must be less than 256 bytes in length.
+- Supports both synchronous and asynchronous operation modes.
+- Batch operations can significantly improve processing efficiency and are recommended for large-scale data operations.
+- TLS configuration needs to ensure that the certificate path and permissions are correct.
+- The client needs to maintain network connectivity with the meta service.
+- Setting init_bm to False during initialization will start pure client mode and does not support data reading and writing operations.
