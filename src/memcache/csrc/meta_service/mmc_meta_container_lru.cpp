@@ -51,9 +51,11 @@ private:
     struct ValueLruItem {
         Value value_;
         // 访问时需持有 metaLock_ 写锁，或同时持有 metaLock_ 读锁和 lruLock_。
+	// Access requires holding the write lock for metaLock_, or holding both the read lock for metaLock_ and the lruLock_.
         MediaType mediaType_;
         typename std::list<Key>::iterator lruIter_;
         // 最后一次被访问 的全局顺序号
+	// Global sequence number of the last access
         uint64_t accessSequence_;
         bool lazy_ = false; // 懒删除标志：true 表示在懒删除后缀中，按 FIFO 等待优先淘汰
     };
@@ -276,6 +278,7 @@ public:
             return MMC_UNMATCHED_KEY;
         }
         // 判空与删除在容器写锁内原子完成，消除锁外判空的 ABA 窗口
+	// Checks for emptiness and deletions are performed atomically while holding the container's write lock, eliminating the ABA window that would otherwise exist if such checks were performed outside the lock.
         if (!isEmptyFunc(iter->second.value_)) {
             return MMC_ERROR;
         }
@@ -518,6 +521,7 @@ public:
         Key key = *iter;
 
         // 1、查找value
+	// 1. Find value
         auto mapIter = metaMap_.find(key);
         if (mapIter == metaMap_.end()) {
             lruLists_[mediaType].erase(iter);
@@ -528,6 +532,7 @@ public:
         }
 
         // 2、回调处理并按结果做容器操作（REMOVE/MOVE_DOWN/SKIP）
+	// 2. Handle the callback and perform container operations (REMOVE/MOVE_DOWN/SKIP) based on the result.
         return ApplyEvictResult(key, mapIter, moveFunc, mediaType);
     }
 
@@ -552,6 +557,9 @@ public:
             } else if (olderOrEqual) {
                 // 访问序列号从链表尾部到头部是递增的，因此后面的条目
                 // 不可能再满足这个 cutoff 条件。
+		// The sequence numbers increase from the tail of the linked list toward the head;
+		// therefore, subsequent entries
+		// cannot possibly satisfy this cutoff condition.
                 break;
             }
         }
@@ -728,6 +736,7 @@ private:
             return;
         }
         // 只支持在同层级内部更新
+        // Only supports updates within the same level.
         auto &lruList = lruLists_[lruItem.mediaType_];
         // 懒删除 key 被访问后离开懒后缀：先同步边界与计数，再取消标记
         if (lruItem.lazy_) {

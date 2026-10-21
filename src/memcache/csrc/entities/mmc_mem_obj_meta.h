@@ -161,14 +161,16 @@ private:
 
 private:
     /* make sure the size of this class is 64 bytes */
-    uint16_t prot_{0};                        /* prot of the mem object, i.e. accessibility */
-    uint8_t priority_{0};                     /* priority of the memory object, used for eviction */
-    uint8_t numBlobs_{0};                     /* number of blob that the memory object, i.e. replica count */
-    std::atomic<bool> keepSsdOnEvict_{false}; /* 淘汰时仅释放内存层，保留 SSD 副本（LAZY|KEEP_SSD） */
-    std::list<MmcMemBlobPtr> blobs_;          /* 24 bytes */
-    uint64_t size_{0};                        /* byteSize of each blob */
-    std::mutex mutex_;                        /* must lock before read/write this meta */
-    mutable std::condition_variable cv_;      /* key-level: 回温/状态变化时唤醒等待中的并发 Get() */
+    uint16_t prot_{0};                    /* prot of the mem object, i.e. accessibility */
+    uint8_t priority_{0};                 /* priority of the memory object, used for eviction */
+    uint8_t numBlobs_{0};                 /* number of blob that the memory object, i.e. replica count */
+    /* Release only memory on eviction; retain the SSD replica (LAZY|KEEP_SSD). */
+    std::atomic<bool> keepSsdOnEvict_{false};
+    std::list<MmcMemBlobPtr> blobs_;       /* 24 bytes */
+    uint64_t size_{0};                    /* byteSize of each blob */
+    std::mutex mutex_;                    /* must lock before read/write this meta */
+    /* Wake concurrent Get() calls for this key on rewarming or state changes. */
+    mutable std::condition_variable cv_;
 };
 
 using MmcMemObjMetaPtr = MmcRef<MmcMemObjMeta>;
