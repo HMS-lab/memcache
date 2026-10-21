@@ -1,4 +1,4 @@
-# MemCache Configs
+# MemCache Configuration
 
 ## MetaService Config
 
@@ -124,13 +124,13 @@
 | ock.mmc.dynamic_config.enable                  | bool       | optional     | true                 | true/false                                                                            | Enable dynamic config polling. When enabled, LocalService periodically checks the config file for `meta_service_url`, `config_store_url`, `log_level` and client tunables (`retry_milliseconds`, `aggregate.io/num`, `batch_option.chunk.size/count`) changes and applies them without restart          |
 | ock.mmc.dynamic_config.interval                | integer    | optional     | 5                    | [1, 300]                                                                              | Polling interval in seconds for dynamic config file check                                                                                                                                                                                |
 
-## client-only（init_bm=False）etcd HA 部署说明
+## Deployment Notes for client-only (`init_bm=False`) in etcd HA Mode
 
-PD/DP 分离等场景下，仅持有元数据、不创建 BM 的客户端进程（`init_bm=False`，如 vLLM 调度器）在 etcd HA 模式下需要发现 MetaService 的动态端口，部署需满足：
+In PD/DP-separated deployments, client processes that hold metadata without creating BM resources (`init_bm=False`, such as a vLLM scheduler) must discover MetaService's dynamic port when etcd HA is enabled. The deployment must meet these requirements:
 
-- 配置文件需包含：
-  - `ock.mmc.local_service.config_store_url`（`etcd://...`）：用于发现上层 leader 地址；
-  - `ock.mmc.local_service.world_size`：与 MetaService/LocalService 一致；
-  - `ock.mmc.local_service.config_store_tls.*`：若 etcd 启用了 TLS，必须配置。
-- `ock.mmc.meta_service_url` 在 etcd HA 下仅为配置值，MetaService 实际监听由 memfabric 分配的动态端口，不会被该客户端直接使用。etcd HA 的 Leader 会在默认 `[9000, 65535]` 内自动选择**两个互不相同的空闲端口**——config store 侦听端口与 MetaService 侦听端口——并注册到 etcd，客户端直连这两个端口；区间可用环境变量 `MEMFABRIC_HYBRID_CONFIG_STORE_PORT_START` / `MEMFABRIC_HYBRID_CONFIG_STORE_PORT_END`（别名 `MF_CONFIG_STORE_PORT_START` / `MF_CONFIG_STORE_PORT_END`）收窄，memcache 侧不可指定。
-- **升级顺序**：该能力依赖 memfabric 的 `smem_bm_get_bindable_leader_address_by_store_url` 接口（memfabric PR #1363）。必须**先升级 memfabric（libmf_smem）再升级 memcache**；两者版本不配套时，etcd HA + `init_bm=False` 场景会发现失败并报错（不会崩溃）。
+- The configuration file must include:
+  - `ock.mmc.local_service.config_store_url` (`etcd://...`): used to discover the upstream leader address.
+  - `ock.mmc.local_service.world_size`: must match the value used by MetaService/LocalService.
+  - `ock.mmc.local_service.config_store_tls.*`: required when TLS is enabled for etcd.
+- In etcd HA mode, `ock.mmc.meta_service_url` is only a configuration value. MetaService listens on a dynamic port assigned by MemFabric, and this client does not use the configured URL directly. The etcd HA leader automatically selects **two different free ports** in the default range `[9000, 65535]`, one for the config store and one for MetaService, and registers them in etcd. Clients connect directly to these ports. Narrow the range with `MEMFABRIC_HYBRID_CONFIG_STORE_PORT_START` / `MEMFABRIC_HYBRID_CONFIG_STORE_PORT_END` (aliases: `MF_CONFIG_STORE_PORT_START` / `MF_CONFIG_STORE_PORT_END`); MemCache cannot specify the ports.
+- **Upgrade order**: This feature depends on MemFabric's `smem_bm_get_bindable_leader_address_by_store_url` API (MemFabric PR #1363). **Upgrade MemFabric (`libmf_smem`) before MemCache.** If the versions are incompatible, discovery fails and returns an error in etcd HA mode with `init_bm=False`; the process does not crash.
