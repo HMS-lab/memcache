@@ -9,10 +9,10 @@ ${INSTALL_PATH}/
               |-- set_env.sh
               |-- ${version}
                    |-- ${arch}-${os}
-                        |-- include    (头文件)
-                        |-- bin        (用于TLS相关二进制文件)
-                        |-- lib64      (so库)
-                        |-- whl        (python的whl包)
+                        |-- include    (header files)
+                        |-- bin        (TLS-related binaries)
+                        |-- lib64      (shared libraries)
+                        |-- whl        (Python wheel package)
                    |-- uninstall.sh
                    |-- version.info
 

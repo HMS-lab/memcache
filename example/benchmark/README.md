@@ -1,39 +1,38 @@
-# benchmark
+# Benchmark
 
-提供python benchmark，以方便测试memcache内存池put/get性能。
-主要涉及如下步骤。
+This Python benchmark helps measure put/get performance for the MemCache memory pool. It runs the following steps.
 
-## 一、启动元数据服务
+## 1. Start the Metadata Service
 
 ```shell
 export MMC_META_CONFIG_PATH=${your config path}/mmc-meta.conf;
 bash bench_start_meta.sh
 ```
 
-## 二、写数据测试
+## 2. Write Test Data
 
 ```shell
 export MMC_LOCAL_CONFIG_PATH=${your config path}/mmc-local.conf;
 bash bench_start.sh -t write -p 1 -b 16 -s 1048576 -n 100 -w 10 -d 1 -e memcache -l npu
 ```
 
-## 三、读数据测试
+## 3. Read Test Data
 
 ```shell
 export MMC_LOCAL_CONFIG_PATH=${your config path}/mmc-local.conf;
 bash bench_start.sh -t read -p 1 -b 16 -s 1048576 -n 100 -d 1 -e memcache -l npu
 ```
 
-## 入参说明
+## Parameters
 
-| **参数**        | **可选项**               | **说明** |
+| **Parameter** | **Options** | **Description** |
 |----------------|--------------------------|----------|
-| -t             | [read, write]            | 控制测试是写入数据还是读取数据      |
-| -p             | [1, 32]                  | process count, 运行的进程数量, 受限于NPU的个数      |
-| -b             | [1, ]                    | batch size, 单次IO key的个数      |
-| -s             | [1, ]                    | block size, 单次IO key对应的value的大小，单位Byte      |
-| -n             | [10, ]                   | call count, 循环测试次数，受限于内存池总容量，会生成 batch_size \* process_count \* call_count个key   |
-| -w             | [0, ]                    | 写入预热次数。预热在正式写入计时前执行，不计入性能结果；每轮预热使用临时 key，并在计时前删除。默认值为 2；读测试已在正式计时前完成预热，无需配置该参数。 |
-| -d             | [1, 2]                   | 测试连续tensor（1）还是离散tensor（2），离散tensor默认为61\*128KB + 61\*16KB，连续tensor大小为block size   |
-| -e             | [memcache, mooncake]     | 内存池后端，默认支持memcache，mooncake须安装相关软件     |
-| -l             | [npu, cpu]               | 测试数据tensor位于NPU还是CPU      |
+| -t | [read, write] | Select whether to write or read data |
+| -p | [1, 32] | Process count, limited by the number of NPUs |
+| -b | [1, ] | Batch size, or number of keys in a single I/O operation |
+| -s | [1, ] | Block size: the value size associated with each key in bytes |
+| -n | [10, ] | Call count (test iterations). Limited by total memory-pool capacity. Generates `batch_size * process_count * call_count` keys. |
+| -w | [0, ] | Number of write warmup iterations. Warmup runs before timed writes and is excluded from performance results. Each iteration uses temporary keys that are deleted before timing. Defaults to 2. Read tests are warmed up before timing and do not require this parameter. |
+| -d | [1, 2] | Test a contiguous tensor (1) or a non-contiguous tensor (2). The default non-contiguous tensor size is 61×128 KB + 61×16 KB; the contiguous tensor size is the block size. |
+| -e | [memcache, mooncake] | Memory-pool backend. MemCache is supported by default; Mooncake requires its dependencies to be installed. |
+| -l | [npu, cpu] | Whether the test tensor is on the NPU or CPU |

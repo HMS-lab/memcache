@@ -1,59 +1,57 @@
-# whl包安装及使用
+# Install and Use the Wheel Package
 
-介绍whl包的安装及使用方法，适用于需要使用Python接口的用户。
+This guide explains how to install and use the wheel package. It is intended for users of the Python API.
 
-## 软件安装
+## Install the Software
 
-whl包已发布到[pypi](https://pypi.org/project/memcache-hybrid/#files)，可以直接在线安装。
+The wheel package is published on [PyPI](https://pypi.org/project/memcache-hybrid/#files) and can be installed directly:
 
 ```bash
-# 安装最新版本
+# Install the latest version
 pip install memcache_hybrid
 ```
 
 ```bash
-# 查看版本及安装路径
+# Check the version and installation path
 pip show memcache_hybrid
 ```
 
-## 软件使用
+## Use the Software
 
-### 安装依赖软件MemFabric
+### Install the MemFabric Dependency
 
-MemCache运行时需要依赖MemFabric。
+MemCache requires MemFabric at runtime.
 
 ```bash
-# 查看memfabric_hybrid
+# Check memfabric_hybrid
 pip show memfabric_hybrid
 ```
 
-- 如果安装的MemCache是1.1.x及以上版本，则在安装时会自动安装配套依赖的MemFabric，可以无需再安装。
-
-- 如果安装的MemCache是1.0.x版本，可通过[版本配套](https://gitcode.com/Ascend/memcache/releases)查看与MemCache匹配的MemFabric版本。
+- MemCache 1.1.x and later automatically installs the compatible MemFabric dependency, so no separate installation is needed.
+- For MemCache 1.0.x, see the [release compatibility information](https://gitcode.com/Ascend/memcache/releases) to find the matching MemFabric version.
 
 ```bash
-# 此处以1.0.8版本为例
+# Example for version 1.0.8
 pip install memfabric_hybrid==1.0.8
 ```
 
-MemFabric详细安装方法可参考[MemFabric使用指导](https://gitcode.com/Ascend/memfabric_hybrid/blob/develop/docs/zh/installation.md)。
+See the [MemFabric installation guide](https://gitcode.com/Ascend/memfabric_hybrid/blob/develop/docs/zh/installation.md) for details.
 
-### 运行软件
+### Run the Software
 
-我们提供了两种方式来启动软件，两种方式的区别在于设置配置项的方式不同。
+There are two ways to start the software. They differ in how configuration options are set:
 
-- 方式一：通过Python接口直接设置配置项（推荐）
+- Option 1: Set configuration options directly through the Python API (recommended).
+- Option 2: Set configuration options through configuration files and environment variables (for compatibility with the previous method).
 
-- 方式二：通过配置文件和环境变量设置配置项（兼容原有方式）
+> [!NOTE]
+> MemCache 1.0.x supports only option 2. For version 1.1.x and later, choose either option.
 
-> [!NOTE] 说明
-> 如果安装的MemCache是1.0.x版本，只能选择方式二，1.1.x及以上版本，您可以根据需要选择其中一种启动方式即可。
+#### Option 1: Set Configuration Through the Python API (Recommended)
 
-#### 方式一：通过Python接口直接设置配置项（推荐）
+**1. Start MetaService**
 
-**1. 启动MetaService**
-
-MetaService作为独立进程运行，进入Python控制台或者编写如下Python脚本即可拉起进程。
+MetaService runs as a standalone process. Start it from a Python console or a Python script:
 
 ```python
 from memcache_hybrid import MetaService, MetaConfig
@@ -69,11 +67,11 @@ MetaService.setup(config)
 MetaService.main()
 ```
 
-**2. 启动LocalService**
+**2. Start LocalService**
 
-LocalService作为客户端，以whl形式作为共享库提供API供应用进程调用加载，以下是通过Python接口设置配置项的一个简单示例。
+LocalService acts as a client and exposes APIs to application processes through the wheel package. The following example sets configuration through the Python API.
 
-进入Python控制台或者编写如下Python脚本即可拉起示例进程。
+Run this in a Python console or script to start the example process:
 
 ```python
 from memcache_hybrid import DistributedObjectStore, LocalConfig
@@ -88,23 +86,23 @@ store = DistributedObjectStore()
 assert store.setup(config) == 0, "setup local config failed"
 ```
 
-具体配置项可以参考[配置项说明](./memcache_config.md)，配置项的值请根据实际运行环境和场景进行修改。
+See the [configuration reference](./memcache_config.md) for available options. Set their values to match your environment and workload.
 
-> [!NOTE] 说明
-> 此种方式设置的配置项优先级高于方式二中通过配置文件设置的值，如果同时使用方式二配置了配置文件，实际运行时使用的是此方法设置的值。
+> [!NOTE]
+> Configuration set this way takes precedence over configuration from option 2. If both methods are used, the values set through this method are used at runtime.
 
-#### 方式二：通过配置文件和环境变量设置配置项（兼容原有方式）
+#### Option 2: Set Configuration Through Files and Environment Variables (Compatibility Method)
 
-**1. 设置配置文件**
+**1. Set up the configuration files**
 
-pip安装完成后可通过以下命令查看具体安装位置。
+After installing with pip, use the following command to find the installation location:
 
 ```bash
-# 查看安装位置和版本
+# Show the installation location and version
 pip show memcache_hybrid
 ```
 
-查询结果如下：
+Example output:
 
 ```text
 Name: memcache_hybrid
@@ -119,25 +117,25 @@ Requires:
 Required-by:
 ```
 
-这里安装的位置在`/usr/local/lib/python3.11/site-packages`，则配置文件位于`/usr/local/lib/python3.11/site-packages/memcache_hybrid/config`。
+If the package is installed at `/usr/local/lib/python3.11/site-packages`, its configuration files are under `/usr/local/lib/python3.11/site-packages/memcache_hybrid/config`.
 
-> [!NOTE] 说明
+> [!NOTE]
 >
-> - 1.0.x 版本安装目录下不带配置文件，需要从[代码仓](https://gitcode.com/Ascend/memcache/tree/v1.0.0/config)获取。
-> - 1.2.X 及以上版本 whl 包已默认编译带上 ubsio 盘管理功能，config 目录下包含 mmc-meta.conf、mmc-local.conf 和 ubsio.conf。
+> - MemCache 1.0.x does not include configuration files in the installation directory. Get them from the local [`config/`](../../config/) directory.
+> - MemCache 1.2.x and later wheels include UBSIO disk management by default. The `config` directory contains `mmc-meta.conf`, `mmc-local.conf`, and `ubsio.conf`.
 
-软件运行时，配置文件 mmc-meta.conf（用于设置MetaService参数）、mmc-local.conf（用于设置LocalService参数）和 ubsio.conf（UBSIO/SSD 盘管理配置）可以位于任意目录。
+The runtime configuration files `mmc-meta.conf` (MetaService settings), `mmc-local.conf` (LocalService settings), and `ubsio.conf` (UBSIO/SSD disk management settings) can be stored in any directory.
 
-**建议将这两个配置文件复制到其他目录（比如/usr/local）再进行修改，防止重新安装后被覆盖**
+**Copy these configuration files elsewhere (for example, to `/usr/local`) before editing them to prevent them from being overwritten during reinstallation.**
 
-运行前可以根据 [配置项说明](./memcache_config.md) 对配置文件 mmc-meta.conf 和 mmc-local.conf 进行相关配置。
+Before running, configure `mmc-meta.conf` and `mmc-local.conf` according to the [configuration reference](./memcache_config.md).
 
-**2. 设置环境变量**
+**2. Set environment variables**
 
-通过环境变量来设置配置文件的路径。
+Use environment variables to specify the configuration file paths.
 
-- 两个配置文件可以放在任意路径，这里以默认安装路径为例，请修改为实际路径。
-- whl 包已默认编译带上 ubsio 盘管理功能，如启用 SSD 需修改配置文件并设置此环境变量，详见 SSD 使用文档。
+- The configuration files can be stored anywhere. The following example uses the default installation path; change it to the actual path.
+- Wheels include UBSIO disk management by default. To use SSDs, update the configuration and set this environment variable; see the SSD usage guide.
 
 ```bash
 export UBSIO_CONFIG_PATH=/usr/local/lib/python3.11/site-packages/memcache_hybrid/config/ubsio.conf
@@ -145,26 +143,26 @@ export MMC_META_CONFIG_PATH=/usr/local/lib/python3.11/site-packages/memcache_hyb
 export MMC_LOCAL_CONFIG_PATH=/usr/local/lib/python3.11/site-packages/memcache_hybrid/config/mmc-local.conf
 ```
 
-**3. 启动MetaService**
+**3. Start MetaService**
 
-进入Python控制台或者编写如下Python脚本即可拉起进程。
+Start the process from a Python console or script:
 
 ```python
 from memcache_hybrid import MetaService
 MetaService.main()
 ```
 
-**4. 启动LocalService**
+**4. Start LocalService**
 
-通过MemCache提供的[API](./memcache_python_api.md)初始化客户端并拉起LocalService，执行数据写入、查询、获取、删除等。
+Initialize the client through the MemCache [API](./memcache_python_api.md) to start LocalService and perform data writes, queries, reads, and removals.
 
-下面的脚本[test_mmc_demo.py](https://gitcode.com/Ascend/memcache/blob/master/example/python/test_mmc_demo.py)是我们提供的一个示例：
+The script [test_mmc_demo.py](https://gitcode.com/Ascend/memcache/blob/master/example/python/test_mmc_demo.py) is one example:
 
 ```bash
 python3 test_mmc_demo.py
 ```
 
-## 软件卸载
+## Uninstall the Software
 
 ```bash
 pip uninstall memcache_hybrid

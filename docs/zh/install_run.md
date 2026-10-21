@@ -1,25 +1,25 @@
-# run包编译、安装及使用
+# Build, Install, and Use the Run Package
 
-介绍run包的安装及使用方法，适用于需要使用C++接口的用户。
+This guide explains how to install and use the run package. It is intended for users of the C++ API.
 
-run包没有发布二进制包，需要用户自行编译。
+No prebuilt run package is published; users must build it themselves.
 
-## run包编译
+## Build the Run Package
 
-### 环境准备
+### Prerequisites
 
-编译工具建议版本。
+Recommended tool versions:
 
 - OS: Ubuntu 22.04 LTS+
 - cmake: 3.20.x
 - gcc: 11.4+
-- python 3.11.10
-- pybind11 2.10.3
-- make 4.3 or ninja 1.10.1
+- python: 3.11.10
+- pybind11: 2.10.3
+- make: 4.3 or ninja: 1.10.1
 
-### 编译
+### Build
 
-**1. 下载代码**
+**1. Clone the source code**
 
 ```bash
 git clone https://gitcode.com/Ascend/memcache
@@ -28,134 +28,134 @@ git clean -xdf
 git reset --hard
 ```
 
-**2. 拉取第三方库**
+**2. Fetch third-party libraries**
 
 ```bash
 # Initialize and update only the required submodules (excluding test dependencies)
 git submodule update --init 3rdparty/
 ```
 
-- `--init 3rdparty/` 初始化并更新 `3rdparty/` 下全部子模块（含 spdlog、nlohmann、msgpack-c、libzmq 等），避免拉取 test 目录等不必要的依赖。
-- 若需拉取所有子模块（包括测试依赖），可使用 `git submodule update --recursive --init`。
+- `--init 3rdparty/` initializes and updates all submodules under `3rdparty/` (including spdlog, nlohmann, msgpack-c, and libzmq), without fetching unnecessary dependencies such as those under `test/`.
+- To fetch all submodules, including test dependencies, run `git submodule update --recursive --init`.
 
-**3. 编译**
+**3. Build**
 
-执行如下命令进行编译。
+Run the following command:
 
 ```bash
 bash script/build_and_pack_run.sh --build_mode RELEASE --build_test OFF
 ```
 
-- build_and_pack_run.sh 支持2个参数，分别是`--build_mode <build_mode>`和`--build_test <build_test>`。
-- build_mode: 编译类型，可填RELEASE、DEBUG或ASAN，默认RELEASE。
-- build_test: 是否打包测试工具，可填ON或OFF，默认OFF。
+- `build_and_pack_run.sh` accepts two parameters: `--build_mode <build_mode>` and `--build_test <build_test>`.
+- `build_mode`: Build type. Options are `RELEASE`, `DEBUG`, or `ASAN`; the default is `RELEASE`.
+- `build_test`: Whether to package test tools. Options are `ON` or `OFF`; the default is `OFF`.
 
-编译成功后，生成的run包在output目录下，生成的whl包在output/memcache/wheel目录下。
+After a successful build, the run package is placed in `output/`, and the wheel package is placed in `output/memcache/wheel/`.
 
-## run包安装
+## Install the Run Package
 
-### 安装MemFabric
+### Install MemFabric
 
-MemCache依赖MemFabric，需要先安装MemFabric，详细安装方法可参考[MemFabric使用指导](https://gitcode.com/Ascend/memfabric_hybrid/blob/develop/docs/zh/installation.md)。
+MemCache depends on MemFabric, which must be installed first. See the [MemFabric installation guide](https://gitcode.com/Ascend/memfabric_hybrid/blob/develop/docs/zh/installation.md).
 
-### 安装MemCache
+### Install MemCache
 
-MemCache将所有特性集成到run包中供用户使用，run包格式为 `memcache_hybrid-${version}_${os}_${arch}.run`。
+All MemCache features are included in the run package, named `memcache_hybrid-${version}_${os}_${arch}.run`.
 
-其中，version表示MemCache的版本；os表示操作系统，如linux；arch表示架构，如x86_64或aarch64。
+Here, `version` is the MemCache version, `os` is the operating system (for example, Linux), and `arch` is the architecture (for example, `x86_64` or `aarch64`).
 
-run包的默认安装根路径为 /usr/local/。
+The default installation root is `/usr/local/`.
 
-参考安装命令如下：
+For example:
 
 ```bash
 cd output
-bash memcache_hybrid-*_linux_aarch64.run # 请修改为实际路径和文件名
+bash memcache_hybrid-*_linux_aarch64.run # Replace with the actual path and filename
 ```
 
-如果想要自定义安装路径，可以添加 `--install-path` 参数。
+To choose a custom installation path, use the `--install-path` parameter:
 
 ```bash
-bash memcache_hybrid-*_linux_aarch64.run --install-path=${your path}  # 请修改为实际路径和文件名
+bash memcache_hybrid-*_linux_aarch64.run --install-path=${your path} # Replace with the actual path and filename
 ```
 
-安装的run包可以通过如下命令查看版本（此处以默认安装路径为例）。
+To check the installed version (using the default installation path):
 
 ```bash
 cat /usr/local/memcache_hybrid/latest/version.info
 ```
 
-## 软件使用
+## Use the Software
 
-### 设置环境变量
+### Set Environment Variables
 
 ```bash
-# 这里使用的是默认安装路径，请修改为实际路径
+# This uses the default installation paths; change them to the actual paths
 source /usr/local/memcache_hybrid/set_env.sh
 source /usr/local/memfabric_hybrid/set_env.sh
 ```
 
-### 启动MetaService
+### Start MetaService
 
-MetaService作为独立进程运行，可以在设置配置项之后直接拉起。
+MetaService runs as a standalone process. Start it after configuring its settings.
 
-**1. 修改配置文件**
+**1. Edit the configuration file**
 
-安装完成后配置文件位于安装目录下的`memcache_hybrid/latest/config/mmc-meta.conf`。
+After installation, the configuration file is at `memcache_hybrid/latest/config/mmc-meta.conf` under the installation directory.
 
-**建议将配置文件复制到其他目录再进行修改，防止重新安装后被覆盖**
+**Copy the configuration file elsewhere before editing it to prevent it from being overwritten during reinstallation.**
 
-运行前需要根据 [MetaService配置项](./memcache_config.md) 对配置文件 mmc-meta.conf 进行相关配置。
+Before running, configure `mmc-meta.conf` according to the [MetaService configuration options](./memcache_config.md).
 
-**2. 设置配置文件路径**
+**2. Set the configuration file path**
 
 ```bash
-# 这里使用的是默认安装路径，请修改为实际路径
+# This uses the default installation path; change it to the actual path
 export MMC_META_CONFIG_PATH=/usr/local/memcache_hybrid/latest/config/mmc-meta.conf
 ```
 
-**3. 启动MetaService**
+**3. Start MetaService**
 
 ```bash
 /usr/local/memcache_hybrid/latest/aarch64-linux/bin/mmc_meta_service
 ```
 
-### LocalService
+### Start LocalService
 
-LocalService作为客户端，以共享库的形式提供API供应用进程调用加载
+LocalService acts as a client and provides APIs to application processes through a shared library.
 
-**1. 修改配置文件**
+**1. Edit the configuration file**
 
-安装完成后配置文件位于安装目录下的memcache_hybrid/latest/config/mmc-local.conf
+After installation, the configuration file is at `memcache_hybrid/latest/config/mmc-local.conf` under the installation directory.
 
-**建议将配置文件复制到其他目录再进行修改，防止重新安装后被覆盖**
+**Copy the configuration file elsewhere before editing it to prevent it from being overwritten during reinstallation.**
 
-运行前需要根据 [LocalService配置项](./memcache_config.md) 对配置文件 mmc-local.conf 进行相关配置
+Before running, configure `mmc-local.conf` according to the [LocalService configuration options](./memcache_config.md).
 
-**2. 设置配置文件路径**
+**2. Set the configuration file path**
 
 ```bash
-# 这里使用的是默认安装路径，请修改为实际路径
+# This uses the default installation path; change it to the actual path
 export MMC_LOCAL_CONFIG_PATH=/usr/local/memcache_hybrid/latest/config/mmc-local.conf
 ```
 
-**3. 导入头文件**
+**3. Include the header**
 
 ```cpp
 #include "mmcache.h"
 ```
 
-**4. 调用相关API**
+**4. Call the APIs**
 
-通过调用MemCache提供的[API](./memcache_c++_api.md)初始化客户端，执行数据写入、查询、获取、删除等
+Use the MemCache [APIs](./memcache_c++_api.md) to initialize the client and perform data writes, queries, reads, and removals.
 
-可参考示例代码[memcache_cpp_test.cpp](https://gitcode.com/Ascend/memcache/blob/master/example/cpp/memcache_cpp_test.cpp)
+See the example source file [memcache_cpp_test.cpp](https://gitcode.com/Ascend/memcache/blob/master/example/cpp/memcache_cpp_test.cpp).
 
-## 软件卸载
+## Uninstall the Software
 
-卸载脚本是位于安装目录下的`memcache_hybrid/latest/uninstall.sh`，直接执行即可完成卸载。
+Run the uninstall script at `memcache_hybrid/latest/uninstall.sh` under the installation directory:
 
 ```bash
-# 这里使用的是默认安装路径，请修改为实际路径
+# This uses the default installation path; change it to the actual path
 bash /usr/local/memcache_hybrid/latest/uninstall.sh
 ```
