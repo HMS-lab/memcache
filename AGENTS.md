@@ -1,66 +1,64 @@
-# 仓库指南
+# Repository Guide
 
-## 构建
+## Build
 
-- **默认打包构建**：`bash script/build_and_pack_run.sh --build_mode RELEASE --build_test OFF`，生成 `.run` 包和 wheel 到 `output/`。
-- **调试构建**：`bash script/build_and_pack_run.sh --build_mode DEBUG --incremental`，用于本地调试并复用已有 `build/`。
-- 编译统一使用 `build_and_pack_run.sh`，不要直接调用底层构建脚本。
+- **Default Build & Package**: `bash script/build_and_pack_run.sh --build_mode RELEASE --build_test OFF` — generates a `.run` package and a wheel file in the `output/` directory.
+- **Debug Build**: `bash script/build_and_pack_run.sh --build_mode DEBUG --incremental` — used for local debugging, reusing the existing `build/` directory.
+- Always use `build_and_pack_run.sh` for compilation; do not invoke underlying build scripts directly.
 
-## 测试
+## Testing
 
-- **全部 C++ UT**：`bash script/run_ut.sh`，执行 DEBUG 测试构建、运行 `output/bin/ut/test_mmc_test`，并生成 `output/coverage`。
-- **按名称过滤**：`bash script/run_ut.sh meta_service`，脚本会传递 `--gtest_filter=*meta_service*`。
-- 覆盖率门禁来自 `script/run_ut.sh`：`src/memcache` 行覆盖率不少于 70%，分支覆盖率不少于 40%。
-- Python 测试位于 `test/python`，通常依赖 Ascend/NPU、MetaService 或 mock server；未准备环境时不要默认视为已通过。
+- **All C++ Unit Tests (UT)**: `bash script/run_ut.sh` — performs a DEBUG build, executes `output/bin/ut/test_mmc_test`, and generates coverage reports in `output/coverage`.
+- **Filter by Name**: `bash script/run_ut.sh meta_service` — the script will pass the `--gtest_filter=*meta_service*` argument.
+- Coverage Thresholds (enforced via `script/run_ut.sh`): At least 70% line coverage and 40% branch coverage for the `src/memcache` directory.
+- Python Tests: Located in `test/python`. These typically depend on Ascend/NPU, MetaService, or a mock server; do not assume they have passed if the required environment is not set up.
 
-## 预提交与代码风格
+## Pre-commit & Code Style
 
-- 安装：`pip install pre-commit && pre-commit install --install-hooks`。
-- PR 增量检查：`bash script/ci-pre-commit-pr.sh`。
-- Python 规则以 `pre-commit/pyproject.toml` 为准：Ruff 目标 `py310`，行宽 120，并启用 Pylint、Bandit。
-- C/C++ 格式以 `.clang-format` 和 `.pre-commit-config.yaml` 为准：clang-format v18.1.8、4 空格缩进、行宽 120。
-- C/C++ 命名和魔法数字规则以 `docs/zh/c_cpp_naming.md` 为准。
+- Installation: `pip install pre-commit && pre-commit install --install-hooks`.
+- Incremental PR Checks: `bash script/ci-pre-commit-pr.sh`.
+- Python Rules: Governed by `pre-commit/pyproject.toml` — targets `py310`, 120-character line width, with Pylint and Bandit enabled.
+- C/C++ Formatting: Governed by `.clang-format` and `.pre-commit-config.yaml` — uses `clang-format` v18.1.8, 4-space indentation, and a 120-character line width. - For C/C++ naming conventions and rules regarding "magic numbers," refer to `docs/zh/c_cpp_naming.md`.
 
-## 代码规范
+## Code Standards
 
-- 新增 C/C++ 代码遵守 `docs/zh/c_cpp_naming.md`：文件 `snake_case`，C++ 类型/函数 `UpperCamelCase`，C API `snake_case`，参数和局部变量 `lowerCamelCase`，私有/保护成员以 `_` 结尾。
-- 除 `0`、`-1` 等惯用值外，具有独立语义的数字必须提取为命名常量或枚举值；测试代码同样适用。
-- 新增测试文件使用 `*_test.cpp`，Mock 实现文件使用 `mock_*.cpp`；存量文件不要求为此单独改名。
-- 错误处理保持本项目现有错误码、断言宏、校验宏和日志宏风格，例如 `MMC_OK`、`MMC_ERROR`、`MMC_VALIDATE_RETURN`、`MMC_LOG_ERROR`。
-- 安全相关要求以 `docs/zh/SECURITYNOTE.md` 为准，涉及 TLS、证书、私钥、配置文件权限、运行用户和端口范围时必须同步参考。
+- New C/C++ code must adhere to `docs/zh/c_cpp_naming.md`: use `snake_case` for filenames; `UpperCamelCase` for C++ types and functions; `snake_case` for C APIs; `lowerCamelCase` for parameters and local variables; and append an underscore (`_`) to the names of private or protected members.
+- Except for conventional values like `0` or `-1`, any number with a distinct semantic meaning must be defined as a named constant or an enumeration value; this also applies to test code.
+- New test files should follow the `*_test.cpp` naming convention, and mock implementation files should use `mock_*.cpp`; existing files do not need to be renamed to comply with this.
+- Error handling must remain consistent with the project's existing style—including error codes, assertion macros, validation macros, and logging macros—such as `MMC_OK`, `MMC_ERROR`, `MMC_VALIDATE_RETURN`, and `MMC_LOG_ERROR`.
+- Security-related requirements are governed by `docs/zh/SECURITYNOTE.md`; this document must be consulted whenever dealing with TLS, certificates, private keys, configuration file permissions, runtime user accounts, or port ranges.
 
-## 运行时与配置
+## Runtime and Configuration
 
-- 常用配置文件：`config/mmc-meta.conf`、`config/mmc-local.conf`。
-- 安装使用文档：`docs/zh/install_whl.md`、`docs/zh/install_run.md`。
-- 配置项说明：`docs/zh/memcache_config.md`。
-- 常见环境变量：`docs/zh/environment_variables.md`。
-- 构建时 `PYTHON_HOME` 默认探测 `/usr/local/python3.11` 或 `/usr/local`；UT 会设置 mock CANN 的 `ASCEND_HOME_PATH`。
+- Common configuration files: `config/mmc-meta.conf`, `config/mmc-local.conf`.
+- Installation and usage documentation: `docs/zh/install_whl.md`, `docs/zh/install_run.md`.
+- Configuration parameter descriptions: `docs/zh/memcache_config.md`.
+- Common environment variables: `MMC_META_CONFIG_PATH`, `MMC_LOCAL_CONFIG_PATH`, `MEMCACHE_HYBRID_HOME_PATH`, `LD_LIBRARY_PATH`. See `docs/zh/environment_variables.md` for details.
+- During the build process, `PYTHON_HOME` defaults to `/usr/local/python3.11` or `/usr/local`. For unit testing (UT), `ASCEND_HOME_PATH` is set to point to a mock CANN environment.
 
-## 仓库模块边界
+## Repository Module Boundaries
 
-| 模块 | 路径 | 说明 |
+| Module | Path | Description |
 |---|---|---|
-| 公共 C/C++ API | `src/memcache/include/` | 对外头文件，变更需同步 API 文档 |
-| 核心实现 | `src/memcache/csrc/` | client、common、config、entities、local/meta service、net、proto、under_api |
-| Python 绑定 | `src/memcache/python/`、`src/memcache/csrc/python_wrapper/` | `memcache_hybrid` wheel 和 `_pymmc` |
-| MetaService 进程 | `src/memcache/csrc/daemon/` | `mmc_meta_service` |
-| 依赖底座 | `3rdparty/memfabric_hybrid/` | MemFabric/SMEM/HYBM 依赖 |
-| 测试与示例 | `test/`、`example/` | GTest、Python/mock、K8S deploy、C++/Python 示例 |
+| Public C/C++ API | `src/memcache/include/` | Public-facing header files; changes must be reflected in the API documentation. |
+| Core Implementation | `src/memcache/csrc/` | Includes client, common, config, entities, local/meta service, net, proto, and under_api. |
+| Python Bindings | `src/memcache/python/`, `src/memcache/csrc/python_wrapper/` | Components for the `memcache_hybrid` wheel and `_pymmc`. |
+| MetaService Process | `src/memcache/csrc/daemon/` | `mmc_meta_service` |
+| Underlying Dependencies | `3rdparty/memfabric_hybrid/` | Dependencies for MemFabric, SMEM, and HYBM. |
+| Tests and Examples | `test/`, `example/` | GTest, Python/mock, K8S deployment, and C++/Python examples. |
 
-## 对外接口与文档同步
+## External Interfaces and Documentation Synchronization
 
-- C API 变更同步 `docs/zh/memcache_c_api.md`。
-- C++ API 变更同步 `docs/zh/memcache_c++_api.md`。
-- Python API 变更同步 `docs/zh/memcache_python_api.md`。
-- REST/MetaService 行为变更同步 `docs/zh/memcache_restful_api.md`。
-- 安装、配置、环境变量或安全行为变更同步 `docs/zh/install_whl.md`、`docs/zh/install_run.md`、`docs/zh/memcache_config.md`、`docs/zh/SECURITYNOTE.md` 中相关内容。
+- Changes to the C API must be synchronized with `docs/zh/memcache_c_api.md`.
+- Changes to the C++ API must be synchronized with `docs/zh/memcache_c++_api.md`.
+- Changes to the Python API must be synchronized with `docs/zh/memcache_python_api.md`.
+- Changes to REST/MetaService behavior must be synchronized with `docs/zh/memcache_restful_api.md`. - For any changes related to installation, configuration, environment variables, or security, please update the corresponding content in `docs/zh/install_whl.md`, `docs/zh/install_run.md`, `docs/zh/memcache_config.md`, and `docs/zh/SECURITYNOTE.md`.
 
-## 产物与依赖
+## Artifacts and Dependencies
 
-- 生成产物不要提交：`build/`、`output/`、`src/memcache/python/build/`、`*.egg-info`、wheel、shared libs。
-- 关键依赖来自现有构建脚本和文档：CMake >= 3.12、C++17 编译器、Ninja 或 Make、Python >= 3.8、pybind11、MemFabric Hybrid。
+- Do not commit build artifacts, including: `build/`, `output/`, `src/memcache/python/build/`, `*.egg-info`, wheel files, or shared libraries.
+- Key dependencies (as specified in existing build scripts and documentation) include: CMake >= 3.12, a C++17-compliant compiler, Ninja or Make, Python >= 3.8, pybind11, and MemFabric Hybrid.
 
-## 许可证
+## License
 
-Mulan PSL v2。新增源码文件保持与现有文件一致的版权和许可证头。
+Mulan PSL v2. New source code files must include copyright and license headers consistent with those in existing files.
