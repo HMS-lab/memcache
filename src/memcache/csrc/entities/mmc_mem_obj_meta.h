@@ -156,6 +156,7 @@ private:
     uint64_t size_{0};                   /* byteSize of each blob */
     std::mutex mutex_;                   /* must lock before read/write this meta */
     mutable std::condition_variable cv_; /* key-level: 回温/状态变化时唤醒等待中的并发 Get() */
+		//Wake up waiting concurrent operations upon temperature recovery or state changes.
 };
 
 using MmcMemObjMetaPtr = MmcRef<MmcMemObjMeta>;

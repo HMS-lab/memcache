@@ -1422,6 +1422,8 @@ Result MmcMetaManager::Alloc(const std::string &key, const AllocOptions &allocOp
         globalAllocator_->Free(blobs);
         // 内存碎片场景：水位线正常，但申请大小超过当前系统中最大的单个连续空闲块，
         // 同步执行强制淘汰并在本次调用内重试分配，确保清理完成后即可分配成功
+        // Memory fragmentation scenario: Water levels are normal, but the requested size exceeds the largest single contiguous free block currently available in the system.
+        // Perform synchronous forced eviction and retry the allocation within the same call to ensure success immediately after cleanup.
         MediaType media = static_cast<MediaType>(allocOpt.mediaType_);
         if (media == MEDIA_NONE) {
             media = globalAllocator_->GetTopLayerMediumType();
@@ -1429,6 +1431,8 @@ Result MmcMetaManager::Alloc(const std::string &key, const AllocOptions &allocOp
         if (media != MEDIA_NONE && media != MEDIA_SSD && globalAllocator_->IsFragmentation(media, allocOpt.blobSize_)) {
             // 逐 rank 检测碎片：Alloc 经 ArrangeLocality/RandomAssign 可能在任意 rank 上失败，
             // preferredRank_ 不能反映实际失败的 rank，须检查该介质所有已挂载 rank
+            // Check for fragments rank by rank: Allocation—following ArrangeLocality or RandomAssign—may fail on any rank;
+            // preferredRank_ does not reflect the actual rank where the failure occurred, so all ranks where the medium is mounted must be checked.
             auto fragmentedRanks = globalAllocator_->GetFragmentedRanks(media, allocOpt.blobSize_);
             if (!fragmentedRanks.empty()) {
                 MMC_LOG_WARN("Alloc failed by fragmentation, media: "

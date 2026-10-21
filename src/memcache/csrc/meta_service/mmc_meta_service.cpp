@@ -232,6 +232,11 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
             metaManagerPtr->CheckAndEvict(MEDIA_NONE, 0);
             // 碎片整理式异步淘汰：水位淘汰后释放与空闲地址段相邻的 LRU 冷数据，合并出更大的连续空闲块，缓解内存碎片
             // DefragEvict 内部逐 (rank, media) 判断：仅多段空闲且最大连续空闲块不足 1000MB（存在碎片）时才释放
+	    // Defragmentation-style asynchronous eviction: Following a threshold-based eviction,
+	    // LRU "cold" data adjacent to existing free memory segments is released.
+	    // This merges smaller free spaces into larger, contiguous blocks, thereby mitigating memory fragmentation.
+	    // Within the DefragEvict mechanism, evaluation is performed for each (rank, media) pair: data is released
+	    // only when multiple free segments exist and the largest contiguous free block is less than 1000 MB (indicating the presence of fragmentation).
             metaManagerPtr->DefragEvict();
         });
         if (periodicEvictRet != MMC_OK) {
