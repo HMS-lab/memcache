@@ -1,24 +1,24 @@
-# example
+# Examples
 
-## 简介
+## Introduction
 
-本项目提供了C++和Python的调用样例，请开发者根据实际情况参考对应实现。
+This project provides C++ and Python examples. Developers can refer to the implementation that fits their use case.
 
-## 目录说明
+## Directory Structure
 
 ```text
 ├── examples
-│   ├── benchmark        # memcache性能测试benchmark
-│   ├── cpp              # c++样例
-│   ├── python           # python样例
-│   ├── metrics          # grafana metrics样例
+│   ├── benchmark        # MemCache performance benchmarks
+│   ├── cpp              # C++ examples
+│   ├── python           # Python examples
+│   ├── metrics          # Grafana metrics examples
 ```
 
-## 开发样例
+## Development Examples
 
-| **样例名称**                             | **样例介绍**          | **开发语言** |
+| **Example** | **Description** | **Language** |
 |--------------------------------------|-------------------|----------|
-| [benchmark](./benchmark/README.md)   | MemCache 性能测试benchmark    | python      |
-| [C++ example](./cpp/README.md)       | MemCache C++样例    | C++      |
-| [python example](./python/README.md) | MemCache Python样例 | Python   |
-| [metrics example](https://gitcode.com/Ascend/memcache/wiki/memcache%E5%AF%B9%E6%8E%A5Grafana+Prometheus%E4%BD%BF%E7%94%A8%E6%95%99%E7%A8%8B.md) |MemCache grafana metrics样例 | json    |
+| [benchmark](./benchmark/README.md) | MemCache performance benchmarks | Python |
+| [C++ example](./cpp/README.md) | MemCache C++ example | C++ |
+| [Python example](./python/README.md) | MemCache Python example | Python |
+| [metrics example](https://gitcode.com/Ascend/memcache/wiki/memcache%E5%AF%B9%E6%8E%A5Grafana+Prometheus%E4%BD%BF%E7%94%A8%E6%95%99%E7%A8%8B.md) | MemCache Grafana metrics example | JSON |
