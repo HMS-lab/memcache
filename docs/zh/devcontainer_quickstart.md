@@ -1,16 +1,16 @@
-# MemCache Hybrid — 远端开发 & 全量运行指南
+# MemCache Hybrid — Remote Development and Running All Examples
 
-## 前置条件
+## Prerequisites
 
-- **远端服务器**：昇腾 NPU 服务器，已安装 NPU 驱动。
-- **本地机器**：VS Code + Remote—SSH 扩展。
-- **网络**：本地能 SSH 到远端服务器，远端能拉 gitcode + Docker 镜像。
+- **Remote server**: An Ascend NPU server with the NPU driver installed.
+- **Local machine**: VS Code with the Remote-SSH extension.
+- **Network**: The local machine can SSH to the remote server, and the remote server can access GitCode and Docker images.
 
 ---
 
-## 1. 远端克隆项目
+## 1. Clone the project on the remote server
 
-SSH 登录远端服务器，克隆仓库。
+SSH into the remote server and clone the repository.
 
 ```bash
 git clone https://gitcode.com/Ascend/memcache.git
@@ -19,131 +19,131 @@ cd memcache
 
 ---
 
-## 2. VS Code SSH-Remote 连接
+## 2. Connect with VS Code Remote-SSH
 
-不需要手动在远端启动 VS Code Server，VS Code 会自动处理。
+You do not need to start VS Code Server manually on the remote host; VS Code handles this automatically.
 
-**方式 A —— 命令行快捷连接**（本地终端执行）
+**Option A — Connect from the command line** (run in a local terminal)
 
 ```bash
-code --remote ssh-remote+<你的服务器地址> /path/to/memcache
+code --remote ssh-remote+<your-server-address> /path/to/memcache
 ```
 
-例如：
+For example:
 
 ```bash
 code --remote ssh-remote+192.168.1.100 /home/user/memcache
 ```
 
-**方式 B —— VS Code UI**
+**Option B — Use the VS Code UI**
 
-1. `F1` → `Remote-SSH: Connect to Host...`。
-2. 输入 `ssh user@host` 或从 `~/.ssh/config` 选择。
-3. 输入服务器密码。
-4. 连接后 `File > Open Folder...` → 选择 `memcache` 目录。
-5. 输入服务器密码。
+1. Press `F1` and select `Remote-SSH: Connect to Host...`.
+2. Enter `ssh user@host` or select a host from `~/.ssh/config`.
+3. Enter the server password.
+4. After connecting, select `File > Open Folder...` and choose the `memcache` directory.
+5. Enter the server password when prompted.
 
-> [!NOTE] 说明
-> VS Code 会自动在远端安装 `vscode-server`，首次连接需等待几十秒。
+> [!NOTE]
+> VS Code automatically installs `vscode-server` on the remote host. The first connection may take several dozen seconds.
 
 ---
 
-## 3. 在 Dev Container 中打开
+## 3. Open the project in a Dev Container
 
-1. 确保远端已安装 Docker（root 或 docker 组权限）。
-2. VS Code 中 `F1` → `Dev Containers: Reopen in Container`。
-3. 输入服务器密码。
-4. 等待镜像拉取 + 容器构建 + postCreateCommand 完成。
+1. Make sure Docker is installed on the remote host and that you have root or docker group permissions.
+2. In VS Code, press `F1` and select `Dev Containers: Reopen in Container`.
+3. Enter the server password.
+4. Wait for the image pull, container build, and `postCreateCommand` to finish.
 
-> [!NOTE] 说明
+> [!NOTE]
 >
-> - 第一次会拉取 `quay.nju.edu.cn/ascend/vllm-ascend:v0.20.2rc1-a3`（约 15-20 GB），耗时较长。
-> - 官方镜像源为 `quay.io/ascend/vllm-ascend:v0.22.1rc1-a3`，配置中使用中国国内镜像加速下载。
-> A2 环境请改用 `quay.nju.edu.cn/ascend/vllm-ascend:v0.20.2rc1`。
+> - The first run pulls `quay.nju.edu.cn/ascend/vllm-ascend:v0.20.2rc1-a3` (about 15–20 GB) and may take a while.
+> - The official image is `quay.io/ascend/vllm-ascend:v0.22.1rc1-a3`; the configuration uses a mirror in China to speed up downloads.
+> - For an A2 environment, use `quay.nju.edu.cn/ascend/vllm-ascend:v0.20.2rc1`.
 
-postCreateCommand 会自动执行以下操作（`.devcontainer/post_create.sh`）：
+`postCreateCommand` automatically performs the following steps (`.devcontainer/post_create.sh`):
 
-- 安装 Python 开发依赖（pre-commit、pytest、pybind11 等）。
-- 初始化 `3rdparty/` 子模块。
-- 验证工具链版本（gcc、cmake、ninja、python）。
-- CMake 冒烟配置测试。
-- 安装 pre-commit hooks。
+- Installs Python development dependencies (pre-commit, pytest, pybind11, and others).
+- Initializes the `3rdparty/` submodules.
+- Checks toolchain versions (gcc, cmake, ninja, and python).
+- Runs a CMake smoke configuration test.
+- Installs pre-commit hooks.
 
-> [!NOTE] 说明
-> 完成后 VS Code 左下角显示 `Dev Container: MemCache Dev Container`。
-> 点击右下角的 `show logs` 会在终端显示构建细节和进度。
+> [!NOTE]
+> When setup is complete, the lower-left corner of VS Code displays `Dev Container: MemCache Dev Container`.
+> Select `show logs` in the lower-right corner to view build details and progress in the terminal.
 
 ---
 
-## 4. 构建
+## 4. Build
 
 ```bash
-# 首次构建（Release 模式）
+# First build (Release mode)
 bash script/build_and_pack_run.sh --build_mode RELEASE --build_test OFF
 
-# 调试构建（复用已有 build/ 目录）
+# Debug build (reuse the existing build/ directory)
 bash script/build_and_pack_run.sh --build_mode DEBUG --incremental
 ```
 
-编译产物：
+Build artifacts:
 
-- **run 包**：`output/memcache_hybrid-*.run`
-- **whl 包**：`output/memcache/wheel/memcache_hybrid-*.whl`
+- **run package**: `output/memcache_hybrid-*.run`
+- **wheel package**: `output/memcache/wheel/memcache_hybrid-*.whl`
 
 ---
 
-## 5. 运行全部 Examples
+## 5. Run all examples
 
-### 参数说明
+### Parameters
 
-| 参数 | 默认 | 说明 |
+| Parameter | Default | Description |
 |---|---|---|
-| *(无)* | — | Python + C++ 全量运行 |
-| `--python` | — | 仅运行 Python 例子 |
-| `--cpp` | — | 仅运行 C++ 例子（自动构建+安装运行包） |
-| `--meta-config` | `config/mmc-meta.conf` | MetaService 配置文件路径 |
-| `--local-config` | `config/mmc-local.conf` | LocalService 配置文件路径 |
-| `--run-bench` | off | 运行性能基准测试 |
-| `--example-timeout` | 180s | 单用例超时秒数 |
-| `--dry-run` | off | 只打印不执行 |
-| `--verbose` | off | 显示用例完整输出 |
+| *(none)* | — | Run all Python and C++ examples |
+| `--python` | — | Run Python examples only |
+| `--cpp` | — | Run C++ examples only (automatically builds and installs the run package) |
+| `--meta-config` | `config/mmc-meta.conf` | Path to the MetaService configuration file |
+| `--local-config` | `config/mmc-local.conf` | Path to the LocalService configuration file |
+| `--run-bench` | off | Run performance benchmarks |
+| `--example-timeout` | 180s | Timeout in seconds for each test case |
+| `--dry-run` | off | Print commands without running them |
+| `--verbose` | off | Show complete output for each test case |
 
-### 使用示例
+### Examples
 
 ```bash
-# 查看会跑哪些例子（不实际执行）
+# See which examples would run without executing them
 bash script/run_all_examples.sh --dry-run
 
-# 全量运行（Python + C++，MetaService 自动检测/启动）
+# Run all examples (Python + C++; MetaService is detected or started automatically)
 bash script/run_all_examples.sh
 
-# 只跑 Python examples
+# Run Python examples only
 bash script/run_all_examples.sh --python
 
-# 只跑 C++ examples
+# Run C++ examples only
 bash script/run_all_examples.sh --cpp
 
-# 运行时查看详细输出
+# Show detailed output while running
 bash script/run_all_examples.sh --verbose
 ```
 
-### 运行内容
+### What runs
 
-| 类别 | 条件 | 内容 |
+| Category | Condition | Contents |
 |---|---|---|
-| `example/python/` — 基础 CRUD | `--python` + NPU | `test_mmc_demo`, `test_mmc_batch`, `test_mmc_start_meta_service_and_simple_test` |
-| `example/python/` — Layers | 同上 + torch_npu | `test_mmc_layers`, `test_mmc_layers_batch` |
-| `example/cpp/` | `--cpp` + NPU | 构建并运行 `memcache_cpp_test`（put/get/remove 自动验证） |
-| `example/benchmark/` | `--run-bench` + NPU | 4KB 小数据写/读冒烟测试 |
+| `example/python/` — basic CRUD | `--python` + NPU | `test_mmc_demo`, `test_mmc_batch`, `test_mmc_start_meta_service_and_simple_test` |
+| `example/python/` — layers | As above + torch_npu | `test_mmc_layers`, `test_mmc_layers_batch` |
+| `example/cpp/` | `--cpp` + NPU | Build and run `memcache_cpp_test` (automatically verifies put/get/remove) |
+| `example/benchmark/` | `--run-bench` + NPU | 4 KB small-data write/read smoke test |
 
 ---
 
-## 6. 手动运行示例
+## 6. Run examples manually
 
-### Python 示例
+### Python examples
 
 ```bash
-# 方式一：先启动 MetaService，再运行
+# Option 1: Start MetaService first, then run the examples
 export MMC_META_CONFIG_PATH=/path/to/mmc-meta.conf
 export MMC_LOCAL_CONFIG_PATH=/path/to/mmc-local.conf
 python3 -c "from memcache_hybrid import MetaService; MetaService.main()" &
@@ -151,14 +151,14 @@ python3 -c "from memcache_hybrid import MetaService; MetaService.main()" &
 python3 example/python/test_mmc_demo.py
 python3 example/python/test_mmc_batch.py
 
-# 方式二：使用自包含示例（进程内启动 MetaService）
+# Option 2: Use a self-contained example (starts MetaService in the process)
 python3 example/python/test_mmc_start_meta_service_and_simple_test.py
 ```
 
-### C++ 示例
+### C++ examples
 
 ```bash
-# 需要先安装 run 包，source 环境变量
+# Install the run package first, then source the environment variables
 source /usr/local/memcache_hybrid/set_env.sh
 source /usr/local/memfabric_hybrid/set_env.sh
 
@@ -172,44 +172,44 @@ export MMC_LOCAL_CONFIG_PATH=/path/to/mmc-local.conf
 ### Benchmark
 
 ```bash
-# 先启动 MetaService
+# Start MetaService first
 export MMC_META_CONFIG_PATH=/path/to/mmc-meta.conf
 bash example/benchmark/bench_start_meta.sh
 
-# 写数据测试
+# Write test
 export MMC_LOCAL_CONFIG_PATH=/path/to/mmc-local.conf
 bash example/benchmark/bench_start.sh -t write -p 1 -b 16 -s 1048576 -n 100 -d 1 -e memcache -l npu
 
-# 读数据测试
+# Read test
 bash example/benchmark/bench_start.sh -t read -p 1 -b 16 -s 1048576 -n 100 -d 1 -e memcache -l npu
 ```
 
 ---
 
-## 常见问题
+## Frequently asked questions
 
-**Q: 拉镜像太慢 / 超时**
+**Q: Image pulls are too slow or time out.**
 
-`.devcontainer/Dockerfile` 中已将源指向国内 mirror `quay.nju.edu.cn`。如仍需代理，在远端 `/etc/docker/daemon.json` 配置 registry mirror。
+`.devcontainer/Dockerfile` is configured to use the `quay.nju.edu.cn` mirror. If you still need a proxy, configure a registry mirror in `/etc/docker/daemon.json` on the remote host.
 
-**Q: 构建时找不到 `pybind11`**
+**Q: `pybind11` cannot be found during the build.**
 
-`postCreateCommand` 已安装，如跳过则手动：
+`postCreateCommand` installs it automatically. If you skipped that step, install it manually:
 
 ```bash
 pip install pybind11
 ```
 
-**Q: 没有 NPU 能不能跑**
+**Q: Can I run this without an NPU?**
 
-不能。MemCache 依赖昇腾 NPU 驱动（`davinci`、`devmm_svm`）。无 NPU 环境下构建会失败。
+No. MemCache depends on the Ascend NPU drivers (`davinci`, `devmm_svm`), and the build will fail without an NPU environment.
 
-**Q: 只想用 Python 不用 C++ 例子**
+**Q: I only want to use Python examples, not C++ examples.**
 
 ```bash
 bash script/run_all_examples.sh --python
 ```
 
-**Q: 需要修改 MetaService 或 LocalService 配置**
+**Q: How do I change the MetaService or LocalService configuration?**
 
-编辑 `config/mmc-meta.conf` 和 `config/mmc-local.conf`，或通过 `--meta-config` / `--local-config` 指定自定义路径。
+Edit `config/mmc-meta.conf` and `config/mmc-local.conf`, or use `--meta-config` / `--local-config` to specify custom paths.

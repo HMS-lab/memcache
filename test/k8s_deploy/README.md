@@ -1,1 +1,1 @@
-# k8s 部署测试脚本，生产环境慎用
+# Kubernetes Deployment Test Scripts — Use with Caution in Production

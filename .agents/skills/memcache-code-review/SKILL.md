@@ -1,90 +1,90 @@
 ---
 name: memcache-code-review
-description: "当用户要求 MemCache 代码审查、变更检查或新增代码检查时使用。按本项目已有的 docs/zh/c_cpp_naming.md、.clang-format、.pre-commit-config.yaml、pre-commit/pyproject.toml、script/run_ut.sh、docs/zh/SECURITYNOTE.md 和 API/安装文档检查变更。"
+description: "Use when the user requests a MemCache code review, change review, or review of newly added code. Check changes against this repository's existing docs/zh/c_cpp_naming.md, .clang-format, .pre-commit-config.yaml, pre-commit/pyproject.toml, script/run_ut.sh, docs/zh/SECURITYNOTE.md, and API/installation documentation."
 ---
 
-# memcache-code-review — 代码审查
+# memcache-code-review — Code Review
 
-## 目标
+## Goal
 
-对新增或变更代码进行审查，确认变更符合本仓库已有规范、脚本和文档约束，并指出可能影响构建、测试、接口文档或安全说明的问题。
+Review added or changed code for compliance with this repository's conventions, scripts, and documentation requirements. Identify issues that could affect builds, tests, API documentation, or security notes.
 
-## 依据
+## Sources
 
-审查只使用本项目已有依据：
+Use only sources already present in this project:
 
-- C/C++ 命名、魔法数字、测试命名：`docs/zh/c_cpp_naming.md`。
-- C/C++ 格式化：`.clang-format` 和 `.pre-commit-config.yaml`。
-- Python 检查：`pre-commit/pyproject.toml`。
-- UT 和覆盖率门禁：`script/run_ut.sh`。
-- 安全说明：`docs/zh/SECURITYNOTE.md`。
-- 安装、配置、API 文档：`docs/zh/install_whl.md`、`docs/zh/install_run.md`、`docs/zh/memcache_config.md`、`docs/zh/memcache_c_api.md`、`docs/zh/memcache_c++_api.md`、`docs/zh/memcache_python_api.md`、`docs/zh/memcache_restful_api.md`。
+- C/C++ naming, magic numbers, and test naming: `docs/zh/c_cpp_naming.md`.
+- C/C++ formatting: `.clang-format` and `.pre-commit-config.yaml`.
+- Python checks: `pre-commit/pyproject.toml`.
+- Unit test and coverage gates: `script/run_ut.sh`.
+- Security notes: `docs/zh/SECURITYNOTE.md`.
+- Installation, configuration, and API documentation: `docs/zh/install_whl.md`, `docs/zh/install_run.md`, `docs/zh/memcache_config.md`, `docs/zh/memcache_c_api.md`, `docs/zh/memcache_c++_api.md`, `docs/zh/memcache_python_api.md`, and `docs/zh/memcache_restful_api.md`.
 
-## 范围限定
+## Scope
 
-- 重点审查新增或变更的代码行，不要求全文件重构。
-- 旧代码存在同类问题时可以简要提示，但不要扩大修改范围。
-- 建议应优先沿用项目现有宏、日志、错误码、命名和脚本。
+- Focus on added or changed lines; do not require a full-file refactor.
+- Briefly mention similar issues in existing code when useful, but do not expand the scope of changes.
+- Prefer recommendations that follow the project's existing macros, logging, error codes, naming, and scripts.
 
-## 审查要点
+## Review Checklist
 
-### 1. 命名和魔法数字
+### 1. Naming and Magic Numbers
 
-- 文件名、类型、函数、变量、常量、宏、枚举、测试文件、Mock 文件按 `docs/zh/c_cpp_naming.md` 检查。
-- 除 `0` 和 `-1` 等惯用值外，具有独立语义的数字必须提取为命名常量或枚举值。
-- 测试代码也要检查魔法数字，尤其是端口、重试次数、等待次数、超时时间、倍率和阈值。
+- Check filenames, types, functions, variables, constants, macros, enumerations, test files, and Mock files against `docs/zh/c_cpp_naming.md`.
+- Except for conventional values such as `0` and `-1`, extract numbers with independent semantic meaning into named constants or enumeration values.
+- Check test code for magic numbers too, especially ports, retry counts, wait counts, timeouts, multipliers, and thresholds.
 
-### 2. 格式化和静态检查
+### 2. Formatting and Static Checks
 
-- C/C++ 行宽、缩进、括号和格式化行为以 `.clang-format` 与 `.pre-commit-config.yaml` 为准。
-- Python 行宽、Ruff、Pylint、Bandit 配置以 `pre-commit/pyproject.toml` 为准。
-- 如需给出验证建议，优先使用 `TARGET_BRANCH=develop bash script/ci-pre-commit-pr.sh` 或 `pre-commit run --files ...`。
+- Follow `.clang-format` and `.pre-commit-config.yaml` for C/C++ line width, indentation, braces, and formatting.
+- Follow `pre-commit/pyproject.toml` for Python line width and Ruff, Pylint, and Bandit settings.
+- When suggesting checks, prefer `TARGET_BRANCH=develop bash script/ci-pre-commit-pr.sh` or `pre-commit run --files ...`.
 
-### 3. 错误处理和日志风格
+### 3. Error Handling and Logging
 
-- 错误码和成功码沿用本项目已有语义，例如 `MMC_OK`、`MMC_ERROR`、`MMC_NOT_INITIALIZED`、`MMC_INVALID_ARGUMENT`、`MMC_UNMATCHED_KEY`。
-- 错误分支应优先沿用本项目已有宏和日志风格，例如 `MMC_VALIDATE_RETURN`、`MMC_ASSERT*`、`MMC_LOG_ERROR`。
-- 发现新增错误路径完全缺少可定位失败原因、返回码或关键上下文时，按风险指出，但不要引入项目中不存在的新日志框架或字段。
+- Use existing project error and success code semantics, such as `MMC_OK`, `MMC_ERROR`, `MMC_NOT_INITIALIZED`, `MMC_INVALID_ARGUMENT`, and `MMC_UNMATCHED_KEY`.
+- Prefer existing macros and logging conventions in error paths, such as `MMC_VALIDATE_RETURN`, `MMC_ASSERT*`, and `MMC_LOG_ERROR`.
+- If a new error path lacks a diagnosable reason, return code, or key context, report the risk. Do not introduce logging frameworks or fields that the project does not use.
 
-### 4. 测试和覆盖率
+### 4. Tests and Coverage
 
-- C++ UT 以 `script/run_ut.sh` 为主要入口。
-- 覆盖率门禁以脚本为准：行覆盖率不少于 70%，分支覆盖率不少于 40%。
-- 新增 C++ 测试文件命名使用 `*_test.cpp`；存量 `test_*.cpp` 文件不要求仅因命名规则而修改。
-- Python 测试如依赖 Ascend/NPU、MetaService、mock server 或 K8S 环境，未运行时必须明确说明。
+- Use `script/run_ut.sh` as the main entry point for C++ unit tests.
+- Follow the script's coverage gates: at least 70% line coverage and 40% branch coverage.
+- Name new C++ test files `*_test.cpp`. Existing `test_*.cpp` files do not need to be renamed solely to meet the naming convention.
+- If Python tests require Ascend/NPU, MetaService, a mock server, or Kubernetes, state clearly when they were not run.
 
-### 5. 文档同步
+### 5. Documentation Updates
 
-- C API 变更检查 `docs/zh/memcache_c_api.md`。
-- C++ API 变更检查 `docs/zh/memcache_c++_api.md`。
-- Python API 变更检查 `docs/zh/memcache_python_api.md`。
-- REST/MetaService 行为变更检查 `docs/zh/memcache_restful_api.md`。
-- 安装、配置、环境变量或安全行为变更检查 `docs/zh/install_whl.md`、`docs/zh/install_run.md`、`docs/zh/memcache_config.md`、`docs/zh/SECURITYNOTE.md`。
+- For C API changes, check `docs/zh/memcache_c_api.md`.
+- For C++ API changes, check `docs/zh/memcache_c++_api.md`.
+- For Python API changes, check `docs/zh/memcache_python_api.md`.
+- For REST/MetaService behavior changes, check `docs/zh/memcache_restful_api.md`.
+- For installation, configuration, environment variable, or security behavior changes, check `docs/zh/install_whl.md`, `docs/zh/install_run.md`, `docs/zh/memcache_config.md`, and `docs/zh/SECURITYNOTE.md`.
 
-### 6. 安全说明
+### 6. Security Notes
 
-- TLS、证书、私钥、端口范围、运行用户和文件权限相关变更，以 `docs/zh/SECURITYNOTE.md` 为检查依据。
-- 不建议输出未脱敏的私钥、证书口令、token、完整配置值、完整环境变量 dump 或原始缓存/共享内存数据。
+- Use `docs/zh/SECURITYNOTE.md` when reviewing changes involving TLS, certificates, private keys, port ranges, runtime users, or file permissions.
+- Do not include unredacted private keys, certificate passwords, tokens, full configuration values, complete environment dumps, or raw cache/shared-memory data in review output.
 
-## 输出格式
+## Output Format
 
-发现问题时，按严重程度排序：
+When issues are found, list them in severity order:
 
 ```markdown
-### 问题位置
-`文件路径:行号`
+### Location
+`path/to/file:line`
 
-### 问题
-说明违反了本项目哪个已有规范、脚本或文档约束。
+### Issue
+Explain which existing project convention, script, or documentation requirement is violated.
 
-### 建议
-给出最小修改建议，并说明依据文件。
+### Recommendation
+Suggest the smallest fix and cite the source file that supports it.
 ```
 
-没有发现问题时，说明已检查范围、依据文件和未运行的验证项。
+When no issues are found, state the scope reviewed, the source files used, and any checks that were not run.
 
-## 原则
+## Principles
 
-- 不新增本仓库没有的门禁规则。
-- 不为了满足规则做无关重构或大范围格式化。
-- 不把未运行的 UT、硬件验证、K8S 验证或性能验证描述为通过。
+- Do not add gate rules that the repository does not already have.
+- Do not make unrelated refactors or broad formatting changes just to satisfy a rule.
+- Do not report unit tests, hardware checks, Kubernetes checks, or performance checks as passing if they were not run.

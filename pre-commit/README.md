@@ -1,3 +1,3 @@
-# pre-commit本地运行指南
+# Running pre-commit Locally
 
-pre-commit本地运行请参见 [pre-commit-guide.md](https://gitcode.com/Ascend/community/blob/master/docs/contributor/pre-commit-guide.md)。
+See the [pre-commit contributor guide](https://gitcode.com/Ascend/community/blob/master/docs/contributor/pre-commit-guide.md) for instructions on running pre-commit locally.

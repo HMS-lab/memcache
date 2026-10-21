@@ -1,24 +1,24 @@
-# 合入来源
+# Source of Change
 
-- [ ] 需求
-- [ ] 问题单
-- [ ] issue
+- [ ] Feature request
+- [ ] Bug report
+- [ ] Issue
 
-# 问题/功能描述
+# Problem / Feature Description
 
-# 修改方案描述
+# Proposed Changes
 
-# 是否涉及UT/ST
+# Does this involve UT/ST?
 
-- [ ] 是
-- [ ] 否（说明理由）
+- [ ] Yes
+- [ ] No (explain why)
 
-# 开发自检
+# Developer Self-Check
 
-- [ ] 规范：未超过1k；超过1k已完成备案；反合入需要标题注明【反合】
-- [ ] 规范：已关联issue或里程碑
-- [ ] 规范：不需要UT/ST且已说明理由；需要且已包含UT/ST
-- [ ] 安全：涉及对外接口/参数/环境变量改动，并同步修改资料
-- [ ] 安全：未引入三方开源软件；引入三方开源软件并经过安全评审
-- [ ] 安全：未新增对外接口/参数；新增对外接口/参数有校验
-- [ ] 规范：未涉及资料改动；涉及资料改动并已完成修改
+- [ ] Process: The change is no larger than 1k lines; if it is larger, it has been registered. For a revert, the title includes `[Revert]`.
+- [ ] Process: The change is linked to an issue or milestone.
+- [ ] Process: UT/ST is unnecessary and the reason is explained, or required UT/ST is included.
+- [ ] Security: External APIs, parameters, or environment variables changed, and the documentation has been updated.
+- [ ] Security: No third-party open-source software was added, or any added software has passed security review.
+- [ ] Security: No external API or parameter was added, or any added API or parameter has validation.
+- [ ] Process: No documentation changes are needed, or the required documentation has been updated.
