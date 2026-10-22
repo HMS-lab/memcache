@@ -91,4 +91,4 @@
 |《[DevContainer 远端开发](../devcontainer_quickstart.md)》|VS Code Remote-SSH + DevContainer 一站式开发环境搭建与全量示例运行指南。|
 |《[C/C++ 编码规范](../c_cpp_naming.md)》|提供C/C++的编码规范。|
 |《[配置文件](../memcache_config.md)》|提供MetaService、LocalService的配置参数说明。|
-|《[样例执行](../../../example/examples.md)》|介绍如何端到端执行样例代码，包括C++和Python样例。|
+|《[样例执行](https://gitcode.com/Ascend/memcache/blob/master/example/examples.md)》|介绍如何端到端执行样例代码，包括C++和Python样例。|

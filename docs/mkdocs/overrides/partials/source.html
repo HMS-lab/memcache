@@ -1,0 +1,7 @@
+{#-
+  Override Material source widget: replace the repo icon (git-alt SVG)
+  with the MemCache wordmark image, vertically centered in the header.
+-#}
+<a href="{{ config.repo_url }}" title="{{ lang.t('source') }}" class="md-source" data-md-component="source" style="display: flex; align-items: center;">
+  <img src="{{ 'source/memcache_icon.png' | url }}" alt="MemCache" style="height: 30px; width: auto; display: block;">
+</a>

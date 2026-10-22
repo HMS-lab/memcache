@@ -8,6 +8,7 @@ repo_name: MemCache
 
 theme:
   name: material
+  custom_dir: docs/mkdocs/overrides
   language: zh
   logo: assets/ascend-logo.png
   favicon: assets/ascend-favicon.ico
@@ -59,7 +60,7 @@ plugins:
   - search
   - awesome-nav:
       filename: .nav.yaml
-  - glightbox
+  # - glightbox
   - git-revision-date-localized:
       enable_creation_date: true
   - minify:

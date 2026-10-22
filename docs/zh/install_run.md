@@ -149,7 +149,7 @@ export MMC_LOCAL_CONFIG_PATH=/usr/local/memcache_hybrid/latest/config/mmc-local.
 
 通过调用MemCache提供的[API](./memcache_c++_api.md)初始化客户端，执行数据写入、查询、获取、删除等
 
-可参考示例代码[memcache_cpp_test.cpp](../../example/cpp/memcache_cpp_test.cpp)
+可参考示例代码[memcache_cpp_test.cpp](https://gitcode.com/Ascend/memcache/blob/master/example/cpp/memcache_cpp_test.cpp)
 
 ## 软件卸载
 

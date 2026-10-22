@@ -6,6 +6,8 @@
 /.cache/
 /output/
 /build/
+/site/
+/.venv_mkdocs/
 /script/git_last_commit.txt
 
 package/*

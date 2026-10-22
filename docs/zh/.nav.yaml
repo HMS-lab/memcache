@@ -40,6 +40,11 @@ nav:
           - 集群的扩缩容: user_guide/deployment_guide/集群的扩缩容.md
           - 池化使能950DT和950PR的UB和UBoE: user_guide/deployment_guide/池化使能950DT和950PR的UB和UBoE.md
           - 扩大A3可用内存空间: user_guide/deployment_guide/MemCache扩大A3可用内存空间.md
+          - 安装wheel包: install_whl.md
+          - 安装与运行: install_run.md
+          - 配置项说明: memcache_config.md
+          - 安全提示: SECURITYNOTE.md
+          - 兼容性说明: compatibility.md
       - 监控运维:
           - 对接Grafana+Prometheus使用教程: user_guide/monitoring/memcache对接Grafana+Prometheus使用教程.md
           - Client性能指标看板: user_guide/monitoring/MemCache Client 性能指标看板.md
@@ -55,6 +60,13 @@ nav:
       - 贡献指南:
           - 本地构建文档: developer_guide/contribution/build_docs.md
           - 开发与发布节奏原则（MemFabric交叉参考）: developer_guide/contribution/开发与发布节奏原则.md
+          - C/C++ 命名规范: c_cpp_naming.md
+          - Dev Container 快速开始: devcontainer_quickstart.md
+      - API 文档:
+          - C API: memcache_c_api.md
+          - C++ API: memcache_c++_api.md
+          - Python API: memcache_python_api.md
+          - RESTful API: memcache_restful_api.md
   - 社区:
       - 社区首页: community/index.md
       - 版本规划: community/Roadmap.md
