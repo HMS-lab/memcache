@@ -19,6 +19,7 @@ BUILD_TEST="OFF"
 INCREMENTAL="OFF"
 BUILD_UBSIO="ON"
 BUILD_CPP_EXAMPLE="OFF"
+BUILD_PYTHON_WHL_TYPE="release"
 
 show_help() {
     echo "Usage: $0 [options]"
@@ -28,6 +29,7 @@ show_help() {
     echo "  --incremental           Enable incremental build (skip clean), default: OFF"
     echo "  --build_ubsio <ON/OFF>  Enable/disable build and package ubs-io (SSD backend), default: ON"
     echo "  --build_cpp_example <ON/OFF> Enable/disable in-tree C++ examples, default: OFF"
+    echo "  --build_python_whl_type <release/daily> Python release/daily whl build, default: release"
     echo "  --help                  Show this help message"
     echo ""
     echo "Example:"
@@ -57,6 +59,10 @@ while [[ "$#" -gt 0 ]]; do
             BUILD_CPP_EXAMPLE="$2"
             shift 2
             ;;
+        --build_python_whl_type)
+            BUILD_PYTHON_WHL_TYPE="$2"
+            shift 2
+            ;;
         --help)
             show_help
             exit 0
@@ -74,10 +80,11 @@ echo "BUILD_MODE: $BUILD_MODE"
 echo "BUILD_PYTHON: $BUILD_PYTHON"
 echo "BUILD_UBSIO: $BUILD_UBSIO"
 echo "BUILD_CPP_EXAMPLE: $BUILD_CPP_EXAMPLE"
+echo "BUILD_PYTHON_WHL_TYPE: $BUILD_PYTHON_WHL_TYPE"
 
 cd "${ROOT_PATH}"
 
-bash build.sh "${BUILD_MODE}" OFF OFF "${BUILD_PYTHON}" ON "${INCREMENTAL}" "${BUILD_UBSIO}" "${BUILD_CPP_EXAMPLE}"
+bash build.sh "${BUILD_MODE}" OFF OFF "${BUILD_PYTHON}" ON "${INCREMENTAL}" "${BUILD_UBSIO}" "${BUILD_CPP_EXAMPLE}" "${BUILD_PYTHON_WHL_TYPE}"
 
 bash run_pkg_maker/make_run.sh "${BUILD_TEST}" "${BUILD_UBSIO}"
 

@@ -17,6 +17,7 @@ export ENABLE_PTRACER=${5:-ON}
 export INCREMENTAL=${6:-OFF}
 export BUILD_UBSIO=${7:-ON}
 export BUILD_CPP_EXAMPLE=${8:-OFF}
+export BUILD_PYTHON_WHL_TYPE=${9:-release}
 
 readonly SCRIPT_FULL_PATH=$(dirname $(readlink -f "$0"))
 readonly PROJECT_FULL_PATH=$(dirname "$SCRIPT_FULL_PATH")
@@ -59,7 +60,12 @@ if [ "${BUILD_PYTHON}" != "ON" ]; then
 fi
 
 VERSION="$(cat VERSION | tr -d '[:space:]')"
-export MEMCACHE_VERSION="${VERSION}"
+if [ "${BUILD_PYTHON_WHL_TYPE}" == "daily" ]; then
+    BUILD_DATE=$(date +%Y%m%d)
+    export MEMCACHE_VERSION="${VERSION}".dev"${BUILD_DATE}"
+else
+    export MEMCACHE_VERSION="${VERSION}"
+fi
 echo "VERSION IS ${VERSION}"
 GIT_COMMIT=`git rev-parse HEAD` || true
 {

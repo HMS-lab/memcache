@@ -252,7 +252,7 @@ function install_wheel_package() {
         return
     fi
 
-    wheel_package=$(find "${wheel_dir}" -name "${wheel_name}-${version1}-cp${python_version}*" -print -quit)
+    wheel_package=$(find "${wheel_dir}" -name "${wheel_name}-${version1}*-cp${python_version}*" -print -quit)
     if [ -z "${wheel_package}" ]; then
         print "WARNING" "not found wheel package ${wheel_name} for python-${python_version}, skip install wheel."
         return
