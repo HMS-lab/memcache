@@ -35,7 +35,7 @@ MemCache Python API 是一个高性能的分布式内存缓存客户端，提供
 pip install memcache_hybrid
 ```
 
-📦 包详情：https://pypi.org/project/memcache_hybrid/
+📦 包详情：<https://pypi.org/project/memcache_hybrid/>
 
 ## 核心接口
 
@@ -57,7 +57,7 @@ MetaConfig是元数据服务的启动配置类，用于设置MetaService的监�
 | --------- | ------ | ------- | ------ |
 | meta_service_url | str | "tcp://127.0.0.1:5000" | 元数据服务启动地址 |
 | config_store_url | str | "tcp://127.0.0.1:6000" | Config store地址 |
-| metrics_url | str | "http://127.0.0.1:8000" | Metrics HTTP服务地址 |
+| metrics_url | str | `"http://127.0.0.1:8000"` | Metrics HTTP服务地址 |
 | ha_enable | bool | false | 是否启用高可用部署 |
 | log_level | str | "info" | 日志级别：debug, info, warn, error |
 | log_path | str | "/var/log/memcache_hybrid" | 日志目录 |

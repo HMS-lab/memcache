@@ -36,7 +36,7 @@ pip show memfabric_hybrid
 pip install memfabric_hybrid==1.0.8
 ```
 
-MemFabric详细安装方法可参考[MemFabric使用指导](https://gitcode.com/Ascend/memfabric_hybrid/blob/develop/docs/installation.md)。
+MemFabric详细安装方法可参考[MemFabric使用指导](https://gitcode.com/Ascend/memfabric_hybrid/blob/develop/docs/zh/installation.md)。
 
 ### 运行软件
 

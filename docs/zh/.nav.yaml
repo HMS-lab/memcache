@@ -1,0 +1,61 @@
+nav:
+  - 首页: index.md
+  - 快速开始:
+      - 概述: getting_started/index.md
+      - 快速开始: getting_started/基于ascend vllm拓展Prefill Cache能力[v1.1版本].md
+      - vLLM+A3独立部署案例: getting_started/MemCache+vLLM+A3独立部署案例.md
+      - 特性教程:
+          - 推理多实例共池案例: getting_started/tutorials/features/MMC支持推理多实例共池的案例.md
+      - 模型教程:
+          - DSV4-Flash:
+              - A2 单机: getting_started/tutorials/models/DSV4-Flash+A2单机.md
+              - A2 PD分离: getting_started/tutorials/models/DSV4-Flash+A2-PD分离.md
+              - A3 PD分离（优选方案）: getting_started/tutorials/models/DSV4-Flash+A3-PD分离（优选方案）.md
+              - A3 PD分离（备选方案）: getting_started/tutorials/models/DSV4-Flash+A3-PD分离（备选方案）.md
+          - GLM-4.7:
+              - A2 双机混部: getting_started/tutorials/models/GLM-4.7+A2双机混部.md
+          - GLM-5.1:
+              - A2 8机PD分离（PCIE单节点池化）: getting_started/tutorials/models/GLM-5.1+A2-8机PD分离-PCIE单节点池化.md
+              - A2 8机PD分离（ROCE多节点池化）: getting_started/tutorials/models/GLM-5.1+A2-8机PD分离-ROCE多节点池化.md
+              - A3 4机PD分离: getting_started/tutorials/models/GLM-5.1+A3-4机PD分离.md
+              - A3 4机PD分离（最佳性能版）: getting_started/tutorials/models/GLM-5.1+A3-4机PD分离（最佳性能版）.md
+          - GLM-5.2:
+              - A3 4机PD分离: getting_started/tutorials/models/GLM-5.2+A3-4机PD分离.md
+      - 评测教程:
+          - 多轮对话参考测试: getting_started/tutorials/evaluation/多轮对话参考测试.md
+      - 常见问题: getting_started/FAQ.md
+  - 用户指南:
+      - 特性指南:
+          - 多级池化:
+              - 特性介绍: user_guide/feature_guide/DRAM+SSD多级池化/特性介绍.md
+              - 配置指南: user_guide/feature_guide/DRAM+SSD多级池化/配置指南.md
+              - Kubernetes配置示例: user_guide/feature_guide/DRAM+SSD多级池化/Kubernetes配置示例.md
+              - UBSIO-K8s-CSI-Raw-Block解决方案: user_guide/feature_guide/DRAM+SSD多级池化/UBSIO-K8s-CSI-Raw-Block解决方案.md
+              - 多级池化GLM-5.2+A3-4机PD分离: user_guide/feature_guide/DRAM+SSD多级池化/多级池化GLM-5.2+A3-4机PD分离.md
+          - 异步刷盘与预取: user_guide/feature_guide/MemCache 异步刷盘与预取特性.md
+          - KvEvent加密配置指南: user_guide/feature_guide/KvEvent加密配置指南.md
+      - 部署指南:
+          - 部署HA集群（etcd方案，推荐）: user_guide/deployment_guide/怎么部署一个memcache的HA集群-etcd方案.md
+          - 部署HA集群（K8s方案）: user_guide/deployment_guide/怎么部署一个memcache的HA集群.md
+          - 集群的扩缩容: user_guide/deployment_guide/集群的扩缩容.md
+          - 池化使能950DT和950PR的UB和UBoE: user_guide/deployment_guide/池化使能950DT和950PR的UB和UBoE.md
+          - 扩大A3可用内存空间: user_guide/deployment_guide/MemCache扩大A3可用内存空间.md
+      - 监控运维:
+          - 对接Grafana+Prometheus使用教程: user_guide/monitoring/memcache对接Grafana+Prometheus使用教程.md
+          - Client性能指标看板: user_guide/monitoring/MemCache Client 性能指标看板.md
+  - 开发者指南:
+      - 设计文档:
+          - KvEvent: developer_guide/design_documents/KvEvent设计文档.md
+          - 定时碎片整理和强制淘汰: developer_guide/design_documents/定时碎片整理和强制淘汰设计文档.md
+          - GVA直接读写功能: developer_guide/design_documents/GVA直接读写功能设计文档.md
+          - MemCache+MemFabric配合协同支持主备功能: developer_guide/design_documents/MemCache+MemFabric配合协同支持主备功能设计文档.md
+          - 节点亲和分配策略（local_first）（升级版）（WIP): developer_guide/design_documents/节点亲和分配策略（local_first）设计文档（升级版）（WIP).md
+          - 基于Tag的异构传输（待实现）: developer_guide/design_documents/基于Tag的异构传输（待实现）.md
+          - 客户端定时上报metric数据方案: developer_guide/design_documents/MemCache 客户端定时上报metric数据方案.md
+      - 贡献指南:
+          - 本地构建文档: developer_guide/contribution/build_docs.md
+          - 开发与发布节奏原则（MemFabric交叉参考）: developer_guide/contribution/开发与发布节奏原则.md
+  - 社区:
+      - 社区首页: community/index.md
+      - 版本规划: community/Roadmap.md
+      - 版本说明: community/release_notes.md

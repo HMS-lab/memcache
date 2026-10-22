@@ -19,9 +19,9 @@ High-performance distributed key-value cache
 ## 🔄Latest News
 
 - [2026/06] MemCache使能推理PrefixCache加速案例实践，请关注[wiki主页案例库](https://gitcode.com/Ascend/memcache/wiki/Home.md)获取最新案例
-- [2025/12] MemCache已作为vllm-ascend backend使能大模型推理加速，详情查看vllm-ascend开源社区，[使用示例](https://github.com/vllm-project/vllm-ascend/blob/main/docs/source/user_guide/feature_guide/kv_pool.md#example-of-using-memcache-as-a-kv-pool-backend)
+- [2025/12] MemCache已作为vllm-ascend backend使能大模型推理加速，详情查看vllm-ascend开源社区，[使用示例](https://github.com/vllm-project/vllm-ascend/blob/main/docs/source/user_guide/feature_guide/)
 
-- [2025/11] MemCache项目于2025年11月开源，开源社区地址为：https://gitcode.com/Ascend/memcache
+- [2025/11] MemCache项目于2025年11月开源，开源社区地址为：<https://gitcode.com/Ascend/memcache>
 
 ## 🔜 Roadmap&发布策略
 
