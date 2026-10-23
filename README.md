@@ -19,7 +19,7 @@ High-performance distributed key-value cache
 ## 🔄Latest News
 
 - [2026/06] MemCache使能推理PrefixCache加速案例实践，请关注[wiki主页案例库](https://gitcode.com/Ascend/memcache/wiki/Home.md)获取最新案例
-- [2025/12] MemCache已作为vllm-ascend backend使能大模型推理加速，详情查看vllm-ascend开源社区，[使用示例](https://github.com/vllm-project/vllm-ascend/blob/main/docs/source/user_guide/feature_guide/)
+- [2025/12] MemCache已作为vllm-ascend backend使能大模型推理加速，详情查看vllm-ascend开源社区，[使用示例](https://docs.vllm.ai/projects/ascend/en/v0.27.1rc1/user_guide/feature_guide/kv_pool.html#example-of-using-memcache-as-a-kv-pool-backend)
 
 - [2025/11] MemCache项目于2025年11月开源，开源社区地址为：<https://gitcode.com/Ascend/memcache>
 
@@ -35,7 +35,7 @@ MemCache是针对LLM推理、GR推理场景设计的高性能分布式KVCache存
 - **基于对象操作的API**：支持批量和非批量的put/get/exist/remove操作，支持多层结构的KV Block读写接口。
 - **多层缓存池**：支持HBM，DDR，SSD组成多级缓存池，多级之间通过淘汰和预取进行数据冷热交换。
 - **高带宽低时延**：使用 [MemFabric](https://gitcode.com/Ascend/memfabric_hybrid)
-  作为多级内存和异构网络传输的底座，在Ascend硬件上，基于device_rdma(A2)、device_sdma(A3)、host_rdma(A2/A3)、device_urma(A5)、device_uboe(A5)
+  作为多级内存和异构网络传输的底座，在Ascend硬件上，基于device_rdma(A2)、device_sdma(A3)、host_rdma(A2/A3)、device_urma(A5)
   等路径提供OneCopy跨机跨介质数据直接访问能力，满足高带宽，低时延的读写性能诉求。在鲲鹏硬件上，支持host_urma(K5)。支持host_shm实现同节点共享内存通信。
 - **支持扩缩容**：支持LocalService动态加入和移除
 - **HA能力**：在K8S集群中，MetaService支持多活能力，支持元数据恢复，提供尽力而为的HA能力。

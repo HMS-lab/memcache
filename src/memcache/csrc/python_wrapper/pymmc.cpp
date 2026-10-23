@@ -100,7 +100,7 @@ void DefineMmcStructModule(py::module_ &m)
                 },
                 R"pbdoc(
              Data transfer protocol: host_rdma, host_urma, host_tcp, host_shm, device_rdma, device_urma,
-             device_uboe, device_sdma.
+             device_sdma.
          )pbdoc")
             .def_property(
                 "tag", [](const local_config &cfg) { return std::string(cfg.tag); },
@@ -116,7 +116,7 @@ void DefineMmcStructModule(py::module_ &m)
                 },
                 R"pbdoc(
              Data op type between tags, separated by commas, e.g. "tag1:HOST_TCP:tag2,tag2:DEVICE_RDMA:tag3".
-             Op type whitelist: DEVICE_SDMA, DEVICE_RDMA, DEVICE_URMA, DEVICE_UBOE, HOST_RDMA,
+             Op type whitelist: DEVICE_SDMA, DEVICE_RDMA, DEVICE_URMA, HOST_RDMA,
              HOST_TCP, HOST_URMA, HOST_SHM, AIV_SDMA, DEVICE_MTE.
          )pbdoc")
             .def_property(

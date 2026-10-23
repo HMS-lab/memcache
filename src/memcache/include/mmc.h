@@ -55,7 +55,7 @@ typedef struct {
     // Data transfer protocol:
     // 'host_rdma': rdma over host; 'host_urma': rdma over host_ub;
     // 'host_tcp': tcp over host; 'host_shm': shared memory over host;
-    // 'device_rdma': rdma over device; 'device_urma': urma over device; 'device_uboe': uboe over device;
+    // 'device_rdma': rdma over device; 'device_urma': urma over device;
     // 'device_sdma': sdma over device
     // host_rdma, host_urma and host_tcp need hcom; host_shm does not need hcom
     char protocol[PROTOCOL_SIZE];
@@ -66,7 +66,7 @@ typedef struct {
 
     // Data op type between tags, separated by commas, e.g.:
     // "tag1:DEVICE_SDMA:tag1,tag1:DEVICE_RDMA:tag2"
-    // Op type whitelist: DEVICE_SDMA, DEVICE_RDMA, DEVICE_URMA, DEVICE_UBOE,
+    // Op type whitelist: DEVICE_SDMA, DEVICE_RDMA, DEVICE_URMA,
     // HOST_RDMA, HOST_TCP, HOST_URMA, HOST_SHM, AIV_SDMA, DEVICE_MTE
     char tag_op_info[MMC_TAG_OP_INFO_SIZE];
 
@@ -77,7 +77,7 @@ typedef struct {
     // 2048KB/2048K, 200MB/200mb/200m, 2.5GB or 1TB, case-insensitive;
     // the maximum value is 1TB
     // The system automatically calculates and aligns upwards to 2MB
-    // (host_rdma, host_tcp or host_shm) or 1GB (device_sdma, device_rdma, device_urma or device_uboe)
+    // (host_rdma, host_tcp or host_shm) or 1GB (device_sdma, device_rdma or device_urma)
     // In A3 environment all protocol should be aligned to 1GB, otherwise mmc init will fail
     // After alignment, the HBM size and DRAM size cannot both be 0 at the same time
     char dram_size[64];
