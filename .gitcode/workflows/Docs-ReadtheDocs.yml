@@ -1,0 +1,83 @@
+name: Docs-ReadtheDocs
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - ".readthedocs.yaml"
+      - "requirements/mkdocs.txt"
+      - ".gitcode/workflows/Docs-ReadtheDocs.yml"
+
+  workflow_dispatch:
+
+concurrency:
+  enable: true
+  max: 1
+  exceed-action: QUEUE
+  preemption:
+    enable: false
+
+permissions:
+  repository: read
+
+env:
+  RTD_HOST: https://app.readthedocs.org
+  RTD_VERSION: latest
+
+jobs:
+  trigger_rtd_build:
+    name: Trigger Read the Docs build
+    runs-on: [self-hosted, default, x86, cpu=2]
+    # 防止 RTD 侧无响应时任务长期挂起，阻塞 concurrency QUEUE 中的后续触发
+    timeout-minutes: 10
+    env:
+      # Read the Docs 项目 slug：优先读仓库变量 RTD_PROJECT_SLUG，未设置时回退
+      RTD_PROJECT: ${{ vars.RTD_PROJECT_SLUG }}
+    steps:
+      - name: Trigger Read the Docs build
+        env:
+          RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # 与 memfabric_hybrid 仓库做法一致：允许仓库变量未配置时回退到默认 slug
+          RTD_PROJECT="${RTD_PROJECT:-ascend-memcache}"
+
+          if [ -z "${RTD_TOKEN}" ]; then
+            echo "[ERROR] secret RTD_TOKEN 未配置（项目设置 -> Action 秘钥与变量）"
+            exit 1
+          fi
+
+          API="${RTD_HOST}/api/v3/projects/${RTD_PROJECT}"
+          TRIGGER_URL="${API}/versions/${RTD_VERSION}/builds/"
+
+          CODE="000"
+          for i in 1 2 3; do
+            CODE=$(curl -sS --connect-timeout 10 --max-time 60 -o rtd_resp.json -w '%{http_code}' \
+              -X POST "${TRIGGER_URL}" \
+              -H "Authorization: Token ${RTD_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/json" \
+              -d '{}') || CODE="000"
+            echo "trigger HTTP ${CODE} (attempt ${i}/3)"
+            case "${CODE}" in
+              2??) break ;;
+              000|429|500|502|503|504) if [ "${i}" -lt 3 ]; then sleep 10; fi ;;
+              *) break ;;
+            esac
+          done
+
+          case "${CODE}" in
+            2??)
+              echo "Read the Docs build triggered successfully."
+              cat rtd_resp.json || true
+              ;;
+            *)
+              echo "[ERROR] 触发 RTD 构建失败，请检查 RTD_PROJECT 与 RTD_TOKEN"
+              cat rtd_resp.json || true
+              exit 1
+              ;;
+          esac

@@ -4,11 +4,10 @@ site_author: MemCache Team
 site_description: MemCache Hybrid 项目文档
 docs_dir: docs/zh
 repo_url: https://gitcode.com/Ascend/memcache
-repo_name: MemCache
+repo_name: Ascend/memcache
 
 theme:
   name: material
-  custom_dir: docs/mkdocs/overrides
   language: zh
   logo: assets/ascend-logo.png
   favicon: assets/ascend-favicon.ico
@@ -101,6 +100,7 @@ markdown_extensions:
 
 extra_css:
   - mkdocs/stylesheets/extra.css
+  - assets/memcache_title_icon.css
 
 extra_javascript:
   - mkdocs/javascripts/mathjax.js

@@ -1,0 +1,13 @@
+/* 顶部导航栏：站点名文字（logo 后的第二个位置）替换为 memcache 图标 */
+.md-header__topic:first-child {
+    height: 100%;
+    align-items: center;
+}
+
+.md-header__topic:first-child .md-ellipsis {
+    display: inline-block;
+    width: 8rem;
+    height: 1.5rem;
+    font-size: 0;
+    background: url("../source/memcache_icon.png") center / contain no-repeat;
+}
