@@ -132,6 +132,10 @@ MemCache核心能力是提供大容量内存池和高性能的H2D、D2H、**D2RH
 
 ## 📝相关信息
 
+- [贡献指南](./CONTRIBUTING.md)
+
+- [社区行为准则](./CODE_OF_CONDUCT.md)
+
 - [安全声明](./docs/zh/SECURITYNOTE.md)
 
 - [许可证](./LICENSE)

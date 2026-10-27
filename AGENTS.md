@@ -34,7 +34,7 @@
 - 常用配置文件：`config/mmc-meta.conf`、`config/mmc-local.conf`。
 - 安装使用文档：`docs/zh/install_whl.md`、`docs/zh/install_run.md`。
 - 配置项说明：`docs/zh/memcache_config.md`。
-- 常见环境变量：`MMC_META_CONFIG_PATH`、`MMC_LOCAL_CONFIG_PATH`、`MEMCACHE_HYBRID_HOME_PATH`、`LD_LIBRARY_PATH`。
+- 常见环境变量：`docs/zh/environment_variables.md`。
 - 构建时 `PYTHON_HOME` 默认探测 `/usr/local/python3.11` 或 `/usr/local`；UT 会设置 mock CANN 的 `ASCEND_HOME_PATH`。
 
 ## 仓库模块边界
