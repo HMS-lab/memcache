@@ -6,7 +6,7 @@
 High-performance distributed key-value cache
   </h2>
 
-[![Docs](https://img.shields.io/badge/docs-live-brightgreen)](https://gitcode.com/Ascend/memcache)
+[![Docs](https://img.shields.io/badge/docs-live-brightgreen)](https://ascend-memcache.readthedocs.io/zh-cn/latest/)
 [![PyPI](https://img.shields.io/pypi/v/memcache-hybrid)](https://pypi.org/project/memcache-hybrid/#history)
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/memcache-hybrid)](https://pypi.org/project/memcache-hybrid/)
 [![PyPI - Downloads](https://img.shields.io/pypi/dm/memcache-hybrid)](https://pypi.org/project/memcache-hybrid/)
