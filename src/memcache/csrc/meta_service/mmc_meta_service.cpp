@@ -160,6 +160,19 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
         if (rankId != UINT32_MAX) {
             MMC_LOG_WARN("HeartBeat timeout for rank=" << rankId << ", linkId=" << linkId << ", clearing resource");
             (void)ClearResource(rankId);
+            // 配置面已判定该 rank 失效，但数据面链路可能仍是 ESTABLISHED（假死/长 GC 等）。
+            // 只清资源不够：客户端感知不到自己已被摘除，非 etcd 模式也没有 leader-change
+            // 通知可依赖，因此这里主动断开该 rank 的 meta 链路，让其断链回调触发重连，
+            // 并由 retryHandler_ 重放 BM 注册（Mount 幂等，不会重复计量）。
+            MetaNetServerPtr netServer = metaNetServer_;
+            if (netServer != nullptr) {
+                Result releaseRet = netServer->ReleasePeer(rankId);
+                if (releaseRet == MMC_NOT_INITIALIZED) {
+                    MMC_LOG_INFO("Release meta link of rank=" << rankId << " is not supported by current libmf_smem");
+                } else if (releaseRet != MMC_OK) {
+                    MMC_LOG_WARN("Release meta link of rank=" << rankId << " failed, ret=" << releaseRet);
+                }
+            }
         } else {
             MMC_LOG_DEBUG("HeartBeat timeout for unknown linkId=" << linkId);
         }

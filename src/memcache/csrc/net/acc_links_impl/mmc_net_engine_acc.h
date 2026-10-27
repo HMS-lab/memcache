@@ -33,6 +33,7 @@ public:
 
     Result ConnectToPeer(uint32_t peerId, const std::string &peerIp, uint16_t port, NetLinkPtr &newLink, bool isForce,
                          bool ignoreRankId = false) override;
+    Result ReleasePeer(uint32_t peerId) override;
 
     Result Call(uint32_t targetId, int16_t opCode, const char *reqData, uint32_t reqDataLen, char **respData,
                 uint32_t &respDataLen, int32_t timeoutInSecond) override;

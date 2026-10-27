@@ -37,6 +37,7 @@ using smemAccServerSetSentHandlerFunc = void (*)(smem_acc_server_t, int16_t, sme
 using smemAccServerSetLinkBrokenHandlerFunc = void (*)(smem_acc_server_t, smem_acc_link_broken_cb, void *);
 using smemAccServerConnectFunc = int32_t (*)(smem_acc_server_t, const char *, uint16_t,
                                              const smem_acc_connect_request_t *, uint32_t, smem_acc_link_t *);
+using smemAccServerReleaseLinkFunc = int32_t (*)(smem_acc_server_t, smem_acc_link_t);
 using smemAccHttpServerRegisterHandlerFunc = int32_t (*)(smem_acc_server_t, uint8_t, const char *, smem_acc_http_cb,
                                                          void *);
 using smemAccGetClusterStatusFunc = int32_t (*)(char *, uint32_t, uint32_t *);
@@ -155,6 +156,19 @@ public:
         return gSmemAccServerConnect(server, ip, port, request, retries, link);
     }
 
+    /**
+     * @brief 释放一条已判定失效的服务端链路（走 acc 标准断链清理后关闭 fd），
+     *        对端据此感知断链并重连。
+     * @return 0 成功；旧版 libmf_smem.so 未导出该符号时返回 MMC_NOT_INITIALIZED
+     */
+    static int32_t ReleaseServerLink(smem_acc_server_t server, smem_acc_link_t link)
+    {
+        if (gSmemAccServerReleaseLink == nullptr) {
+            return MMC_NOT_INITIALIZED;
+        }
+        return gSmemAccServerReleaseLink(server, link);
+    }
+
     static int32_t RegisterHttpHandler(smem_acc_server_t server, uint8_t method, const char *path,
                                        smem_acc_http_cb callback, void *context)
     {
@@ -236,6 +250,7 @@ private:
     static smemAccServerSetSentHandlerFunc gSmemAccServerSetSentHandler;
     static smemAccServerSetLinkBrokenHandlerFunc gSmemAccServerSetLinkBrokenHandler;
     static smemAccServerConnectFunc gSmemAccServerConnect;
+    static smemAccServerReleaseLinkFunc gSmemAccServerReleaseLink;
     static smemAccHttpServerRegisterHandlerFunc gSmemAccHttpServerRegisterHandler;
     static smemAccGetClusterStatusFunc gSmemAccGetClusterStatus;
     static smemAccLinkRetainFunc gSmemAccLinkRetain;

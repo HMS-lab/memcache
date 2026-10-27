@@ -33,6 +33,22 @@ public:
         return engine_->Call(rankId, req.msgId, req, resp, timeoutInSecond);
     }
 
+    /**
+     * @brief Release the meta link to a rank which has been judged dead by an external liveness source
+     *        (config store heartbeat timeout) but whose meta link still looks established. The peer
+     *        then observes the disconnection, reconnects and replays its BM registration.
+     *
+     * @param rankId       [in] rank id of peer
+     * @return 0 if released or no link exists
+     */
+    Result ReleasePeer(uint32_t rankId)
+    {
+        if (engine_ == nullptr) {
+            return MMC_NOT_INITIALIZED;
+        }
+        return engine_->ReleasePeer(rankId);
+    }
+
 private:
     Result HandleNewLink(const NetLinkPtr &link);
 

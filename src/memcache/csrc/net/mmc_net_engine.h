@@ -179,6 +179,26 @@ public:
                                  bool isForce, bool ignoreRankId = false) = 0;
 
     /**
+     * @brief Release the link to a peer which has been judged dead by an external liveness source
+     *        (e.g. config store heartbeat timeout) while its data-plane link still looks established.
+     *
+     * The link is torn down through the standard broken-link path, so the peer observes the
+     * disconnection and reconnects (and replays its registration). Releasing a peer without a link
+     * is not an error, so the call is idempotent.
+     *
+     * The default implementation is a no-op: engines that do not track peer links have nothing to
+     * release.
+     *
+     * @param peerId       [in] id of peer
+     * @return 0 if released or no link exists
+     */
+    virtual Result ReleasePeer(uint32_t peerId)
+    {
+        (void)peerId;
+        return MMC_OK;
+    }
+
+    /**
      * @brief Register callback function of request received
      *
      * @param opCode       [in] op code for the handler

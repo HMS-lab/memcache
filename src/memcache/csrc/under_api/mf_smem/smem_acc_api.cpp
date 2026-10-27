@@ -37,6 +37,7 @@ smemAccServerSetRequestHandlerFunc MFAccApi::gSmemAccServerSetRequestHandler = n
 smemAccServerSetSentHandlerFunc MFAccApi::gSmemAccServerSetSentHandler = nullptr;
 smemAccServerSetLinkBrokenHandlerFunc MFAccApi::gSmemAccServerSetLinkBrokenHandler = nullptr;
 smemAccServerConnectFunc MFAccApi::gSmemAccServerConnect = nullptr;
+smemAccServerReleaseLinkFunc MFAccApi::gSmemAccServerReleaseLink = nullptr;
 smemAccHttpServerRegisterHandlerFunc MFAccApi::gSmemAccHttpServerRegisterHandler = nullptr;
 smemAccLinkRetainFunc MFAccApi::gSmemAccLinkRetain = nullptr;
 smemAccLinkReleaseFunc MFAccApi::gSmemAccLinkRelease = nullptr;
@@ -72,6 +73,9 @@ Result MFAccApi::LoadAllSymbols()
     DL_LOAD_SYM(gSmemAccServerSetLinkBrokenHandler, smemAccServerSetLinkBrokenHandlerFunc, gSmemHandle,
                 "smem_acc_server_set_link_broken_handler");
     DL_LOAD_SYM(gSmemAccServerConnect, smemAccServerConnectFunc, gSmemHandle, "smem_acc_server_connect");
+    // 可选符号：旧版 libmf_smem.so 未导出该接口，缺失时按“不支持”处理，
+    // 不影响其余能力
+    DlLoadSymOptional(gSmemAccServerReleaseLink, gSmemHandle, "smem_acc_server_release_link");
     DL_LOAD_SYM(gSmemAccHttpServerRegisterHandler, smemAccHttpServerRegisterHandlerFunc, gSmemHandle,
                 "smem_acc_http_server_register_handler");
     DL_LOAD_SYM(gSmemAccLinkRetain, smemAccLinkRetainFunc, gSmemHandle, "smem_acc_link_retain");
@@ -133,6 +137,7 @@ void MFAccApi::ClearAllSymbols()
     gSmemAccServerSetSentHandler = nullptr;
     gSmemAccServerSetLinkBrokenHandler = nullptr;
     gSmemAccServerConnect = nullptr;
+    gSmemAccServerReleaseLink = nullptr;
     gSmemAccHttpServerRegisterHandler = nullptr;
     gSmemAccLinkRetain = nullptr;
     gSmemAccLinkRelease = nullptr;

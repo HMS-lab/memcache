@@ -255,6 +255,14 @@ int32_t AccTcpServer::ConnectToPeerServer(const std::string &ip, uint16_t port, 
     return ret;
 }
 
+int32_t AccTcpServer::ReleaseLink(const AccTcpLinkComplexPtr &link)
+{
+    if (link == nullptr) {
+        return mmc::MMC_INVALID_PARAM;
+    }
+    return mmc::MFAccApi::ReleaseServerLink(handle_, link->Handle());
+}
+
 void AccTcpServer::RegisterNewRequestHandler(int16_t type, const AccNewReqHandler &handler)
 {
     if (type < MIN_MSG_TYPE || type >= MAX_MSG_TYPE || !handler || requestHandlers_[type]) {

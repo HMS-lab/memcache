@@ -98,6 +98,10 @@ public:
     uint64_t UpCtx() const;
     int32_t NonBlockSend(int16_t type, int16_t result, uint32_t sequence, const AccDataBufferPtr &data,
                          const AccDataBufferPtr &callbackContext) const;
+    smem_acc_link_t Handle() const
+    {
+        return handle_;
+    }
 
 private:
     smem_acc_link_t handle_{nullptr};
@@ -157,6 +161,7 @@ public:
     void RegisterLinkBrokenHandler(const AccLinkBrokenHandler &handler);
     void RegisterNewLinkHandler(const AccNewLinkHandler &handler);
     void RegisterDecryptHandler(const AccDecryptHandler &handler);
+    int32_t ReleaseLink(const AccTcpLinkComplexPtr &link);
     int32_t LoadDynamicLib(const std::string &path);
 
 private:

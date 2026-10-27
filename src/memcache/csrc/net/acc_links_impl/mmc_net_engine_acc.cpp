@@ -588,6 +588,28 @@ Result NetEngineAcc::HandleLinkBroken(const TcpLinkPtr &link) const
     return ret;
 }
 
+Result NetEngineAcc::ReleasePeer(uint32_t peerId)
+{
+    MMC_ASSERT_LOG_AND_RETURN(server_ != nullptr, "server_ is nullptr", MMC_NOT_INITIALIZED);
+    MMC_ASSERT_LOG_AND_RETURN(peerLinkMap_ != nullptr, "peerLinkMap_ is nullptr", MMC_NOT_INITIALIZED);
+
+    NetLinkAccPtr linkAcc = nullptr;
+    if (!peerLinkMap_->Find(peerId, linkAcc) || linkAcc.Get() == nullptr) {
+        /* 幂等：链路已经不在（真实断链已处理过），无需重复释放 */
+        MMC_LOG_INFO("ReleasePeer: no link found for peer " << peerId);
+        return MMC_OK;
+    }
+    const auto &tcpLink = linkAcc->RealLink();
+    MMC_ASSERT_LOG_AND_RETURN(tcpLink.Get() != nullptr, "tcpLink is nullptr", MMC_INVALID_PARAM);
+
+    MMC_LOG_WARN("Release link of peer " << peerId << ", linkId: " << tcpLink->Id()
+                                         << ", peer will reconnect and replay its registration");
+    // 走 acc 标准断链清理（回调 HandleLinkBroken -> peerLinkMap_ 摘除）后再关闭 fd，
+    // 让对端感知断链。
+    // 不能只关 fd：peerLinkMap_ 会残留旧链路，同 rankId 的重连因键冲突无法注册新链路。
+    return server_->ReleaseLink(tcpLink);
+}
+
 Result NetEngineAcc::ConnectToPeer(uint32_t peerId, const std::string &peerIp, uint16_t port, NetLinkPtr &newLink,
                                    bool isForce, bool ignoreRankId)
 {
