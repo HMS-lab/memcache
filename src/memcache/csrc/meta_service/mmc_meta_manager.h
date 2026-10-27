@@ -184,6 +184,14 @@ public:
         removeThreadPool_ = MmcMakeRef<MmcThreadPool>("remove_pool", REMOVE_POOL_BASE);
         MMC_ASSERT_LOG_AND_RETURN(removeThreadPool_ != nullptr, "removeThreadPool_ is nullptr", MMC_MALLOC_FAILED);
         MMC_RETURN_ERROR(removeThreadPool_->Start(), "remove thread pool start failed");
+        // EraseIf 专用线程池：与 shard 数量对齐，上限 kShardLruPoolMax（可按需调整）。
+        // 断链清理会一次锁住全部 shard，线程数与 shard 数一致时收益最大。
+        constexpr uint32_t kShardLruPoolMax = 32;
+        shardLruThreadPool_ =
+            MmcMakeRef<MmcThreadPool>("shardlru_pool", std::min<uint32_t>(lruShardCount_, kShardLruPoolMax));
+        MMC_ASSERT_LOG_AND_RETURN(shardLruThreadPool_ != nullptr, "shardLruThreadPool_ is nullptr", MMC_MALLOC_FAILED);
+        MMC_RETURN_ERROR(shardLruThreadPool_->Start(), "shardlru thread pool start failed");
+        metaContainer_->SetEraseIfPool(shardLruThreadPool_);
         // P4: 注册 FreeBlobs 的 SSD 预释放回调，在释放 SSD blob 前通过 RPC 删除远端数据
         MmcMemBlob::ssdPreFreeHandler_ = [this](const std::string &key, const MmcMemBlobDesc &desc) {
             threadPool_->Enqueue([this, key, desc]() {
@@ -204,7 +212,12 @@ public:
         if (!started_) {
             return;
         }
+        // 先断开容器对线程池的引用，再销毁线程池：避免停止阶段的 EraseIf 走并行分支拿无效 future
+        if (metaContainer_ != nullptr) {
+            metaContainer_->SetEraseIfPool(nullptr);
+        }
         threadPool_->Destroy();
+        shardLruThreadPool_->Destroy();
         rewarmThreadPool_->Destroy();
         removeThreadPool_->Destroy();
         MmcMemBlob::ssdPreFreeHandler_ = nullptr;
@@ -272,7 +285,7 @@ public:
      * @brief unmount the mempool contributor at given location
      * @param loc          [in] location of the mem pool contributor to be unmounted
      */
-    Result Unmount(const MmcLocation &loc);
+    Result Unmount(const MmcLocation &loc, bool deadRank = false);
 
     /**
      * @brief Clean SSD blobs of a rank from the meta container
@@ -552,6 +565,7 @@ private:
     Result RebuildMeta(std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList);
 
     Result RemoveBlobs(uint32_t rank, MediaType mediaType);
+    Result RemoveBlobsForDeadRank(uint32_t rank, MediaType mediaType);
 
     bool CheckActiveLease(const std::string &key, const MmcMemObjMetaPtr &meta, const MmcBlobFilterPtr &filter);
 
@@ -833,6 +847,8 @@ private:
     MmcMetaChangeCallbacks changeCallbacks_;
     MmcThreadPoolPtr rewarmThreadPool_;
     MmcThreadPoolPtr removeThreadPool_;
+    // EraseIf 并行执行专用池：线程数按 shard 数对齐（上限 kShardLruPoolMax）
+    MmcThreadPoolPtr shardLruThreadPool_;
     // 由 MetaService 冷启动配置统一设置。
     SsdMetadataMode ssdMetadataMode_{MMC_SSD_METADATA_AGGREGATED};
     std::unordered_set<uint32_t> ssdEnabledRanks_;

@@ -17,6 +17,7 @@
 #include "mmc_blob_allocator.h"
 #include "mmc_def.h"
 #include "mmc_ref.h"
+#include "mmc_thread_pool.h"
 
 namespace ock {
 namespace mmc {
@@ -37,6 +38,11 @@ public:
     virtual Result EraseIfEmpty(const Key &key, std::function<bool(const Value &)> isEmptyFunc) = 0;
     virtual Result EraseAll(std::function<void(const Key &, const Value &)> removeFunc) = 0;
     virtual void EraseIf(std::function<bool(const Key &, const Value &)> matchFunc) = 0;
+    // EraseIf 并行执行所用线程池，由 meta manager 在启动时注入；未注入时退化为串行。
+    virtual void SetEraseIfPool(MmcThreadPoolPtr pool)
+    {
+        (void)pool;
+    }
     virtual void IterateIf(std::function<bool(const Key &, const Value &)> matchFunc,
                            std::map<Key, Value> &matchedValues) = 0;
     virtual void GetAllKeys(std::vector<Key> &keys) = 0;

@@ -199,6 +199,9 @@ enum TP_MMC_MOD {
     TP_MMC_META_LEASE_TIMEOUT_COUNT,
     TP_MMC_META_FREE_BLOB,
     TP_MMC_META_FORCE_EVICT_RELEASE,
+    // 断链清理耗时：存活节点 / 死节点两条 blob 摘除路径
+    TP_MMC_META_REMOVE_BLOBS,
+    TP_MMC_META_REMOVE_BLOBS_DEAD,
 
     // 携带值语义复用：以 internalFragBytes (字节) 替代时间差槽位，tracer 聚合出内部碎片事件的次数/avg/max 分布
     TP_MMC_ALLOC_FRAG,

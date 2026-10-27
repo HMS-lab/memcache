@@ -282,7 +282,7 @@ Result MmcMetaService::BmUnregister(uint32_t rank, uint16_t mediaType)
     return BmUnregisterWithoutLock(rank, mediaType);
 }
 
-Result MmcMetaService::BmUnregisterWithoutLock(uint32_t rank, uint16_t mediaType)
+Result MmcMetaService::BmUnregisterWithoutLock(uint32_t rank, uint16_t mediaType, bool deadRank)
 {
     if (!started_) {
         MMC_LOG_ERROR("MetaService (" << name_ << ") is not started");
@@ -290,7 +290,8 @@ Result MmcMetaService::BmUnregisterWithoutLock(uint32_t rank, uint16_t mediaType
     }
 
     MmcLocation loc{rank, static_cast<MediaType>(mediaType)};
-    MMC_RETURN_ERROR(metaMgrProxy_->Unmount(loc), "Unmount loc { " << rank << ", " << mediaType << " } failed");
+    MMC_RETURN_ERROR(metaMgrProxy_->Unmount(loc, deadRank),
+                     "Unmount loc { " << rank << ", " << mediaType << " } failed");
     MMC_LOG_DEBUG("Unmount loc: " << loc << " finish");
     if (rankMediaTypeMap_.find(rank) != rankMediaTypeMap_.end() &&
         rankMediaTypeMap_[rank].find(mediaType) != rankMediaTypeMap_[rank].end()) {
@@ -326,17 +327,21 @@ Result MmcMetaService::ClearResource(uint32_t rank)
         mediaTypes = it->second;
     }
 
-    for (const auto &mediaType : mediaTypes) {
-        MMC_LOG_TRACE("Clear resource {rank, mediaType} -> { " << rank << ", " << mediaType << " }");
-        (void)BmUnregisterWithoutLock(rank, mediaType);
-    }
-
-    // SSD 数据由 UBS IO 管理，未注册为 allocator segment；断链时需单独清理容器中的 SSD blob
+    // SSD 数据由 UBS IO 管理，未注册为 allocator segment；断链时需单独清理容器中的 SSD blob。
+    // 必须在下面的 media 反注册之前执行：Unmount 会无条件抹掉 ssdEnabledRanks_，
+    // 若放在之后，CleanSsdBlobs 里的 IsSsdAvailable 恒为 false，SSD blob 元数据将永久残留。
+    // 注意：CleanSsdBlobs 内部会调用 RemoveBlobs -> EraseIf 做全表扫描，key 规模大时非常慢，
+    // 其内部已按 rank 是否注册过 storage 短路：未开 SSD 时这里几乎是零开销。
     if (metaMgrProxy_ != nullptr) {
         Result ret = metaMgrProxy_->CleanSsdBlobs(rank);
         if (ret != MMC_OK) {
             MMC_LOG_WARN("Clean SSD blobs failed for rank=" << rank << ", ret=" << ret);
         }
+    }
+
+    for (const auto &mediaType : mediaTypes) {
+        MMC_LOG_TRACE("Clear resource {rank, mediaType} -> { " << rank << ", " << mediaType << " }");
+        (void)BmUnregisterWithoutLock(rank, mediaType, true);
     }
     // 断链后客户端已不在，清除其上报的指标，ssd_used 等聚合立即归零，不再保留旧值
     MmcClientMetricStore::GetInstance().Remove(rank);
@@ -364,18 +369,19 @@ Result MmcMetaService::ClearAllResources()
         }
         std::unordered_set<uint16_t> mediaTypes = it->second;
 
+        // 同 ClearResource：SSD 清理必须在 Unmount 抹掉 ssdEnabledRanks_ 之前执行
+        if (metaMgrProxy_ != nullptr) {
+            Result ret = metaMgrProxy_->CleanSsdBlobs(rank);
+            if (ret != MMC_OK) {
+                MMC_LOG_WARN("Clean SSD blobs failed for rank=" << rank << ", ret=" << ret);
+            }
+        }
+
         for (const auto &mediaType : mediaTypes) {
             Result ret = BmUnregisterWithoutLock(rank, mediaType);
             if (ret != MMC_OK) {
                 MMC_LOG_WARN("ClearAllResources unmount failed, rank=" << rank << ", mediaType=" << mediaType
                                                                        << ", ret=" << ret);
-            }
-        }
-
-        if (metaMgrProxy_ != nullptr) {
-            Result ret = metaMgrProxy_->CleanSsdBlobs(rank);
-            if (ret != MMC_OK) {
-                MMC_LOG_WARN("Clean SSD blobs failed for rank=" << rank << ", ret=" << ret);
             }
         }
         MmcClientMetricStore::GetInstance().Remove(rank);

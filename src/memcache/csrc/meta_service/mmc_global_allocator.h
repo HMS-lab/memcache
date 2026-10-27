@@ -242,6 +242,21 @@ public:
         return MMC_OK;
     }
 
+    // 死节点清理：整段丢弃分配器，不再校验 allocatedSize_==0
+    Result ForceUnmount(const MmcLocation &loc)
+    {
+        globalAllocLock_.LockWrite();
+        auto iter = allocators_.find(loc);
+        if (iter == allocators_.end()) {
+            globalAllocLock_.UnlockWrite();
+            return MMC_OK;
+        }
+        allocators_.erase(iter);
+        globalAllocLock_.UnlockWrite();
+        MMC_LOG_WARN("ForceUnmount bm for dead rank, loc: " << loc);
+        return MMC_OK;
+    }
+
     Result BuildFromBlobs(const MmcLocation &location, std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList)
     {
         globalAllocLock_.LockRead();
@@ -262,6 +277,16 @@ public:
         Result ret = allocator->BuildFromBlobs(blobList);
         globalAllocLock_.UnlockRead();
         return ret;
+    }
+
+    // 判断某个 (rank, media) 是否还有已分配的 blob；用于断链清理前的短路判断。
+    bool HasAllocatedBlobs(uint32_t rank, MediaType media)
+    {
+        globalAllocLock_.LockRead();
+        auto iter = allocators_.find(MmcLocation{rank, media});
+        bool has = (iter != allocators_.end() && iter->second != nullptr && !iter->second->CanUnmount());
+        globalAllocLock_.UnlockRead();
+        return has;
     }
 
     void GetUsedInfo(uint64_t (&totalSize)[MEDIA_NONE], uint64_t (&usedSize)[MEDIA_NONE])

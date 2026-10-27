@@ -155,11 +155,11 @@ public:
         return ret;
     }
 
-    Result Unmount(const MmcLocation &loc)
+    Result Unmount(const MmcLocation &loc, bool deadRank = false)
     {
         MmcMetaMetricManager &metricManager = MmcMetaMetricManager::GetInstance();
         metricManager.IncrementRequestCounter(RestMetricType::UNMOUNT, loc.rank_);
-        Result ret = metaMangerPtr_->Unmount(loc);
+        Result ret = metaMangerPtr_->Unmount(loc, deadRank);
         IncrementResultCounter(metricManager, RestMetricType::UNMOUNT, ret, loc.rank_);
         return ret;
     }

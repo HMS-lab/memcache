@@ -1911,14 +1911,21 @@ Result MmcMetaManager::RebuildMeta(std::vector<std::pair<std::string, MmcMemBlob
 
 Result MmcMetaManager::RemoveBlobs(uint32_t rank, MediaType mediaType)
 {
+    // 该 (rank, media) 已无任何已分配 blob 时直接返回：EraseIf 是全表扫描，
+    // 0G/空 rank 断链不应为此付出秒级开销。SSD 不走 allocator，由 CleanSsdBlobs 自己短路。
+    if (mediaType != MEDIA_SSD && !globalAllocator_->HasAllocatedBlobs(rank, mediaType)) {
+        MMC_LOG_DEBUG("RemoveBlobs skip, rank=" << rank << " media=" << static_cast<int>(mediaType)
+                                                << " has no allocated blob");
+        return MMC_OK;
+    }
     MmcBlobFilterPtr filter = MmcMakeRef<MmcBlobFilter>(rank, mediaType, NONE);
     if (filter == nullptr) {
         MMC_LOG_ERROR("Failed to create blob filter for rank=" << rank << ", media=" << static_cast<int>(mediaType));
         return MMC_MALLOC_FAILED;
     }
 
-    uint64_t freedBlobs = 0;
-    uint64_t erasedKeys = 0;
+    std::atomic<uint64_t> freedBlobs{0};
+    std::atomic<uint64_t> erasedKeys{0};
     auto matchFunc = [this, &filter, &freedBlobs, &erasedKeys](const std::string &key,
                                                                const MmcMemObjMetaPtr &objMeta) -> bool {
         if (objMeta == nullptr) {
@@ -1938,25 +1945,67 @@ Result MmcMetaManager::RemoveBlobs(uint32_t rank, MediaType mediaType)
         return shouldErase;
     };
 
+    TP_TRACE_BEGIN(TP_MMC_META_REMOVE_BLOBS);
     metaContainer_->EraseIf(matchFunc);
+    TP_TRACE_END(TP_MMC_META_REMOVE_BLOBS, MMC_OK);
     KvEventCleared(rank, mediaType);
-    MMC_LOG_TRACE("Remove blobs for rank=" << rank << ", media=" << static_cast<int>(mediaType)
-                                           << " done, freedBlobs=" << freedBlobs << ", erasedKeys=" << erasedKeys);
+    MMC_LOG_TRACE("Remove blobs for rank=" << rank << ", media=" << static_cast<int>(mediaType) << " done, freedBlobs="
+                                           << freedBlobs.load() << ", erasedKeys=" << erasedKeys.load());
     return MMC_OK;
 }
 
-Result MmcMetaManager::Unmount(const MmcLocation &loc)
+Result MmcMetaManager::RemoveBlobsForDeadRank(uint32_t rank, MediaType mediaType)
+{
+    if (mediaType != MEDIA_SSD && !globalAllocator_->HasAllocatedBlobs(rank, mediaType)) {
+        MMC_LOG_DEBUG("RemoveBlobsForDeadRank skip, rank=" << rank);
+        return MMC_OK;
+    }
+    MmcBlobFilterPtr filter = MmcMakeRef<MmcBlobFilter>(rank, mediaType, NONE);
+    if (filter == nullptr) {
+        MMC_LOG_ERROR("Failed to create blob filter for rank=" << rank << ", media=" << static_cast<int>(mediaType));
+        return MMC_MALLOC_FAILED;
+    }
+
+    std::atomic<uint64_t> droppedBlobs{0};
+    std::atomic<uint64_t> erasedKeys{0};
+    auto matchFunc = [this, &filter, &droppedBlobs, &erasedKeys](const std::string &key,
+                                                                 const MmcMemObjMetaPtr &objMeta) -> bool {
+        if (objMeta == nullptr) {
+            return false;
+        }
+        std::unique_lock<std::mutex> guard(objMeta->Mutex());
+        auto blobs = objMeta->DetachBlobs(filter);
+        guard.unlock();
+        // 死节点：不迁移状态机、不摘备份、不归还分配器（整段随 ForceUnmount 丢弃）
+        droppedBlobs += blobs.size();
+        blobs.clear();
+        guard.lock();
+        const bool shouldErase = (objMeta->NumBlobs() == 0);
+        if (shouldErase) {
+            ++erasedKeys;
+        }
+        return shouldErase;
+    };
+
+    TP_TRACE_BEGIN(TP_MMC_META_REMOVE_BLOBS_DEAD);
+    metaContainer_->EraseIf(matchFunc);
+    TP_TRACE_END(TP_MMC_META_REMOVE_BLOBS_DEAD, MMC_OK);
+    KvEventCleared(rank, mediaType);
+    return MMC_OK;
+}
+
+Result MmcMetaManager::Unmount(const MmcLocation &loc, bool deadRank)
 {
     Result ret = globalAllocator_->Stop(loc);
     if (ret != MMC_OK) {
         return ret;
     }
-    ret = RemoveBlobs(loc.rank_, loc.mediaType_);
+    ret = deadRank ? RemoveBlobsForDeadRank(loc.rank_, loc.mediaType_) : RemoveBlobs(loc.rank_, loc.mediaType_);
     const Result removeBlobsRet = ret;
     if (removeBlobsRet != MMC_OK) {
         MMC_LOG_ERROR("Remove blobs failed for loc " << loc << ", ret=" << removeBlobsRet);
     }
-    ret = globalAllocator_->Unmount(loc);
+    ret = deadRank ? globalAllocator_->ForceUnmount(loc) : globalAllocator_->Unmount(loc);
     if (ret != MMC_OK) {
         MMC_LOG_ERROR("global allocator unmount failed for loc " << loc << ", ret=" << ret);
         return ret;
@@ -2062,6 +2111,12 @@ Result MmcMetaManager::BatchLookupStorage(const std::vector<std::string> &keys, 
 
 Result MmcMetaManager::CleanSsdBlobs(uint32_t rank)
 {
+    // 未注册 storage 的 rank 不可能持有 SSD blob；RemoveBlobs 内部是 EraseIf 全表扫描，
+    // key 规模大时单次可达数十秒，这里必须短路，否则 0G rank 断链也会扫全表。
+    if (!IsSsdAvailable(rank)) {
+        MMC_LOG_DEBUG("CleanSsdBlobs skip, rank=" << rank << " has no SSD registered");
+        return MMC_OK;
+    }
     return RemoveBlobs(rank, MEDIA_SSD);
 }
 

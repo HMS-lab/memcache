@@ -14,6 +14,11 @@
 #define MF_HYBRID_MMC_META_CONTAINER_SHARDED_LRU_H
 
 #include <algorithm>
+#include <atomic>
+#include <condition_variable>
+#include <future>
+#include <memory>
+#include <mutex>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -76,10 +81,41 @@ public:
         return MMC_OK;
     }
 
+    void SetEraseIfPool(MmcThreadPoolPtr pool) override
+    {
+        eraseIfPool_ = std::move(pool);
+    }
+
     void EraseIf(std::function<bool(const Key &, const Value &)> matchFunc) override
     {
-        for (size_t i = 0; i < shards_.size(); ++i) {
-            shards_[i]->EraseIf(matchFunc);
+        const size_t shardCount = shards_.size();
+        if (shardCount == 0) {
+            return;
+        }
+        if (eraseIfPool_ == nullptr) {
+            for (size_t i = 0; i < shardCount; ++i) {
+                shards_[i]->EraseIf(matchFunc);
+            }
+            return;
+        }
+
+        std::vector<std::future<void>> futures;
+        futures.reserve(shardCount);
+        for (size_t i = 0; i < shardCount; ++i) {
+            auto future = eraseIfPool_->Enqueue([this, i, &matchFunc]() { shards_[i]->EraseIf(matchFunc); });
+            if (!future.valid()) {
+                // 线程池已停止（Enqueue 返回无效 future）：当前 shard 退化为串行执行
+                shards_[i]->EraseIf(matchFunc);
+                continue;
+            }
+            futures.emplace_back(std::move(future));
+        }
+        for (auto &future : futures) {
+            try {
+                future.get();
+            } catch (const std::exception &e) {
+                MMC_LOG_WARN("EraseIf shard task failed: " << e.what());
+            }
         }
     }
 
@@ -464,6 +500,7 @@ private:
 
     uint64_t shardSelectShift_;
     std::vector<std::unique_ptr<MmcMetaContainerLRU<Key, Value>>> shards_;
+    MmcThreadPoolPtr eraseIfPool_;
 };
 
 template class MmcMetaContainerShardedLRU<std::string, MmcMemObjMetaPtr>;
