@@ -202,6 +202,11 @@ enum TP_MMC_MOD {
 
     // 携带值语义复用：以 internalFragBytes (字节) 替代时间差槽位，tracer 聚合出内部碎片事件的次数/avg/max 分布
     TP_MMC_ALLOC_FRAG,
+
+    // SyncCall 打点：batch get 元数据 RPC / batch put alloc RPC / batch malloc RPC 的耗时
+    TP_MMC_CLIENT_BATCH_GET_RPC,
+    TP_MMC_CLIENT_BATCH_PUT_RPC,
+    TP_MMC_CLIENT_BATCH_MALLOC_RPC,
 };
 
 #endif

@@ -412,7 +412,10 @@ Result MmcClientDefault::BatchPut(const std::vector<std::string> &keys, const st
         request.options_.emplace_back(std::move(tmpAllocOptions));
     }
     BatchAllocResponse allocResponse{};
-    MMC_RETURN_ERROR(metaNetClient_->SyncCall(request, allocResponse, rpcRetryTimeOut_), "batch put alloc failed");
+    TP_TRACE_BEGIN(TP_MMC_CLIENT_BATCH_PUT_RPC);
+    auto allocRpcRet = metaNetClient_->SyncCall(request, allocResponse, rpcRetryTimeOut_);
+    TP_TRACE_END(TP_MMC_CLIENT_BATCH_PUT_RPC, allocRpcRet == MMC_OK ? 0 : 1);
+    MMC_RETURN_ERROR(allocRpcRet, "batch put alloc failed");
     // check alloc result
     if (keys.size() != allocResponse.blobs_.size() || keys.size() != allocResponse.numBlobs_.size() ||
         keys.size() != allocResponse.results_.size()) {
@@ -557,8 +560,10 @@ Result MmcClientDefault::BatchGet(const std::vector<std::string> &keys, const st
     const uint64_t operateId = GenerateOperateId(rankId_);
     BatchGetRequest request{keys, rankId_, operateId};
     BatchAllocResponse response;
-    MMC_RETURN_ERROR(metaNetClient_->SyncCall(request, response, rpcRetryTimeOut_),
-                     "client " << name_ << " batch get failed");
+    TP_TRACE_BEGIN(TP_MMC_CLIENT_BATCH_GET_RPC);
+    auto getMetaRpcRet = metaNetClient_->SyncCall(request, response, rpcRetryTimeOut_);
+    TP_TRACE_END(TP_MMC_CLIENT_BATCH_GET_RPC, getMetaRpcRet == MMC_OK ? 0 : 1);
+    MMC_RETURN_ERROR(getMetaRpcRet, "client " << name_ << " batch get failed");
     // check rsp meta
     if (response.blobs_.size() != keys.size() || response.numBlobs_.size() != keys.size()) {
         MMC_LOG_ERROR("client " << name_ << " batch get response size mismatch: expected " << keys.size()
@@ -1354,7 +1359,10 @@ Result MmcClientDefault::BatchMalloc(const std::vector<std::string> &keys, const
         request.options_.emplace_back(std::move(tmpAllocOptions));
     }
     BatchAllocResponse allocResponse{};
-    MMC_RETURN_ERROR(metaNetClient_->SyncCall(request, allocResponse, rpcRetryTimeOut_), "batch put alloc failed");
+    TP_TRACE_BEGIN(TP_MMC_CLIENT_BATCH_MALLOC_RPC);
+    auto allocRpcRet = metaNetClient_->SyncCall(request, allocResponse, rpcRetryTimeOut_);
+    TP_TRACE_END(TP_MMC_CLIENT_BATCH_MALLOC_RPC, allocRpcRet == MMC_OK ? 0 : 1);
+    MMC_RETURN_ERROR(allocRpcRet, "batch put alloc failed");
     // check alloc result
     if (keys.size() != allocResponse.blobs_.size() || keys.size() != allocResponse.numBlobs_.size() ||
         keys.size() != allocResponse.results_.size()) {
