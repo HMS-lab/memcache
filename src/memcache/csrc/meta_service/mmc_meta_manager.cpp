@@ -767,6 +767,9 @@ void MmcMetaManager::RewarmRankGroup(uint32_t rank, const std::vector<size_t> &i
         if (classified.lowerBlob == nullptr) {
             if (!IsSsdMetadataSeparated()) {
                 MMC_LOG_WARN("rewarm: source blob lost for key=" << context.keys[index] << ", rank=" << rank);
+                RollbackEntry(context.keys[index], memObj, nullptr, classified.pendingBlob, context.opRankId,
+                              context.opSeq);
+                MmcMetaMetricManager::GetInstance().IncrementRewarmFailCounter(rank);
                 continue;
             }
         }

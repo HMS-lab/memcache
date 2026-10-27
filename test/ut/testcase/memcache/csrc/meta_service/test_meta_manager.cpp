@@ -17,6 +17,7 @@
 #include <thread>
 #include "gtest/gtest.h"
 #include "mmc_meta_manager.h"
+#include "mmc_meta_mgr_proxy.h"
 #include "mmc_def.h"
 #include "mmc_ref.h"
 
@@ -63,6 +64,37 @@ protected:
                                    MediaType media)
     {
         return mgr->EvictCallBackFunction(key, object, media);
+    }
+    static MmcMemBlobPtr AddRewarmTestBlob(MmcMetaManagerPtr &mgr, const std::string &key,
+                                           const MmcMemObjMetaPtr &object, MediaType media, BlobState state)
+    {
+        constexpr uint32_t blobCount = 1U;
+        constexpr uint32_t rank = 0U;
+        std::vector<MmcMemBlobPtr> blobs;
+        const AllocOptions options{SIZE_32K, blobCount, media, {rank}, ALLOC_FORCE_BY_RANK};
+        if (mgr->globalAllocator_->Alloc(options, blobs) != MMC_OK || blobs.empty()) {
+            ADD_FAILURE() << "cannot allocate test blob for " << key;
+            return nullptr;
+        }
+        const auto &blob = blobs.front();
+        EXPECT_EQ(object->AddBlob(blob), MMC_OK);
+        if (state == READABLE) {
+            EXPECT_EQ(blob->UpdateState(MMC_WRITE_OK), MMC_OK);
+        } else {
+            blob->SetRewarmOrigin();
+            EXPECT_EQ(blob->UpdateState(key, rank, 0, MMC_ALLOCATED_OK), MMC_OK);
+            MmcMetaMetricManager::GetInstance().IncrementRewarmBytesCurrent(blob->Size(), rank);
+        }
+        return blob;
+    }
+    static void RunQueuedRewarm(MmcMetaManagerPtr &mgr, const std::string &key, const MmcMemObjMetaPtr &object)
+    {
+        constexpr uint32_t rank = 0U;
+        const std::vector<std::string> keys{key};
+        const std::vector<MmcMemObjMetaPtr> objects{object};
+        std::vector<MmcMemMetaDesc> metas(keys.size());
+        const MmcMetaManager::RewarmGroupContext context{UINT32_MAX, 0, keys, objects, metas};
+        mgr->RewarmRankGroup(rank, {0}, context, false);
     }
 };
 TestMmcMetaManager::TestMmcMetaManager() {}
@@ -155,6 +187,133 @@ TEST_F(TestMmcMetaManager, PendingGetDoesNotDependOnRewarmWorkerAvailability)
     ASSERT_EQ(objMetas.size(), 1U);
     EXPECT_EQ(objMetas[0].numBlobs_, 1U);
     metaMng->Stop();
+}
+
+TEST_F(TestMmcMetaManager, BatchQuerySsdEvictionWakesPendingAndPreservesOtherKeys)
+{
+    constexpr uint64_t defaultTtlMs = 2000U;
+    constexpr uint64_t pendingTimeoutMs = 5000U;
+    constexpr uint16_t highWatermark = 70U;
+    constexpr uint16_t lowWatermark = 60U;
+    constexpr uint32_t rank = 0U;
+    constexpr uint64_t baseGva = 0x100000U;
+    constexpr uint64_t capacity = 1048576U;
+    constexpr size_t evictedIndex = 0U;
+    constexpr size_t rewarmedIndex = 1U;
+    constexpr size_t readableIndex = 2U;
+    constexpr uint8_t singleBlob = 1U;
+    const auto pendingObservation = std::chrono::milliseconds(100);
+    const auto completionLimit = std::chrono::seconds(1);
+    MmcMetaExtConfig extConfig;
+    extConfig.pendingWaitTimeoutMs = pendingTimeoutMs;
+    auto proxy = MmcMakeRef<MmcMetaMgrProxy>(MetaNetServerPtr{});
+    ASSERT_EQ(proxy->Start(defaultTtlMs, highWatermark, lowWatermark, extConfig), MMC_OK);
+    auto mgr = proxy->GetMetaManager();
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> mountedBlobs;
+    ASSERT_EQ(mgr->Mount({{rank, MEDIA_DRAM}, {rank, MEDIA_SSD}}, {{baseGva, capacity}, {baseGva, capacity}},
+                         mountedBlobs, true),
+              MMC_OK);
+
+    const std::vector<std::string> keys{"evicted_pending", "successful_pending", "readable_dram"};
+    std::vector<MmcMemObjMetaPtr> objects(keys.size());
+    for (auto &object : objects) {
+        object = MmcMakeRef<MmcMemObjMeta>();
+    }
+    const auto source = AddRewarmTestBlob(mgr, keys[evictedIndex], objects[evictedIndex], MEDIA_SSD, READABLE);
+    const auto evictedPending =
+        AddRewarmTestBlob(mgr, keys[evictedIndex], objects[evictedIndex], MEDIA_DRAM, ALLOCATED);
+    const auto successfulPending =
+        AddRewarmTestBlob(mgr, keys[rewarmedIndex], objects[rewarmedIndex], MEDIA_DRAM, ALLOCATED);
+    const auto readable = AddRewarmTestBlob(mgr, keys[readableIndex], objects[readableIndex], MEDIA_DRAM, READABLE);
+    ASSERT_NE(source, nullptr);
+    ASSERT_NE(evictedPending, nullptr);
+    ASSERT_NE(successfulPending, nullptr);
+    ASSERT_NE(readable, nullptr);
+    for (size_t index = 0; index < keys.size(); ++index) {
+        ASSERT_EQ(MetaContainer(mgr)->Insert(keys[index], objects[index]), MMC_OK);
+    }
+
+    BatchQueryRequest request{keys, GenerateOperateId(rank), GET_KEY_INFO_FOR_LAYER_WISE};
+    BatchQueryResponse response;
+    std::promise<void> queryStarted;
+    auto started = queryStarted.get_future();
+    auto query = std::async(std::launch::async, [&]() {
+        queryStarted.set_value();
+        return proxy->BatchQuery(request, response);
+    });
+    started.wait();
+    EXPECT_EQ(query.wait_for(pendingObservation), std::future_status::timeout);
+
+    // The SSD deletion notification arrives after another request has created a pending DRAM blob.
+    EXPECT_EQ(mgr->RemoveSsdBlob(keys[evictedIndex], rank), MMC_OK);
+    const auto completionStart = std::chrono::steady_clock::now();
+    RunQueuedRewarm(mgr, keys[evictedIndex], objects[evictedIndex]);
+    {
+        std::lock_guard<std::mutex> guard(objects[rewarmedIndex]->Mutex());
+        EXPECT_EQ(successfulPending->UpdateState(keys[rewarmedIndex], rank, 0, MMC_WRITE_OK), MMC_OK);
+        objects[rewarmedIndex]->NotifyReadable();
+    }
+    const auto queryStatus = query.wait_for(completionLimit);
+    const auto completionElapsed = std::chrono::steady_clock::now() - completionStart;
+    EXPECT_EQ(query.get(), MMC_OK);
+    proxy->Stop();
+
+    EXPECT_EQ(queryStatus, std::future_status::ready);
+    EXPECT_LT(completionElapsed, completionLimit);
+    EXPECT_EQ(objects[evictedIndex]->NumBlobs(), 0U);
+    EXPECT_EQ(evictedPending->UseCount(), 0U);
+    MmcMemObjMetaPtr removedObject;
+    EXPECT_EQ(MetaContainer(mgr)->Get(keys[evictedIndex], removedObject), MMC_UNMATCHED_KEY);
+    ASSERT_EQ(response.batchQueryInfos_.size(), keys.size());
+    EXPECT_FALSE(response.batchQueryInfos_[evictedIndex].valid_);
+    EXPECT_EQ(response.batchQueryInfos_[evictedIndex].numBlobs_, 0U);
+    EXPECT_TRUE(response.batchQueryInfos_[evictedIndex].blobs_.empty());
+    for (const auto index : {rewarmedIndex, readableIndex}) {
+        const auto &info = response.batchQueryInfos_[index];
+        EXPECT_TRUE(info.valid_);
+        EXPECT_EQ(info.numBlobs_, singleBlob);
+        ASSERT_EQ(info.blobs_.size(), singleBlob);
+        EXPECT_EQ(info.blobs_.front().mediaType_, MEDIA_DRAM);
+        EXPECT_EQ(info.blobs_.front().state_, READABLE);
+        EXPECT_EQ(info.size_, SIZE_32K);
+    }
+    EXPECT_EQ(response.batchQueryInfos_[rewarmedIndex].blobs_.front().gva_, successfulPending->GetDesc().gva_);
+    EXPECT_EQ(response.batchQueryInfos_[readableIndex].blobs_.front().gva_, readable->GetDesc().gva_);
+    EXPECT_EQ(successfulPending->UseCount(), 0U);
+    EXPECT_EQ(readable->UseCount(), 0U);
+}
+
+TEST_F(TestMmcMetaManager, QueuedRewarmSsdEvictionPreservesReadableDram)
+{
+    constexpr uint64_t defaultTtlMs = 2000U;
+    constexpr uint16_t highWatermark = 70U;
+    constexpr uint16_t lowWatermark = 60U;
+    constexpr uint32_t rank = 0U;
+    constexpr uint64_t baseGva = 0x100000U;
+    constexpr uint64_t capacity = 1048576U;
+    constexpr uint8_t singleBlob = 1U;
+    auto mgr = MmcMakeRef<MmcMetaManager>(defaultTtlMs, highWatermark, lowWatermark);
+    ASSERT_EQ(mgr->Start(), MMC_OK);
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> mountedBlobs;
+    ASSERT_EQ(mgr->Mount({{rank, MEDIA_DRAM}, {rank, MEDIA_SSD}}, {{baseGva, capacity}, {baseGva, capacity}},
+                         mountedBlobs, true),
+              MMC_OK);
+    const std::string key = "ssd_evicted_dram_readable";
+    auto object = MmcMakeRef<MmcMemObjMeta>();
+    ASSERT_NE(AddRewarmTestBlob(mgr, key, object, MEDIA_SSD, READABLE), nullptr);
+    const auto readable = AddRewarmTestBlob(mgr, key, object, MEDIA_DRAM, READABLE);
+    ASSERT_NE(readable, nullptr);
+    ASSERT_EQ(MetaContainer(mgr)->Insert(key, object), MMC_OK);
+
+    EXPECT_EQ(mgr->RemoveSsdBlob(key, rank), MMC_OK);
+    RunQueuedRewarm(mgr, key, object);
+    MemObjQueryInfo info;
+    EXPECT_EQ(mgr->Query(key, GenerateOperateId(rank), GET_KEY_INFO_FOR_LAYER_WISE, info), MMC_OK);
+    mgr->Stop();
+    EXPECT_TRUE(info.valid_);
+    EXPECT_EQ(info.numBlobs_, singleBlob);
+    ASSERT_EQ(info.blobs_.size(), singleBlob);
+    EXPECT_EQ(info.blobs_.front(), readable->GetDesc());
 }
 
 TEST_F(TestMmcMetaManager, PendingPrefetchDoesNotAddDramReadLease)
