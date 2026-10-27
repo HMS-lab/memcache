@@ -13,6 +13,7 @@
 #include "mmc_ptracer.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <future>
 #include <utility>
@@ -85,12 +86,27 @@ Result MmcMetaMgrProxy::BatchAlloc(const BatchAllocRequest &req, BatchAllocRespo
                                                                     << ", option count: " << req.options_.size());
         return MMC_ERROR;
     }
+    // Watermark checks are batch-level: doing them once per key serializes every
+    // BatchAlloc through the global allocator lock and walks all rank allocators
+    // thousands of times per request.
+    // MEDIA_NONE means the default (top layer) media and is what clients send when no media is
+    // specified, so keep one extra slot for it; otherwise the default path would skip eviction.
+    std::array<uint64_t, MEDIA_NONE + 1> wantSize{};
+    for (const auto &option : req.options_) {
+        const int media = static_cast<int>(option.mediaType_);
+        if (media >= 0 && media <= MEDIA_NONE) {
+            wantSize[media] += option.blobSize_ * option.numBlobs_;
+        }
+    }
+    for (int media = 0; media <= MEDIA_NONE; ++media) {
+        if (wantSize[media] > 0) {
+            metaMangerPtr_->CheckAndEvict(static_cast<MediaType>(media), wantSize[media]);
+        }
+    }
     for (size_t i = 0; i < req.keys_.size(); ++i) {
         // per-rank tracking: UINT32_MAX if no preferred rank specified
         const uint32_t rank = req.options_[i].preferredRank_.empty() ? UINT32_MAX : req.options_[i].preferredRank_[0];
         MmcMemMetaDesc objMeta{};
-        metaMangerPtr_->CheckAndEvict(static_cast<MediaType>(req.options_[i].mediaType_),
-                                      req.options_[i].blobSize_ * req.options_[i].numBlobs_);
         TP_TRACE_BEGIN(TP_MMC_META_MGR_ALLOC);
         metricManager.IncrementRequestCounter(RestMetricType::ALLOC, rank);
         Result ret = metaMangerPtr_->Alloc(req.keys_[i], req.options_[i], req.operateId_, req.leaseTtlMs_, objMeta);

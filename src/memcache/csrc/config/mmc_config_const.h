@@ -41,6 +41,8 @@ constexpr auto OCK_MMC_META_LEASE_TTL_MS = std::make_pair("ock.mmc.meta.lease_tt
 constexpr auto OCK_MMC_META_LRU_SHARD_COUNT =
     std::make_pair("ock.mmc.meta_service.lru_shard_count", MMC_DEFAULT_META_LRU_SHARD_COUNT);
 constexpr auto OCK_MMC_META_LRU_TYPE = std::make_pair("ock.mmc.meta_service.lru_type", "sharded_lru");
+constexpr auto OCK_MMC_META_NET_POOL_BASE =
+    std::make_pair("ock.mmc.meta_service.net_pool_base", MMC_DEFAULT_META_NET_POOL_BASE);
 constexpr auto OKC_MMC_LOCAL_SERVICE_BACKEND_ID = std::make_pair("ock.mmc.local_service.backend_id", "");
 // GC eviction yield: periodically sleep during eviction loop to release the write lock,
 // allowing blocked Put/Get/Exist requests to acquire the lock and execute.
@@ -163,6 +165,8 @@ constexpr int MIN_LEASE_TTL_MS = 1;
 constexpr int MAX_LEASE_TTL_MS = 2147483647;
 constexpr int MIN_META_LRU_SHARD_COUNT = 1;
 constexpr int MAX_META_LRU_SHARD_COUNT = MMC_MAX_META_LRU_SHARD_COUNT;
+constexpr int MIN_META_NET_POOL_BASE = 4;
+constexpr int MAX_META_NET_POOL_BASE = 256;
 
 // GC eviction yield parameter ranges
 constexpr int MIN_EVICT_YIELD_INTERVAL = 0;

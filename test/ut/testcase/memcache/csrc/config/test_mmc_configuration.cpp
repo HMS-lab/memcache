@@ -179,6 +179,32 @@ TEST_F(TestMmcConfiguration, MetaLruTypeConfigDefaultsAndConverts)
     EXPECT_EQ(metaConfig.lruType, MMC_META_LRU_TYPE_LRU);
 }
 
+TEST_F(TestMmcConfiguration, MetaNetPoolBaseDefaultsAndRangeValidation)
+{
+    MetaServiceConfig config;
+    config.LoadDefault();
+
+    mmc_meta_service_config_t metaConfig{};
+    config.GetMetaServiceConfig(metaConfig);
+    EXPECT_EQ(metaConfig.netPoolBase, MMC_DEFAULT_META_NET_POOL_BASE);
+
+    config.Set(ConfConstant::OCK_MMC_META_NET_POOL_BASE.first, static_cast<int32_t>(MIN_META_NET_POOL_BASE));
+    EXPECT_TRUE(config.ValidateConf().empty());
+    config.GetMetaServiceConfig(metaConfig);
+    EXPECT_EQ(metaConfig.netPoolBase, static_cast<uint32_t>(MIN_META_NET_POOL_BASE));
+
+    config.Set(ConfConstant::OCK_MMC_META_NET_POOL_BASE.first, static_cast<int32_t>(MAX_META_NET_POOL_BASE));
+    EXPECT_TRUE(config.ValidateConf().empty());
+    config.GetMetaServiceConfig(metaConfig);
+    EXPECT_EQ(metaConfig.netPoolBase, static_cast<uint32_t>(MAX_META_NET_POOL_BASE));
+
+    config.Set(ConfConstant::OCK_MMC_META_NET_POOL_BASE.first, static_cast<int32_t>(MIN_META_NET_POOL_BASE - 1));
+    EXPECT_FALSE(config.ValidateConf().empty());
+
+    config.Set(ConfConstant::OCK_MMC_META_NET_POOL_BASE.first, static_cast<int32_t>(MAX_META_NET_POOL_BASE + 1));
+    EXPECT_FALSE(config.ValidateConf().empty());
+}
+
 TEST_F(TestMmcConfiguration, EvictYieldConfigRangeValidationTest)
 {
     MetaServiceConfig config;

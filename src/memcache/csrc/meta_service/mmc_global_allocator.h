@@ -147,6 +147,9 @@ public:
             return MMC_ERROR;
         }
         Result ret = allocator->Release(blob);
+        if (ret == MMC_OK && static_cast<int>(location.mediaType_) < MEDIA_NONE) {
+            SubSat(usedSize_[location.mediaType_], blob->AllocSize());
+        }
         globalAllocLock_.UnlockRead();
         if (ret != MMC_OK) {
             MMC_LOG_ERROR("Free blob failed, blob: " << blob->GetDesc());
@@ -165,7 +168,11 @@ public:
         }
 
         MMC_LOG_INFO("GlobalAllocator Mount " << loc << " enableMaxValueMode:" << enableMaxValueMode);
-        allocators_[loc] = MmcBlobAllocator::Create(loc, localMemInitInfo, enableMaxValueMode, &maxAlignedSize_);
+        auto allocator = MmcBlobAllocator::Create(loc, localMemInitInfo, enableMaxValueMode, &maxAlignedSize_);
+        allocators_[loc] = allocator;
+        if (allocator != nullptr && static_cast<int>(loc.mediaType_) < MEDIA_NONE) {
+            totalSize_[loc.mediaType_].fetch_add(allocator->GetUsageInfo().first, std::memory_order_relaxed);
+        }
 
         MMC_LOG_TRACE("Mount bm on " << loc << ", capacity:" << localMemInitInfo.capacity_ << "  successfully");
         globalAllocLock_.UnlockWrite();
@@ -236,6 +243,11 @@ public:
                                                             << "}  in the mem pool, space is in use");
             return MMC_INVALID_PARAM;
         }
+        if (static_cast<int>(loc.mediaType_) < MEDIA_NONE) {
+            const auto usage = iter->second->GetUsageInfo();
+            SubSat(totalSize_[loc.mediaType_], usage.first);
+            SubSat(usedSize_[loc.mediaType_], usage.second);
+        }
         allocators_.erase(iter);
         MMC_LOG_DEBUG("Unmount one bm successfully, loc: " << loc);
         globalAllocLock_.UnlockWrite();
@@ -274,7 +286,15 @@ public:
             MMC_LOG_ERROR("BuildFromBlobs failed, allocator is nullptr");
             return MMC_ERROR;
         }
+        const bool needUpdateUsage = static_cast<int>(location.mediaType_) < MEDIA_NONE;
+        const uint64_t usedBefore = needUpdateUsage ? allocator->GetUsageInfo().second : 0;
         Result ret = allocator->BuildFromBlobs(blobList);
+        if (ret == MMC_OK && needUpdateUsage) {
+            const uint64_t usedAfter = allocator->GetUsageInfo().second;
+            if (usedAfter > usedBefore) {
+                usedSize_[location.mediaType_].fetch_add(usedAfter - usedBefore, std::memory_order_relaxed);
+            }
+        }
         globalAllocLock_.UnlockRead();
         return ret;
     }
@@ -291,13 +311,12 @@ public:
 
     void GetUsedInfo(uint64_t (&totalSize)[MEDIA_NONE], uint64_t (&usedSize)[MEDIA_NONE])
     {
-        globalAllocLock_.LockRead();
-        for (auto &allocator : allocators_) {
-            auto result = allocator.second->GetUsageInfo();
-            totalSize[allocator.first.mediaType_] += result.first;
-            usedSize[allocator.first.mediaType_] += result.second;
+        // Hot path: read the approximate per-media counters instead of taking
+        // the global lock and walking every rank allocator.
+        for (int i = 0; i < MEDIA_NONE; ++i) {
+            totalSize[i] = totalSize_[i].load(std::memory_order_relaxed);
+            usedSize[i] = usedSize_[i].load(std::memory_order_relaxed);
         }
-        globalAllocLock_.UnlockRead();
     }
 
     uint64_t GetFreeSpace(MediaType type)
@@ -559,13 +578,20 @@ public:
     }
 
 private:
+    static void SubSat(std::atomic<uint64_t> &value, uint64_t delta)
+    {
+        uint64_t current = value.load(std::memory_order_relaxed);
+        while (current >= delta && !value.compare_exchange_weak(current, current - delta, std::memory_order_relaxed)) {}
+    }
+
     Result InnerAlloc(const AllocOptions &allocReq, std::vector<MmcMemBlobPtr> &blobs,
-                      std::unordered_set<uint32_t> &excludeRanks) const
+                      std::unordered_set<uint32_t> &excludeRanks)
     {
         if (allocators_.empty()) {
             MMC_LOG_ERROR("Alloc allocators_ is empty");
             return MMC_ERROR;
         }
+        const size_t blobCountBefore = blobs.size();
         Result ret;
         switch (allocReq.flags_ & 0xFF) {
             case ALLOC_ARRANGE:
@@ -584,6 +610,14 @@ private:
                 ret = MmcLocalityStrategy::ArrangeLocality(allocators_, allocReq, blobs, excludeRanks);
                 break;
         }
+        // Count every blob produced by this call, including partially allocated
+        // blobs on failure; Alloc() frees them through Free(), which subtracts.
+        for (size_t i = blobCountBefore; i < blobs.size(); ++i) {
+            const auto &blob = blobs[i];
+            if (blob != nullptr && static_cast<int>(blob->Type()) < MEDIA_NONE) {
+                usedSize_[blob->Type()].fetch_add(blob->AllocSize(), std::memory_order_relaxed);
+            }
+        }
         return ret;
     }
 
@@ -591,6 +625,10 @@ private:
     std::atomic<uint64_t> maxAlignedSize_{0};
     MmcAllocators allocators_;
     ReadWriteLock globalAllocLock_;
+    // Approximate per-media usage, updated on the allocation/free hot path so
+    // watermark checks no longer need to lock and walk every rank allocator.
+    std::atomic<uint64_t> usedSize_[MEDIA_NONE]{};
+    std::atomic<uint64_t> totalSize_[MEDIA_NONE]{};
 };
 
 using MmcGlobalAllocatorPtr = MmcRef<MmcGlobalAllocator>;

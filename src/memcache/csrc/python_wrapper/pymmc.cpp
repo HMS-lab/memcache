@@ -471,6 +471,11 @@ void DefineMmcStructModule(py::module_ &m)
                 )pbdoc")
             .def_readwrite("lru_type", &mmc_meta_service_config_t::lruType,
                            "Meta LRU type: 0=lru, 1=sharded_lru (default).")
+            .def_readwrite("net_pool_base", &mmc_meta_service_config_t::netPoolBase,
+                           R"pbdoc(
+                    MetaService network async thread pool size. Valid range [4, 256], default 16.
+                    Takes effect only at MetaService start-up; changing it requires a restart.
+                )pbdoc")
             .def_readwrite("lease_ttl_ms", &mmc_meta_service_config_t::leaseTtlMs,
                            R"pbdoc(
                     Default read lease TTL in milliseconds.

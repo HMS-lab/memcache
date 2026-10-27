@@ -34,13 +34,14 @@ enum NetProtocol {
 };
 using ExternalLog = void (*)(int, const char *);
 struct NetEngineOptions {
-    std::string name;             /* name of engine */
-    std::string ip;               /* ip */
-    uint16_t port = 9980L;        /* listen port */
-    uint16_t threadCount = 2;     /* worker thread count */
-    uint16_t rankId = UINT16_MAX; /* rank id */
-    bool startListener = false;   /* start listener or not */
-    mmc_tls_config tlsOption{};   /* TLS communication options */
+    std::string name;                                      /* name of engine */
+    std::string ip;                                        /* ip */
+    uint16_t port = 9980L;                                 /* listen port */
+    uint16_t threadCount = 2;                              /* worker thread count */
+    uint16_t netPoolBase = MMC_DEFAULT_META_NET_POOL_BASE; /* async request pool thread count */
+    uint16_t rankId = UINT16_MAX;                          /* rank id */
+    bool startListener = false;                            /* start listener or not */
+    mmc_tls_config tlsOption{};                            /* TLS communication options */
     int32_t logLevel = 3;
     ExternalLog logFunc = nullptr;
 
@@ -62,8 +63,8 @@ inline std::string NetEngineOptions::ToString() const
 {
     std::ostringstream oss;
     oss << "NetEngineOptions [name " << name << ", ip: " << ip << ", port: " << port << ", threadCount: " << threadCount
-        << ", rankId " << rankId << ", startListener: " << startListener << ", tlsEnables: " << tlsOption.tlsEnable
-        << "]";
+        << ", netPoolBase: " << netPoolBase << ", rankId " << rankId << ", startListener: " << startListener
+        << ", tlsEnables: " << tlsOption.tlsEnable << "]";
     return oss.str();
 }
 

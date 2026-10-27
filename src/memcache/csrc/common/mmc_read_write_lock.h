@@ -12,9 +12,8 @@
 #ifndef MEMFABRIC_HYBRID_MMC_READWRITELOCK_H
 #define MEMFABRIC_HYBRID_MMC_READWRITELOCK_H
 
-#include <condition_variable>
 #include <memory>
-#include <mutex>
+#include <shared_mutex>
 
 namespace ock {
 namespace mmc {
@@ -24,46 +23,28 @@ public:
 
     void LockRead()
     {
-        std::unique_lock<std::mutex> lock(mutex_);
-        while (isWriting_ || numReaders_ == std::numeric_limits<uint16_t>::max()) {
-            cv_.wait(lock);
-        }
-        numReaders_++;
+        mutex_.lock_shared();
     }
 
     void UnlockRead()
     {
-        std::unique_lock<std::mutex> lock(mutex_);
-        if (numReaders_ == 0) {
-            return;
-        }
-        numReaders_--;
-        if (numReaders_ == 0) {
-            cv_.notify_one(); // wake up the write thread
-        }
+        mutex_.unlock_shared();
     }
 
     void LockWrite()
     {
-        std::unique_lock<std::mutex> lock(mutex_);
-        while (isWriting_ || numReaders_ > 0) {
-            cv_.wait(lock);
-        }
-        isWriting_ = true;
+        mutex_.lock();
     }
 
     void UnlockWrite()
     {
-        std::unique_lock<std::mutex> lock(mutex_);
-        isWriting_ = false;
-        cv_.notify_all(); // wake up all the read threads
+        mutex_.unlock();
     }
 
 private:
-    std::mutex mutex_;
-    std::condition_variable cv_;
-    uint16_t numReaders_{0}; // number of current reade threads
-    bool isWriting_{false};  // whether currently have write threads
+    // The allocator is read-mostly: Alloc/Free/GetUsedInfo all take the shared
+    // lock, so concurrent readers must not be serialized through a mutex.
+    std::shared_mutex mutex_;
 };
 
 class ReadLock {

@@ -25,6 +25,7 @@
 #define TLS_PATH_MAX_LEN                 (TLS_PATH_SIZE - 1)
 #define MMC_DEFAULT_META_LRU_SHARD_COUNT 16U
 #define MMC_MAX_META_LRU_SHARD_COUNT     1024U
+#define MMC_DEFAULT_META_NET_POOL_BASE   16U
 #define MMC_META_LRU_TYPE_LRU            0U
 #define MMC_META_LRU_TYPE_SHARDED_LRU    1U
 
@@ -110,6 +111,8 @@ typedef struct {
     uint32_t ssdMetadataMode; // 0: aggregated; 1: separated
     // 分配时 padding 到全局最大对齐值，全网统一，由 MetaService 统一管理。
     bool enableMaxValueMode;
+    // MetaService 网络异步线程池线程数；0 表示使用默认值，有效范围 [4, 256]，重启生效。
+    uint32_t netPoolBase;
 } mmc_meta_service_config_t;
 
 typedef struct {

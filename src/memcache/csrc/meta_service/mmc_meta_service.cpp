@@ -65,6 +65,12 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
     }
     MMC_VALIDATE_RETURN(options.evictThresholdHigh > options.evictThresholdLow,
                         "invalid param, evictThresholdHigh must large than evictThresholdLow", MMC_INVALID_PARAM);
+    options_.netPoolBase = options.netPoolBase == 0 ? MMC_DEFAULT_META_NET_POOL_BASE : options.netPoolBase;
+    MMC_VALIDATE_RETURN(options_.netPoolBase >= MIN_META_NET_POOL_BASE &&
+                            options_.netPoolBase <= MAX_META_NET_POOL_BASE,
+                        "invalid param, netPoolBase must be in range [" + std::to_string(MIN_META_NET_POOL_BASE) +
+                            ", " + std::to_string(MAX_META_NET_POOL_BASE) + "]",
+                        MMC_INVALID_PARAM);
     options_.leaseTtlMs = options.leaseTtlMs == 0 ? MMC_DATA_TTL_MS : options.leaseTtlMs;
     if (options_.defragEvictThreshold == 0) {
         options_.defragEvictThreshold = static_cast<uint16_t>(DEFRAG_EVICT_WASTE_PERCENT_THRESHOLD);
@@ -97,6 +103,7 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
     NetEngineOptions::ExtractIpPortFromUrl(url, netOptions_);
     netOptions_.name = name_;
     netOptions_.threadCount = threadCountBase;
+    netOptions_.netPoolBase = static_cast<uint16_t>(options_.netPoolBase);
     netOptions_.rankId = 0;
     netOptions_.startListener = true;
     netOptions_.tlsOption = options_.accTlsConfig;

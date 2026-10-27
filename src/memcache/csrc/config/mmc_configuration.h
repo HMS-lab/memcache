@@ -257,6 +257,9 @@ public:
             VIntRange::Create(OCK_MMC_META_LRU_SHARD_COUNT.first, MIN_META_LRU_SHARD_COUNT, MAX_META_LRU_SHARD_COUNT),
             0);
         AddStrConf(OCK_MMC_META_LRU_TYPE, VStrEnum::Create(OCK_MMC_META_LRU_TYPE.first, META_LRU_TYPE_ENUM_STR), 0);
+        AddIntConf(OCK_MMC_META_NET_POOL_BASE,
+                   VIntRange::Create(OCK_MMC_META_NET_POOL_BASE.first, MIN_META_NET_POOL_BASE, MAX_META_NET_POOL_BASE),
+                   0);
         AddIntConf(
             OKC_MMC_EVICT_YIELD_INTERVAL,
             VIntRange::Create(OKC_MMC_EVICT_YIELD_INTERVAL.first, MIN_EVICT_YIELD_INTERVAL, MAX_EVICT_YIELD_INTERVAL),
@@ -350,6 +353,7 @@ public:
         config.pendingWaitTimeoutMs = static_cast<uint64_t>(GetInt(ConfConstant::OCK_MMC_PENDING_WAIT_TIMEOUT_MS));
         config.leaseTtlMs = static_cast<uint64_t>(GetInt(ConfConstant::OCK_MMC_META_LEASE_TTL_MS));
         config.lruShardCount = static_cast<uint32_t>(GetInt(ConfConstant::OCK_MMC_META_LRU_SHARD_COUNT));
+        config.netPoolBase = static_cast<uint32_t>(GetInt(ConfConstant::OCK_MMC_META_NET_POOL_BASE));
         config.lruType = GetString(ConfConstant::OCK_MMC_META_LRU_TYPE) == "sharded_lru" ? MMC_META_LRU_TYPE_SHARDED_LRU
                                                                                          : MMC_META_LRU_TYPE_LRU;
         config.evictYieldInterval = static_cast<uint32_t>(GetInt(ConfConstant::OKC_MMC_EVICT_YIELD_INTERVAL));

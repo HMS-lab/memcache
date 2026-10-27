@@ -25,7 +25,6 @@
 namespace ock {
 namespace mmc {
 constexpr const int16_t NET_SERVER_MAGIC = 3867;
-constexpr const int NET_POOL_BASE = 16;
 // 纯 client（未初始化 BM）建连时宣告的无效 rank id，接收端应忽略该 rank。
 constexpr const uint64_t INVALID_RANK_ID = UINT64_MAX;
 
@@ -60,7 +59,7 @@ Result NetEngineAcc::Start(const NetEngineOptions &options)
         return ret;
     }
 
-    threadPool_ = MmcMakeRef<MmcThreadPool>("net_pool", NET_POOL_BASE);
+    threadPool_ = MmcMakeRef<MmcThreadPool>("net_pool", options_.netPoolBase);
     if (threadPool_ == nullptr || threadPool_->Start() != MMC_OK) {
         StopInner();
         UnInitialize();

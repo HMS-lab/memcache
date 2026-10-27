@@ -720,6 +720,7 @@ int32_t mmc_set_log_level(int level);
 - `metricsTlsConfig`：metrics HTTP 服务的 mTLS 配置。
 - `ssdMetadataMode`：SSD元数据模式；`0`表示由MetaService统一管理，`1`表示由存储后端管理。
 - `enableMaxValueMode`：是否启用max-value分配模式（分配时padding到全局最大对齐值），全网统一，由MetaService统一管理；仅在BmRegister注册时生效，不可动态热更。
+- `netPoolBase`：MetaService网络异步线程池线程数，有效范围[4, 256]，默认16；`0`表示使用默认值，MetaService重启后生效。
 
 ### mmc_local_service_config_t
 
