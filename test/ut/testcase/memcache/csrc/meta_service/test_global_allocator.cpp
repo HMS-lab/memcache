@@ -454,6 +454,61 @@ TEST_F(TestMmcGlobalAllocator, StopInvalidLocation)
     EXPECT_EQ(ret, MMC_INVALID_PARAM);
 }
 
+TEST_F(TestMmcGlobalAllocator, ForceUnmountReleasesUsageCounters)
+{
+    MmcGlobalAllocatorPtr allocator = MmcMakeRef<MmcGlobalAllocator>();
+    constexpr uint64_t capacity = SIZE_32K * 10U;
+    MmcLocation loc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo info{0, capacity};
+    ASSERT_EQ(allocator->Mount(loc, info), MMC_OK);
+    ASSERT_EQ(allocator->Start(loc), MMC_OK);
+
+    AllocOptions allocReq;
+    allocReq.blobSize_ = SIZE_32K;
+    allocReq.numBlobs_ = 1;
+    allocReq.mediaType_ = MEDIA_DRAM;
+    std::vector<MmcMemBlobPtr> blobs;
+    ASSERT_EQ(allocator->Alloc(allocReq, blobs), MMC_OK);
+    ASSERT_EQ(blobs.size(), 1U);
+
+    uint64_t total[MEDIA_NONE] = {0};
+    uint64_t used[MEDIA_NONE] = {0};
+    allocator->GetUsedInfo(total, used);
+    EXPECT_EQ(total[MEDIA_DRAM], capacity);
+    EXPECT_EQ(used[MEDIA_DRAM], SIZE_32K * allocReq.numBlobs_);
+
+    // 死节点清理：blob 不归还分配器，整段 allocator 丢弃，聚合用量必须同步归零
+    ASSERT_EQ(allocator->ForceUnmount(loc), MMC_OK);
+
+    uint64_t totalAfterForce[MEDIA_NONE] = {0};
+    uint64_t usedAfterForce[MEDIA_NONE] = {0};
+    allocator->GetUsedInfo(totalAfterForce, usedAfterForce);
+    EXPECT_EQ(totalAfterForce[MEDIA_DRAM], 0U);
+    EXPECT_EQ(usedAfterForce[MEDIA_DRAM], 0U);
+
+    // 同 rank 重连后重新 Mount，容量只能计一次
+    ASSERT_EQ(allocator->Mount(loc, info), MMC_OK);
+    ASSERT_EQ(allocator->Start(loc), MMC_OK);
+    uint64_t totalRemount[MEDIA_NONE] = {0};
+    uint64_t usedRemount[MEDIA_NONE] = {0};
+    allocator->GetUsedInfo(totalRemount, usedRemount);
+    EXPECT_EQ(totalRemount[MEDIA_DRAM], capacity);
+    EXPECT_EQ(usedRemount[MEDIA_DRAM], 0U);
+
+    std::vector<MmcMemBlobPtr> remountBlobs;
+    allocReq.numBlobs_ = 1;
+    ASSERT_EQ(allocator->Alloc(allocReq, remountBlobs), MMC_OK);
+    ASSERT_EQ(remountBlobs.size(), 1U);
+    ASSERT_EQ(allocator->Free(remountBlobs[0]), MMC_OK);
+    ASSERT_EQ(allocator->Unmount(loc), MMC_OK);
+
+    uint64_t totalFinal[MEDIA_NONE] = {0};
+    uint64_t usedFinal[MEDIA_NONE] = {0};
+    allocator->GetUsedInfo(totalFinal, usedFinal);
+    EXPECT_EQ(totalFinal[MEDIA_DRAM], 0U);
+    EXPECT_EQ(usedFinal[MEDIA_DRAM], 0U);
+}
+
 TEST_F(TestMmcGlobalAllocator, ReBuild)
 {
     MmcGlobalAllocatorPtr allocator = MmcMakeRef<MmcGlobalAllocator>();

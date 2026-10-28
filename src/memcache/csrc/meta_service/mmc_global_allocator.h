@@ -263,6 +263,13 @@ public:
             globalAllocLock_.UnlockWrite();
             return MMC_OK;
         }
+        // 死节点路径下 RemoveBlobsForDeadRank 直接丢弃 blob、不回调 Free，usedSize_ 仍包含该 rank 的用量；
+        // 这里按分配器实际容量/用量对称扣减，与 Unmount 保持一致，避免重连后 Mount 重复累加。
+        if (static_cast<int>(loc.mediaType_) < MEDIA_NONE && iter->second != nullptr) {
+            const auto usage = iter->second->GetUsageInfo();
+            SubSat(totalSize_[loc.mediaType_], usage.first);
+            SubSat(usedSize_[loc.mediaType_], usage.second);
+        }
         allocators_.erase(iter);
         globalAllocLock_.UnlockWrite();
         MMC_LOG_WARN("ForceUnmount bm for dead rank, loc: " << loc);
