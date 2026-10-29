@@ -240,6 +240,10 @@ private:
 
 // 注册并启动周期任务，所有模块共享同一个调度器，任务名全局唯一。
 // 同名注册会更新周期和回调。成功返回 MMC_OK，参数非法返回 MMC_INVALID_PARAM，其余失败返回 MMC_ERROR。
+// Register and initiate a periodic task. All modules share a single scheduler, and task names must be globally unique.
+// Registering a task with an existing name will update its period and callback.
+// The function returns `MMC_OK` on success, `MMC_INVALID_PARAM` if the arguments are invalid,
+// and `MMC_ERROR` for other types of failure.
 Result RegisterPeriodicTask(const std::string &taskName, uint32_t intervalSeconds, MmcPeriodicTask::Task task);
 
 // 注销周期任务，等待当前正在执行的回调返回后移除。
