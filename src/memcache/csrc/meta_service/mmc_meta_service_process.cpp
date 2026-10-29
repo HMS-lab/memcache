@@ -59,6 +59,7 @@ int MmcMetaServiceProcess::MainForExecutable()
     pybind11::gil_scoped_release release;
 
     // Python 方式启动已经在解释器中，不能再次创建解释器
+    // The interpreter is already running; a new interpreter cannot be created.
     return MainForPython();
 }
 
