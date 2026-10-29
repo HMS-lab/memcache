@@ -193,6 +193,8 @@ public:
         MMC_RETURN_ERROR(shardLruThreadPool_->Start(), "shardlru thread pool start failed");
         metaContainer_->SetEraseIfPool(shardLruThreadPool_);
         // P4: 注册 FreeBlobs 的 SSD 预释放回调，在释放 SSD blob 前通过 RPC 删除远端数据
+	// P4: Register an SSD pre-release callback for FreeBlobs to delete remote data
+	// via RPC before the SSD blob is released.
         MmcMemBlob::ssdPreFreeHandler_ = [this](const std::string &key, const MmcMemBlobDesc &desc) {
             threadPool_->Enqueue([this, key, desc]() {
                 Result ret = BlobDeleteRpc(key, desc);
