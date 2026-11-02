@@ -1,33 +1,34 @@
 Modes:
   4k-align (default): Round each request up to a multiple of 4 KiB.
-  max-value-align: Apply 4 KiB alignment, then reserve at least the historical maximum aligned request size.
+  max-value-align: Reserve at least the historical maximum aligned request size.
     Successful allocations can increase this maximum. Releases do not decrease it.
-  --compare runs both modes with identical operations and overrides --mode.
+  Run each mode separately. The CLI measures one mode per invocation.
 
-Workloads:
-  random (default): Select allocation with probability P at each step.
-    Otherwise, select a release. Select its target uniformly from outstanding requests.
-  fifo: Select allocation or release as in random.
-    Release the oldest outstanding request first.
-  Both start empty. Neither fills the region before selecting releases.
-  If no request awaits release, attempt an allocation.
-  P is --alloc-probability (default: 0.6). The release probability is 1 - P.
-  --steps counts all operations, including failed allocations and skipped releases.
-
-  alternating: Allocate the smallest and largest configured sizes in alternating pairs.
-    Use a schedule that fills 4k-align capacity, including any whole-page tail.
-    Release the small requests in allocation order. Then attempt one largest request.
-    Size percentages do not apply. Reject explicit --steps and --alloc-probability options.
+Allocation and eviction:
+  Start empty. Each step attempts one allocation with a sampled request size.
+  Occupancy = 100 * reserved bytes / capacity. Reserved bytes include padding.
+  After success at or above the maximum, pause allocations and evict live blocks.
+  Select each block uniformly, without size or age weighting.
+  Stop at or below the minimum, then resume allocations. Use no background thread.
+  Defaults: minimum 80%, maximum 90%. Supply integers: 0 <= minimum < maximum <= 100.
+  Whole blocks can cross either threshold. Complete eviction after the last attempt too.
+  --steps counts allocation attempts, including failures. Evictions do not consume steps.
+  --sample-every counts allocation attempts. Sample after any eviction for that attempt.
+  Also sample before and after each eviction cycle.
 
 Sizes and failures:
-  For random and fifo, sample each request size from --block-sizes.
-  Percentages specify probabilities of allocation attempts. Omitted percentages give equal probabilities.
-  Supply all percentages or omit all. Explicit percentages must total 100%.
-  An outstanding request awaits release, even if its allocation failed.
-  Record capacity and fragmentation failures. Continue without retrying.
-  Skip a release whose allocation failed. Count it separately.
+  Sample each request size from --block-sizes.
+  Percentages specify probabilities of allocation attempts, not shares of bytes.
+  Omitted percentages give equal probabilities. Supply all percentages or omit all.
+  Explicit percentages must total 100%.
+  Record capacity and fragmentation failures. Continue without retrying or forced eviction.
+  Failed requests never become eviction candidates. Failures can repeat below the maximum.
   Invalid operations, including double frees, abort the measurement.
+  --seed controls separate random generators for sizes and eviction targets.
+  Eviction does not change the request-size sequence.
 
-Comparison:
-  Both modes receive the same logical operations. Failures can differ between modes.
-  The alternating schedule fills 4k-align mode. Max-value-align mode can fill differently.
+Metrics:
+  Occupancy percent = 100 * reserved / capacity.
+  Internal fragmentation percent = 100 * (reserved - requested) / reserved.
+  External fragmentation percent = 100 * (free - largest free range) / free.
+  Undefined fragmentation percentages appear as N/A.

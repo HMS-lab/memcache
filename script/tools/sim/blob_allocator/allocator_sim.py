@@ -16,7 +16,7 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
-from collections import Counter, deque
+from collections import Counter
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -78,40 +78,13 @@ class Free:
 
 
 def operations(config):
-    sizes, weights = config['sizes'], config['weights']
-    if config['workload'] == 'alternating':
-        small, large = min(sizes), max(sizes)
-        pairs = config['capacity'] // (align(small) + align(large))
-        if align(small) == align(large) or not pairs:
-            raise ValueError('Alternating requires distinct aligned sizes and capacity for one pair.')
-        for index in range(pairs):
-            yield Alloc(index * 2, small, 'fill')
-            yield Alloc(index * 2 + 1, large, 'fill')
-        tail = (config['capacity'] - pairs * (align(small) + align(large))) // ALIGNMENT * ALIGNMENT
-        if tail:
-            yield Alloc(pairs * 2, tail, 'tail')
-        for index in range(pairs):
-            yield Free(index * 2, 'release-small')
-        yield Alloc(pairs * 2 + 1, large, 'probe')
-        return
     rng = random.Random(config['seed'])
-    outstanding = [] if config['workload'] == 'random' else deque()
-    next_id = 0
-    for _ in range(config['steps']):
-        if not outstanding or rng.random() < config['alloc_probability']:
-            size = rng.choices(sizes, weights=weights, k=1)[0]
-            outstanding.append(next_id)
-            yield Alloc(next_id, size)
-            next_id += 1
-        else:
-            if config['workload'] == 'fifo':
-                request_id = outstanding.popleft()
-            else:
-                index = rng.randrange(len(outstanding))
-                request_id = outstanding[index]
-                outstanding[index] = outstanding[-1]
-                outstanding.pop()
-            yield Free(request_id)
+    for index in range(config['steps']):
+        yield Alloc(
+            index,
+            rng.choices(config['sizes'], weights=config['weights'], k=1)[0],
+            'alloc',
+        )
 
 
 def build_native():
@@ -139,7 +112,11 @@ def build_native():
     if python_headers:
         command.append(f'-DPython3_INCLUDE_DIR={python_headers}')
     subprocess.run(command, check=True, stdout=sys.stderr)
-    subprocess.run(['cmake', '--build', str(build), '--config', 'Release'], check=True, stdout=sys.stderr)
+    subprocess.run(
+        ['cmake', '--build', str(build), '--config', 'Release'],
+        check=True,
+        stdout=sys.stderr,
+    )
     path = build / 'native' / ('_allocator_sim_native' + sysconfig.get_config_var('EXT_SUFFIX'))
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     existing = sys.modules.get('_allocator_sim_native')
@@ -172,7 +149,12 @@ def histogram(ranges):
     while buckets and upper <= max(buckets):
         count, total = buckets.get(upper, (0, 0))
         result.append(
-            {'lower': 0 if upper == ALIGNMENT else upper // 2, 'upper': upper, 'count': count, 'bytes': total}
+            {
+                'lower': 0 if upper == ALIGNMENT else upper // 2,
+                'upper': upper,
+                'count': count,
+                'bytes': total,
+            }
         )
         upper *= 2
     return result, dict(sorted(exact.items()))
@@ -191,18 +173,19 @@ class Measurement:
             {
                 key: 0
                 for key in (
-                    "attempts",
-                    "successes",
-                    "capacity_failures",
-                    "fragmentation_failures",
-                    "releases",
-                    "skipped_releases",
+                    'attempts',
+                    'successes',
+                    'capacity_failures',
+                    'fragmentation_failures',
+                    'releases',
+                    'skipped_releases',
                 )
             }
         )
         self.per_size = {}
         self.requested = self.alignment_waste = self.max_padding = 0
         self.samples = []
+        self.reserved = 0
 
     def sample(self, index, phase='', detailed=False):
         state = self.allocator.snapshot(detailed)
@@ -228,12 +211,14 @@ class Measurement:
             raise RuntimeError('Live blocks disagree with reserved bytes.')
         if (
             state['reserved'] + state['free'] != state['capacity']
+            or self.reserved != state['reserved']
             or self.requested + state['internal_bytes'] != state['reserved']
             or self.alignment_waste + self.max_padding != state['internal_bytes']
         ):
             raise RuntimeError('Allocator accounting is inconsistent.')
         state['internal_percent'] = percentage(state['internal_bytes'], state['reserved'])
         state['external_percent'] = percentage(state['free'] - state['largest_free'], state['free'])
+        state['occupancy_percent'] = percentage(state['reserved'], state['capacity'])
         state['operation_index'] = index
         state['phase'] = phase
         scalar = {key: value for key, value in state.items() if not isinstance(value, (dict, list))}
@@ -287,6 +272,7 @@ class Measurement:
                     raise RuntimeError('Native allocation metadata is inconsistent.')
                 self.requests[request_id] = (handle, info)
                 self.requested += size
+                self.reserved += info['reserved']
                 aligned = self.allocator.align_size(size)
                 self.alignment_waste += aligned - size
                 self.max_padding += info['reserved'] - aligned
@@ -302,6 +288,7 @@ class Measurement:
             handle, info = record
             self.allocator.free(handle)
             self.requested -= info['requested']
+            self.reserved -= info['reserved']
             aligned = self.allocator.align_size(info['requested'])
             self.alignment_waste -= aligned - info['requested']
             self.max_padding -= info['reserved'] - aligned
@@ -310,14 +297,14 @@ class Measurement:
             raise TypeError('Unknown operation type.')
 
 
-def run_workload(sequence, capacity, mode='4k-align', sample_every=1000, *, compare=False):
+def run_workload(sequence, capacity, mode='4k-align', sample_every=1000):
     """Build the adapter, then measure an iterable of Alloc and Free operations."""
     if not isinstance(capacity, int) or not 0 < capacity <= MAX_SIZE or sample_every <= 0:
         raise ValueError('Capacity and sample interval must be positive and valid.')
     if mode not in ('4k-align', 'max-value-align'):
         raise ValueError('Unknown mode. Use 4k-align or max-value-align.')
     native = build_native()
-    modes = [False, True] if compare else [mode == 'max-value-align']
+    modes = [mode == 'max-value-align']
     measurements = {
         ('max-value-align' if enabled else '4k-align'): Measurement(native, capacity, enabled) for enabled in modes
     }
@@ -349,13 +336,81 @@ def run_workload(sequence, capacity, mode='4k-align', sample_every=1000, *, comp
         raise RuntimeError(f'Operation {index}: {error}') from error
 
 
+def run_simulation(config):
+    """Build and run allocation attempts with synchronous water-level eviction."""
+    low, high = config['min_water_level'], config['max_water_level']
+    if any(type(value) is not int for value in (low, high)) or not 0 <= low < high <= PERCENT:
+        raise ValueError('Water levels must be integers: 0 <= minimum < maximum <= 100.')
+    if config['steps'] <= 0 or config['sample_every'] <= 0:
+        raise ValueError('Counts must be positive.')
+    capacity = config['capacity']
+    if not isinstance(capacity, int) or not 0 < capacity <= MAX_SIZE:
+        raise ValueError('Capacity must be positive and valid.')
+    mode = config['mode']
+    if mode not in ('4k-align', 'max-value-align'):
+        raise ValueError('Unknown mode. Use 4k-align or max-value-align.')
+    measurement = Measurement(build_native(), capacity, mode == 'max-value-align')
+    measurement.counts.update(eviction_cycles=0, evictions=0, evicted_reserved_bytes=0)
+    rng = random.Random(config['seed'])
+    live = []
+    index = allocation_index = 0
+
+    def sample(phase):
+        state = measurement.sample(index, phase, True)
+        state['allocation_index'] = allocation_index
+        measurement.samples[-1]['allocation_index'] = allocation_index
+        measurement.samples[-1].update(
+            {key: measurement.counts[key] for key in ('eviction_cycles', 'evictions', 'evicted_reserved_bytes')}
+        )
+        return state
+
+    sample('initial')
+    try:
+        for operation in operations(config):
+            allocation_index += 1
+            index += 1
+            measurement.apply(operation)
+            if measurement.requests[operation.request_id] is None:
+                del measurement.requests[operation.request_id]
+            else:
+                live.append(operation.request_id)
+                if PERCENT * measurement.reserved >= high * capacity:
+                    sample('eviction-start')
+                    while PERCENT * measurement.reserved > low * capacity:
+                        if not live:
+                            raise RuntimeError('Eviction has no live blocks but occupancy exceeds the minimum.')
+                        target = rng.randrange(len(live))
+                        request_id = live[target]
+                        reserved = measurement.requests[request_id][1]['reserved']
+                        index += 1
+                        measurement.apply(Free(request_id, 'evict'))
+                        live[target] = live[-1]
+                        live.pop()
+                        measurement.counts['evictions'] += 1
+                        measurement.counts['evicted_reserved_bytes'] += reserved
+                    measurement.counts['eviction_cycles'] += 1
+                    sample('eviction-end')
+            if allocation_index % config['sample_every'] == 0:
+                sample('periodic')
+        return {
+            mode: {
+                'final': sample('final'),
+                'counters': dict(measurement.counts),
+                'per_size': measurement.per_size,
+                'samples': measurement.samples,
+            }
+        }
+    except Exception as error:
+        raise RuntimeError(f'Allocation attempt {allocation_index}, Operation {index}: {error}') from error
+
+
 def parser():
     result = argparse.ArgumentParser(
         description='Measure the real C++ blob allocator.',
         epilog=(TOOL / 'workload_help.txt').read_text(encoding='utf-8'),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    result.add_argument('--capacity', default='1GiB', help='Region size. Default: 1GiB. All workloads.')
+    result.add_argument('--capacity', default='1GiB', help='Region size. Default: 1GiB.')
     result.add_argument(
         '--block-sizes',
         '--block-size',
@@ -363,45 +418,50 @@ def parser():
         help='Request sizes and optional probabilities. Default: 4KiB,64KiB,1MiB.',
     )
     result.add_argument(
-        '--workload',
-        choices=['random', 'fifo', 'alternating'],
-        default='random',
-        help='Operation strategy. Default: random. See the workload descriptions below.',
-    )
-    result.add_argument(
         '--steps',
         type=int,
-        default=None,
-        help='Operation count for random/fifo. Default: 100000. Invalid for alternating.',
+        default=100000,
+        help='Allocation attempts. Default: 100000.',
     )
     result.add_argument(
-        '--alloc-probability',
-        type=float,
-        default=None,
-        help='Allocation probability for random/fifo. Default: 0.6. Invalid for alternating.',
+        '--min-water-level',
+        type=int,
+        default=80,
+        help='Stop eviction at or below this percent. Default: 80. Use an integer without a percent sign.',
     )
     result.add_argument(
-        '--seed', type=int, default=42, help='Random/fifo seed. Default: 42. No effect for alternating.'
+        '--max-water-level',
+        type=int,
+        default=90,
+        help='Start eviction at or above this percent. Default: 90. Use an integer without a percent sign.',
+    )
+    result.add_argument(
+        '--seed',
+        type=int,
+        default=42,
+        help='Seed for sizes and eviction targets. Default: 42.',
     )
     result.add_argument(
         '--mode',
         choices=['4k-align', 'max-value-align'],
         default='4k-align',
-        help='Alignment policy. Default: 4k-align. All workloads. See the mode descriptions below.',
+        help='Alignment policy. Default: 4k-align. See the mode descriptions below.',
     )
     result.add_argument(
-        '--compare',
-        action='store_true',
-        help='Run both modes with identical operations. Overrides --mode. Default: disabled.',
+        '--sample-every',
+        type=int,
+        default=1000,
+        help='Sample interval in allocation attempts. Default: 1000.',
     )
     result.add_argument(
-        '--sample-every', type=int, default=1000, help='Sample interval in operations. Default: 1000. All workloads.'
+        '--json-report-path',
+        type=Path,
+        help='Optional JSON destination. Default: no file.',
     )
     result.add_argument(
-        '--json-report-path', type=Path, help='Optional JSON destination. Default: no file. All workloads.'
-    )
-    result.add_argument(
-        '--csv-report-path', type=Path, help='Optional CSV destination. Default: no file. All workloads.'
+        '--csv-report-path',
+        type=Path,
+        help='Optional CSV destination. Default: no file.',
     )
     return result
 
@@ -435,22 +495,29 @@ def print_table(headers, rows):
 def print_report(report):
     configuration = dict(report['configuration'])
     configuration['capacity'] = readable_bytes(configuration['capacity'])
+    for key in ('min_water_level', 'max_water_level'):
+        configuration[key] = f'{configuration[key]}%'
     configuration['sizes'] = [readable_bytes(size) for size in configuration['sizes']]
     configuration['weights'] = [
         f'{human_size(size)} : {weight * PERCENT:.2f}%'
-        for size, weight in zip(report['configuration']['sizes'], report['configuration']['weights'], strict=True)
+        for size, weight in zip(
+            report['configuration']['sizes'],
+            report['configuration']['weights'],
+            strict=True,
+        )
     ]
     print('Configuration:')
     print(json.dumps(configuration, indent=2, sort_keys=True))
-    if report['configuration']['workload'] == 'alternating':
-        print('Alternating uses the smallest and largest sizes. Size probabilities do not apply.')
     for mode, outcome in report['modes'].items():
         state = outcome['final']
         print(f'\nMode: {mode}')
         print('\nCounters:')
         print_table(
             ['Operation', 'Count'],
-            [(key.replace('_', ' '), f'{value:,}') for key, value in outcome['counters'].items()],
+            [
+                (key.replace('_', ' '), readable_bytes(value) if key == 'evicted_reserved_bytes' else f'{value:,}')
+                for key, value in outcome['counters'].items()
+            ],
         )
         print('\nMemory:')
         byte_metrics = (
@@ -463,29 +530,54 @@ def print_report(report):
             ('max_value_alignment_padding', 'Max-value-align padding'),
             ('largest_free', 'Largest free range'),
         )
-        print_table(['Metric', 'Size'], [(label, readable_bytes(state[key])) for key, label in byte_metrics])
-        print(f"Free ranges: {state['free_range_count']:,}")
-        for key, denominator in [('internal_percent', 'reserved bytes'), ('external_percent', 'free bytes')]:
+        print_table(
+            ['Metric', 'Size'],
+            [(label, readable_bytes(state[key])) for key, label in byte_metrics],
+        )
+        print(f'Occupancy: {state["occupancy_percent"]:.2f}% (denominator: capacity bytes)')
+        print(f'Free ranges: {state["free_range_count"]:,}')
+        for key, denominator in [
+            ('internal_percent', 'reserved bytes'),
+            ('external_percent', 'free bytes'),
+        ]:
             value = state[key]
             formatted = 'N/A' if value is None else f'{value:.2f}%'
             label = 'Internal fragmentation' if key == 'internal_percent' else 'External fragmentation'
             print(f'{label}: {formatted} (denominator: {denominator})')
         print('\nAllocation attempts by size:')
-        categories = ('attempts', 'successes', 'capacity_failures', 'fragmentation_failures')
+        categories = (
+            'attempts',
+            'successes',
+            'capacity_failures',
+            'fragmentation_failures',
+        )
         print_table(
-            ['Requested size', 'Attempts', 'Successes', 'Capacity failures', 'Fragmentation failures'],
             [
-                [readable_bytes(int(size)), *(f'{counts.get(key, 0):,}' for key in categories)]
+                'Requested size',
+                'Attempts',
+                'Successes',
+                'Capacity failures',
+                'Fragmentation failures',
+            ],
+            [
+                [
+                    readable_bytes(int(size)),
+                    *(f'{counts.get(key, 0):,}' for key in categories),
+                ]
                 for size, counts in sorted(outcome['per_size'].items(), key=lambda item: int(item[0]))
             ],
         )
         print('\nFree-range histogram:')
         print_table(
-            ['Range size (lower exclusive, upper inclusive)', 'Count', 'Actual free space'],
+            [
+                'Range size (lower exclusive, upper inclusive)',
+                'Count',
+                'Actual free space',
+            ],
             [
                 [
-                    f"({human_size(bucket['lower'])}, {human_size(bucket['upper'])}]",
-                    f"{bucket['count']:,}",
+                    f'({human_size(bucket["lower"])}, {human_size(bucket["upper"])}]',
+                    f'{bucket["count"]:,}',
                     readable_bytes(bucket['bytes']),
                 ]
                 for bucket in state['histogram']
@@ -533,40 +625,43 @@ def main(argv=None):
     try:
         sizes, weights = distribution(args.block_sizes)
         capacity = size_value(args.capacity)
-        if args.workload == 'alternating' and (args.steps is not None or args.alloc_probability is not None):
-            raise ValueError('Alternating rejects --steps and --alloc-probability.')
-        steps = 100000 if args.steps is None else args.steps
-        probability = 0.6 if args.alloc_probability is None else args.alloc_probability
-        if steps <= 0 or args.sample_every <= 0 or not 0 <= probability <= 1:
-            raise ValueError('Counts must be positive. Allocation probability must be between zero and one.')
-        if args.workload == 'alternating' and (
-            align(min(sizes)) == align(max(sizes)) or capacity < align(min(sizes)) + align(max(sizes))
-        ):
-            raise ValueError('Alternating requires distinct aligned sizes and capacity for one pair.')
+        if args.steps <= 0 or args.sample_every <= 0:
+            raise ValueError('Counts must be positive.')
+        if not 0 <= args.min_water_level < args.max_water_level <= PERCENT:
+            raise ValueError('Water levels must satisfy 0 <= minimum < maximum <= 100.')
         config = {
             'capacity': capacity,
             'sizes': sizes,
             'weights': weights,
-            'steps': steps if args.workload != 'alternating' else None,
-            'alloc_probability': probability if args.workload != 'alternating' else None,
+            'steps': args.steps,
+            'min_water_level': args.min_water_level,
+            'max_water_level': args.max_water_level,
             'seed': args.seed,
-            'workload': args.workload,
+            'workload': 'water-level',
             'mode': args.mode,
-            'compare': args.compare,
             'sample_every': args.sample_every,
         }
-        modes = run_workload(operations(config), capacity, args.mode, args.sample_every, compare=args.compare)
+        modes = run_simulation(config)
         report = {'configuration': config, 'modes': modes}
         repo = TOOL.parents[3]
         if shutil.which('git'):
             revision = subprocess.run(
-                ['git', '-C', str(repo), 'rev-parse', 'HEAD'], capture_output=True, text=True, check=False
+                ['git', '-C', str(repo), 'rev-parse', 'HEAD'],
+                capture_output=True,
+                text=True,
+                check=False,
             )
             report['source_revision'] = revision.stdout.strip() if revision.returncode == 0 else None
         write_reports(report, args.json_report_path, args.csv_report_path)
         print_report(report)
         return 0
-    except (ValueError, RuntimeError, OSError, subprocess.CalledProcessError, ImportError) as error:
+    except (
+        ValueError,
+        RuntimeError,
+        OSError,
+        subprocess.CalledProcessError,
+        ImportError,
+    ) as error:
         print(f'Measurement aborted: {error}', file=sys.stderr)
         return 1
 

@@ -42,7 +42,6 @@ Reject unknown handles and handles that the simulator already freed.
 Do not ignore a double free.
 Translate unsuccessful releases and unexpected native failures into Python exceptions.
 Abort the entire measurement when any of these errors occurs.
-In comparison mode, abort both runs when either run encounters invalid behavior.
 Report the operation index and the error cause.
 Exit the CLI with a nonzero status.
 Do not print a success summary or write a normal report for an aborted measurement.
@@ -77,20 +76,17 @@ Report missing prerequisites without installing them automatically.
 
 ## Workloads and CLI
 
-Provide an importable Python API for custom workloads.
-Provide random, FIFO, and alternating-hole presets.
-FIFO means that releases select the oldest outstanding logical allocation.
-
-Include `workload_help.txt` in the CLI help without truncating its descriptions.
-Use an argparse formatter that preserves its line breaks.
-Keep that text consistent with workload behavior and the local README.
-State operation probabilities and release order for each workload.
-State that random and FIFO start empty without a separate filling phase.
-State each alternating phase and its option restrictions.
-State how failures and skipped releases affect operation counts.
-State each option's default and applicable workloads in its help description.
-Process `--help` before compilation or measurement.
-Update the README implementation status when executable code becomes available.
+Provide an importable Python API for controlled Alloc/Free experiments.
+The CLI uses allocation attempts and synchronous water-level eviction.
+Start eviction at or above maximum occupancy. Stop at or below minimum occupancy.
+Use reserved bytes divided by capacity. Include padding.
+Defaults: minimum 80%, maximum 90%. Require integer levels: 0 <= minimum < maximum <= 100.
+Select uniformly from successful live allocations. Do not select failed requests.
+Count steps as allocation attempts. Eviction does not consume steps.
+Do not retry failures or trigger eviction because of a failure.
+Keep size and eviction random generators separate and seeded.
+Remove workload selection, allocation probability, and comparison options.
+Keep help and README consistent. Help must not compile code.
 
 Accept distributions through `--block-sizes` with `--block-size` as an alias.
 For example, accept `'4KiB:25%,64KiB:25%,1MiB:50%'`.
@@ -102,11 +98,8 @@ Do not promise exact request counts for sampled distributions.
 Use a local random generator with a configurable seed.
 
 Use `4k-align` mode by default.
-Support enabling max-value-align mode and comparing both modes.
-Use separate allocator instances for comparisons.
-Give both instances the same logical operation sequence.
-Do not modify that sequence because one instance rejects an allocation.
-Record a skipped release when its corresponding allocation failed.
+Support max-value-align through --mode. Measure one mode per invocation.
+Keep run_workload for explicit Alloc/Free experiments without automatic eviction.
 
 ## Metrics and reports
 
@@ -148,7 +141,7 @@ Keep all simulator documentation in this directory.
 ## Verification
 
 Use local Python tests that do not require a running service.
-Test sampling, reproducibility, report options, and comparison sequences.
+Test sampling, reproducibility, report options, and eviction thresholds.
 Test that CLI help describes operation selection, release order, failures, and workload restrictions.
 Test that requesting help does not compile code or start a measurement.
 Test internal waste, external fragmentation, coalescing, and max-value-align padding against the real allocator.
@@ -165,7 +158,7 @@ Leave unrelated user files unchanged.
 
 Accept exactly two `--mode` values: `4k-align` and `max-value-align`.
 Use those names in reports, help, and documentation.
-Provide `--compare` as a separate flag that runs both modes.
+Do not provide `--compare`.
 Keep the existing C++ implementation unchanged.
 Explain each fragmentation percentage with its formula and denominator.
 Use actual current allocations and exact free ranges for the final report.
