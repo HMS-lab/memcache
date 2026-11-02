@@ -1,0 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+# Licensed under Mulan PSL v2. See the repository LICENSE file.
+cmake>=3.18
+pybind11>=3.0
+nlohmann_json>=3.12.0
