@@ -25,9 +25,11 @@ class PythonTests(unittest.TestCase):
             'sizes': [4096, 8192],
             'weights': [0.25, 0.75],
             'seed': 42,
-            'workload': 'random',
+            'mode': '4k-align',
+            'min_water_level': 80,
+            'max_water_level': 90,
+            'sample_every': 100,
             'steps': 1000,
-            'alloc_probability': 0.6,
             'capacity': 64 * KiB,
         }
         config.update(values)
@@ -46,12 +48,17 @@ class PythonTests(unittest.TestCase):
 
     def test_workloads(self):
         self.assertEqual(list(sim.operations(self.config())), list(sim.operations(self.config())))
-        fifo = list(sim.operations(self.config(workload='fifo', alloc_probability=0)))
-        self.assertIsInstance(fifo[0], sim.Alloc)
-        self.assertEqual(fifo[1], sim.Free(fifo[0].request_id))
-        self.assertTrue(all(isinstance(op, sim.Alloc) for op in sim.operations(self.config(alloc_probability=1))))
-        ops = list(sim.operations(self.config(workload='alternating', sizes=[4096, 8192], capacity=28 * KiB)))
-        self.assertEqual([op.phase for op in ops], ['fill'] * 4 + ['tail', 'release-small', 'release-small', 'probe'])
+        self.assertTrue(all(isinstance(op, sim.Alloc) for op in sim.operations(self.config())))
+        for low, high in ((-1, 90), (90, 90), (91, 90), (80, 101), (80.5, 90)):
+            with (
+                patch.object(
+                    sim,
+                    'build_native',
+                    side_effect=AssertionError('Invalid config built code'),
+                ),
+                self.assertRaises(ValueError),
+            ):
+                sim.run_simulation(self.config(min_water_level=low, max_water_level=high))
 
     def test_histogram_and_percentages(self):
         buckets, exact = sim.histogram(
@@ -68,18 +75,32 @@ class PythonTests(unittest.TestCase):
 
     def test_help_never_builds(self):
         with patch.object(sim, 'build_native', side_effect=AssertionError('Help compiled code')):
-            with contextlib.redirect_stdout(io.StringIO()) as output, self.assertRaises(SystemExit) as error:
+            with (
+                contextlib.redirect_stdout(io.StringIO()) as output,
+                self.assertRaises(SystemExit) as error,
+            ):
                 sim.main(['--help'])
             self.assertEqual(error.exception.code, 0)
-            for phrase in ('oldest outstanding', 'Neither fills', 'without retrying', 'max-value-align'):
+            for phrase in (
+                'Start empty',
+                'at or above',
+                'without retrying',
+                'max-value-align',
+            ):
                 self.assertIn(phrase, output.getvalue())
 
-    def test_mode_choices_and_comparison_flag(self):
+    def test_mode_choices_and_removed_flags(self):
         self.assertEqual(sim.parser().parse_args([]).mode, '4k-align')
         selected = sim.parser().parse_args(['--mode', 'max-value-align'])
         self.assertEqual(selected.mode, 'max-value-align')
-        self.assertFalse(selected.compare)
-        self.assertTrue(sim.parser().parse_args(['--compare']).compare)
+        for flag in ('--compare', '--workload', '--alloc-probability'):
+            with (
+                contextlib.redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit),
+            ):
+                sim.parser().parse_args([flag])
+        self.assertEqual(sim.parser().parse_args([]).min_water_level, 80)
+        self.assertEqual(sim.parser().parse_args([]).max_water_level, 90)
         for invalid in ('normal', 'compare', 'off', 'on', 'max-value-alignment'):
             with (
                 self.subTest(mode=invalid),
@@ -90,7 +111,10 @@ class PythonTests(unittest.TestCase):
 
     def test_build_failure_aborts(self):
         with patch.object(sim, 'build_native', side_effect=RuntimeError('Build failed')):
-            with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()) as output:
+            with (
+                contextlib.redirect_stderr(io.StringIO()),
+                contextlib.redirect_stdout(io.StringIO()) as output,
+            ):
                 self.assertEqual(sim.main([]), 1)
             self.assertEqual(output.getvalue(), '')
 
@@ -103,7 +127,11 @@ class PythonTests(unittest.TestCase):
                 with (
                     patch.object(sim.shutil, 'which', return_value='/usr/bin/cmake'),
                     patch.object(sim.importlib.util, 'find_spec', return_value=object()),
-                    patch.object(sim.subprocess, 'run', side_effect=RuntimeError('Captured configure')) as configure,
+                    patch.object(
+                        sim.subprocess,
+                        'run',
+                        side_effect=RuntimeError('Captured configure'),
+                    ) as configure,
                 ):
                     with self.assertRaisesRegex(RuntimeError, 'Captured configure'):
                         sim.build_native()
@@ -113,7 +141,15 @@ class PythonTests(unittest.TestCase):
         report = {
             'configuration': {},
             'modes': {
-                '4k-align': {'samples': [{'operation_index': 0, 'internal_percent': None, 'external_percent': 50.0}]}
+                '4k-align': {
+                    'samples': [
+                        {
+                            'operation_index': 0,
+                            'internal_percent': None,
+                            'external_percent': 50.0,
+                        }
+                    ]
+                }
             },
         }
         with tempfile.TemporaryDirectory() as directory:
@@ -131,7 +167,10 @@ class PythonTests(unittest.TestCase):
                 sim.write_reports(report, json_path, json_path)
 
 
-@unittest.skipUnless(os.environ.get('BLOB_SIM_NATIVE_TESTS') == '1', 'Set BLOB_SIM_NATIVE_TESTS=1 for native tests.')
+@unittest.skipUnless(
+    os.environ.get('BLOB_SIM_NATIVE_TESTS') == '1',
+    'Set BLOB_SIM_NATIVE_TESTS=1 for native tests.',
+)
 class NativeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -182,8 +221,9 @@ class NativeTests(unittest.TestCase):
 
     def test_runner_and_abort(self):
         sequence = [sim.Alloc(0, 8192), sim.Alloc(1, 4096), sim.Free(0)]
-        report = sim.run_workload(iter(sequence), 64 * KiB, compare=True)
+        report = sim.run_workload(iter(sequence), 64 * KiB)
         self.assertEqual(report['4k-align']['final']['reserved'], 4096)
+        report = sim.run_workload(iter(sequence), 64 * KiB, mode='max-value-align')
         self.assertEqual(report['max-value-align']['final']['reserved'], 8192)
         with self.assertRaisesRegex(RuntimeError, 'Operation 3'):
             sim.run_workload(iter([sim.Alloc(0, 8192), sim.Free(0), sim.Free(0)]), 64 * KiB)
@@ -191,6 +231,94 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(report['4k-align']['counters']['skipped_releases'], 1)
         with self.assertRaisesRegex(RuntimeError, 'Operation 3'):
             sim.run_workload(iter([sim.Alloc(0, 128 * KiB), sim.Free(0), sim.Free(0)]), 64 * KiB)
+
+    def simulation(self, **overrides):
+        config = PythonTests().config(
+            sizes=[4 * KiB],
+            weights=[1],
+            steps=4,
+            capacity=16 * KiB,
+            min_water_level=50,
+            max_water_level=100,
+        )
+        config.update(overrides)
+        return sim.run_simulation(config)[config['mode']]
+
+    def test_eviction_boundaries_and_final_attempt(self):
+        for mode in ('4k-align', 'max-value-align'):
+            result = self.simulation(mode=mode)
+            self.assertEqual(result['counters']['attempts'], 4)
+            self.assertEqual(result['counters']['evictions'], 2)
+            self.assertEqual(result['counters']['releases'], 2)
+            self.assertEqual(result['counters']['eviction_cycles'], 1)
+            self.assertEqual(result['counters']['evicted_reserved_bytes'], 8 * KiB)
+            self.assertEqual(result['final']['reserved'], 8 * KiB)
+            self.assertEqual(result['final']['allocation_index'], 4)
+            self.assertEqual(result['final']['operation_index'], 6)
+            self.assertEqual(
+                [x['occupancy_percent'] for x in result['samples'] if x['phase'].startswith('eviction-')],
+                [100, 50],
+            )
+        result = self.simulation(min_water_level=0, max_water_level=90)
+        self.assertEqual(result['final']['reserved'], 0)
+        result = self.simulation(capacity=16 * KiB + 1, min_water_level=50, max_water_level=90)
+        self.assertEqual(result['final']['reserved'], 8 * KiB)
+        result = self.simulation(min_water_level=40, max_water_level=70, steps=3)
+        self.assertEqual(result['final']['reserved'], 4 * KiB)
+
+    def test_failure_does_not_evict(self):
+        sequence = [
+            sim.Alloc(0, 12 * KiB),
+            sim.Alloc(1, 8 * KiB),
+            sim.Alloc(2, 8 * KiB),
+        ]
+        with patch.object(sim, 'operations', return_value=iter(sequence)):
+            result = self.simulation(steps=3)
+        self.assertEqual(result['counters']['capacity_failures'], 2)
+        self.assertEqual(result['counters']['evictions'], 0)
+        self.assertEqual(result['counters']['attempts'], 3)
+        self.assertEqual(result['counters']['skipped_releases'], 0)
+
+    def test_eviction_reproducibility_and_padding(self):
+        options = {'sizes': [4 * KiB, 8 * KiB], 'weights': [0.5, 0.5], 'steps': 100}
+        self.assertEqual(self.simulation(**options), self.simulation(**options))
+        a = self.simulation(**options)
+        b = self.simulation(**options, min_water_level=0, mode='max-value-align')
+        self.assertEqual(a['counters']['attempts'], b['counters']['attempts'])
+        self.assertEqual(
+            {k: v['attempts'] for k, v in a['per_size'].items()},
+            {k: v['attempts'] for k, v in b['per_size'].items()},
+        )
+        sequence = [sim.Alloc(0, 8 * KiB), sim.Alloc(1, 1)]
+        with patch.object(sim, 'operations', side_effect=lambda _: iter(sequence)):
+            normal = self.simulation(steps=2)
+            padded = self.simulation(steps=2, mode='max-value-align')
+        self.assertEqual(normal['counters']['evictions'], 0)
+        self.assertEqual(padded['counters']['eviction_cycles'], 1)
+
+    def test_simulation_abort_and_reports(self):
+        original = sim.Measurement.apply
+
+        def fail_release(measurement, operation):
+            if isinstance(operation, sim.Free):
+                raise RuntimeError('Native release failed.')  # noqa: TRY004 - simulate a native release failure
+            return original(measurement, operation)
+
+        with (
+            patch.object(sim.Measurement, 'apply', fail_release),
+            self.assertRaisesRegex(RuntimeError, 'Allocation attempt 4, Operation 5: Native release failed'),
+        ):
+            self.simulation()
+        result = self.simulation()
+        report = {'configuration': {}, 'modes': {'4k-align': result}}
+        with tempfile.TemporaryDirectory() as directory:
+            json_path, csv_path = Path(directory) / 'out.json', Path(directory) / 'out.csv'
+            sim.write_reports(report, json_path, csv_path)
+            self.assertEqual(json.loads(json_path.read_text())['modes']['4k-align']['final']['occupancy_percent'], 50)
+            with csv_path.open(encoding='utf-8', newline='') as stream:
+                rows = list(csv.DictReader(stream))
+            self.assertEqual(rows[-1]['allocation_index'], '4')
+            self.assertEqual(rows[-1]['evictions'], '2')
 
 
 if __name__ == '__main__':
