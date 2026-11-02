@@ -1,0 +1,575 @@
+#!/usr/bin/env python3
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+# Licensed under Mulan PSL v2. See the repository LICENSE file.
+"""Standalone workloads and measurements for the real MemCache blob allocator."""
+
+import argparse
+import csv
+import hashlib
+import importlib.util
+import json
+import os
+import random
+import re
+import shutil
+import subprocess
+import sys
+import sysconfig
+import tempfile
+from collections import Counter, deque
+from dataclasses import dataclass
+from decimal import Decimal
+from pathlib import Path
+
+TOOL = Path(__file__).resolve().parent
+ALIGNMENT = 4096
+MAX_SIZE = (1 << 64) - ALIGNMENT
+PERCENT = 100
+
+
+def size_value(text):
+    match = re.fullmatch(r'(\d+)(B|KiB|MiB|GiB|TiB)?', str(text).strip(), re.IGNORECASE)
+    if not match:
+        raise ValueError(f'Invalid size: {text}. Use integer bytes or binary units such as KiB.')
+    unit = (match[2] or 'B').lower()
+    size = int(match[1]) * 1024 ** ['b', 'kib', 'mib', 'gib', 'tib'].index(unit)
+    if not 0 < size <= MAX_SIZE:
+        raise ValueError('Size must be positive and must not overflow alignment.')
+    return size
+
+
+def distribution(text):
+    entries = [item.strip().split(':') for item in text.split(',')]
+    if any(len(item) not in (1, 2) for item in entries):
+        raise ValueError('Use SIZE or SIZE:PERCENT% for each entry.')
+    sizes = [size_value(item[0]) for item in entries]
+    if len(set(sizes)) != len(sizes):
+        raise ValueError('Duplicate block sizes are invalid.')
+    weighted = [len(item) == 2 for item in entries]
+    if any(weighted) and not all(weighted):
+        raise ValueError('Supply all percentages or omit all percentages.')
+    if all(weighted):
+        if any(not re.fullmatch(r'\d+(?:\.\d+)?%', item[1]) for item in entries):
+            raise ValueError('Each percentage must be a positive number followed by %.')
+        weights = [Decimal(item[1][:-1]) for item in entries]
+        if any(weight <= 0 for weight in weights) or sum(weights) != PERCENT:
+            raise ValueError('Positive percentages must total 100%.')
+    else:
+        weights = [Decimal(1)] * len(sizes)
+    total = sum(weights)
+    return sizes, [float(weight / total) for weight in weights]
+
+
+def align(size):
+    return (size + ALIGNMENT - 1) // ALIGNMENT * ALIGNMENT
+
+
+@dataclass(frozen=True)
+class Alloc:
+    request_id: int
+    size: int
+    phase: str = ''
+
+
+@dataclass(frozen=True)
+class Free:
+    request_id: int
+    phase: str = ''
+
+
+def operations(config):
+    sizes, weights = config['sizes'], config['weights']
+    if config['workload'] == 'alternating':
+        small, large = min(sizes), max(sizes)
+        pairs = config['capacity'] // (align(small) + align(large))
+        if align(small) == align(large) or not pairs:
+            raise ValueError('Alternating requires distinct aligned sizes and capacity for one pair.')
+        for index in range(pairs):
+            yield Alloc(index * 2, small, 'fill')
+            yield Alloc(index * 2 + 1, large, 'fill')
+        tail = (config['capacity'] - pairs * (align(small) + align(large))) // ALIGNMENT * ALIGNMENT
+        if tail:
+            yield Alloc(pairs * 2, tail, 'tail')
+        for index in range(pairs):
+            yield Free(index * 2, 'release-small')
+        yield Alloc(pairs * 2 + 1, large, 'probe')
+        return
+    rng = random.Random(config['seed'])
+    outstanding = [] if config['workload'] == 'random' else deque()
+    next_id = 0
+    for _ in range(config['steps']):
+        if not outstanding or rng.random() < config['alloc_probability']:
+            size = rng.choices(sizes, weights=weights, k=1)[0]
+            outstanding.append(next_id)
+            yield Alloc(next_id, size)
+            next_id += 1
+        else:
+            if config['workload'] == 'fifo':
+                request_id = outstanding.popleft()
+            else:
+                index = rng.randrange(len(outstanding))
+                request_id = outstanding[index]
+                outstanding[index] = outstanding[-1]
+                outstanding.pop()
+            yield Free(request_id)
+
+
+def build_native():
+    if not shutil.which('cmake'):
+        raise RuntimeError('CMake is missing. Install CMake 3.18 or newer before running a measurement.')
+    if importlib.util.find_spec('pybind11') is None:
+        raise RuntimeError('pybind11 is missing. Install it for the current Python interpreter.')
+    # A stable interpreter identity also separates virtual environments.
+
+    identity = sys.implementation.cache_tag + '-' + hashlib.sha256(sys.executable.encode()).hexdigest()[:12]
+    build = TOOL / 'build' / identity
+    command = [
+        'cmake',
+        '-S',
+        str(TOOL),
+        '-B',
+        str(build),
+        '-DCMAKE_BUILD_TYPE=Release',
+        f'-DPython3_EXECUTABLE={sys.executable}',
+    ]
+    headers = os.environ.get('BLOB_SIM_JSON_HEADERS')
+    # Clear stale explicit paths when the environment returns to automatic discovery.
+    command.append(f'-DJSON_HEADERS={headers or ""}')
+    python_headers = os.environ.get('BLOB_SIM_PYTHON_HEADERS')
+    if python_headers:
+        command.append(f'-DPython3_INCLUDE_DIR={python_headers}')
+    subprocess.run(command, check=True, stdout=sys.stderr)
+    subprocess.run(['cmake', '--build', str(build), '--config', 'Release'], check=True, stdout=sys.stderr)
+    path = build / 'native' / ('_allocator_sim_native' + sysconfig.get_config_var('EXT_SUFFIX'))
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    existing = sys.modules.get('_allocator_sim_native')
+    if existing is not None:
+        if existing.__binary_digest__ != digest:
+            raise RuntimeError('Native code changed. Start a new Python process before measurement.')
+        return existing
+    spec = importlib.util.spec_from_file_location('_allocator_sim_native', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.__binary_digest__ = digest
+    sys.modules[spec.name] = module
+    return module
+
+
+def histogram(ranges):
+    buckets = {}
+    exact = Counter()
+    for _, size in ranges:
+        if size <= 0:
+            raise RuntimeError('A free range has an invalid size.')
+        upper = ALIGNMENT
+        while upper < size:
+            upper *= 2
+        count, total = buckets.get(upper, (0, 0))
+        buckets[upper] = (count + 1, total + size)
+        exact[size] += 1
+    result = []
+    upper = ALIGNMENT
+    while buckets and upper <= max(buckets):
+        count, total = buckets.get(upper, (0, 0))
+        result.append(
+            {'lower': 0 if upper == ALIGNMENT else upper // 2, 'upper': upper, 'count': count, 'bytes': total}
+        )
+        upper *= 2
+    return result, dict(sorted(exact.items()))
+
+
+def percentage(numerator, denominator):
+    return PERCENT * numerator / denominator if denominator else None
+
+
+class Measurement:
+    def __init__(self, native, capacity, enabled):
+        self.allocator = native.Allocator(capacity, enabled)
+        self.requests = {}
+        self.seen = set()
+        self.counts = Counter(
+            {
+                key: 0
+                for key in (
+                    "attempts",
+                    "successes",
+                    "capacity_failures",
+                    "fragmentation_failures",
+                    "releases",
+                    "skipped_releases",
+                )
+            }
+        )
+        self.per_size = {}
+        self.requested = self.alignment_waste = self.max_padding = 0
+        self.samples = []
+
+    def sample(self, index, phase='', detailed=False):
+        state = self.allocator.snapshot(detailed)
+        state['free'] = state['capacity'] - state['reserved']
+        state['requested'] = self.requested
+        state['alignment_waste'] = self.alignment_waste
+        state['max_value_alignment_padding'] = self.max_padding
+        if detailed:
+            ranges = state['ranges']
+            state['free'] = sum(size for _, size in ranges)
+            state['largest_free'] = max((size for _, size in ranges), default=0)
+            state['free_range_count'] = len(ranges)
+            state['histogram'], state['exact_size_histogram'] = histogram(ranges)
+            previous_end = 0
+            for address, size in ranges:
+                if address < previous_end or address + size > state['capacity']:
+                    raise RuntimeError('Free ranges overlap or exceed capacity.')
+                previous_end = address + size
+        if (
+            sum(info['reserved'] for record in self.requests.values() if record is not None for _, info in [record])
+            != state['reserved']
+        ):
+            raise RuntimeError('Live blocks disagree with reserved bytes.')
+        if (
+            state['reserved'] + state['free'] != state['capacity']
+            or self.requested + state['internal_bytes'] != state['reserved']
+            or self.alignment_waste + self.max_padding != state['internal_bytes']
+        ):
+            raise RuntimeError('Allocator accounting is inconsistent.')
+        state['internal_percent'] = percentage(state['internal_bytes'], state['reserved'])
+        state['external_percent'] = percentage(state['free'] - state['largest_free'], state['free'])
+        state['operation_index'] = index
+        state['phase'] = phase
+        scalar = {key: value for key, value in state.items() if not isinstance(value, (dict, list))}
+        scalar.update(
+            {
+                key: self.counts[key]
+                for key in (
+                    'attempts',
+                    'successes',
+                    'capacity_failures',
+                    'fragmentation_failures',
+                    'releases',
+                    'skipped_releases',
+                )
+            }
+        )
+        self.samples.append(scalar)
+        return state
+
+    def apply(self, operation):
+        request_id = operation.request_id
+        if not isinstance(request_id, int) or request_id < 0:
+            raise ValueError('Request IDs must be nonnegative integers.')
+        if isinstance(operation, Alloc):
+            if request_id in self.seen:
+                raise ValueError('Duplicate allocation request ID.')
+            if not isinstance(operation.size, int) or not 0 < operation.size <= MAX_SIZE:
+                raise ValueError('Allocation size is invalid or alignment would overflow.')
+            self.seen.add(request_id)
+            size = operation.size
+            counts = self.per_size.setdefault(size, Counter())
+            counts['attempts'] += 1
+            self.counts['attempts'] += 1
+            required = self.allocator.required_size(size)
+            handle = self.allocator.alloc(size)
+            if handle is None:
+                state = self.allocator.snapshot(False)
+                free = state['capacity'] - state['reserved']
+                if required > free:
+                    category = 'capacity_failures'
+                elif required > state['largest_free']:
+                    category = 'fragmentation_failures'
+                else:
+                    raise RuntimeError('Allocation failure contradicts free-space metrics.')
+                self.counts[category] += 1
+                counts[category] += 1
+                self.requests[request_id] = None
+            else:
+                info = self.allocator.blob_info(handle)
+                if info['requested'] != size or info['reserved'] < size:
+                    raise RuntimeError('Native allocation metadata is inconsistent.')
+                self.requests[request_id] = (handle, info)
+                self.requested += size
+                aligned = self.allocator.align_size(size)
+                self.alignment_waste += aligned - size
+                self.max_padding += info['reserved'] - aligned
+                self.counts['successes'] += 1
+                counts['successes'] += 1
+        elif isinstance(operation, Free):
+            if request_id not in self.requests:
+                raise ValueError('Unknown request or double free.')
+            record = self.requests.pop(request_id)
+            if record is None:
+                self.counts['skipped_releases'] += 1
+                return
+            handle, info = record
+            self.allocator.free(handle)
+            self.requested -= info['requested']
+            aligned = self.allocator.align_size(info['requested'])
+            self.alignment_waste -= aligned - info['requested']
+            self.max_padding -= info['reserved'] - aligned
+            self.counts['releases'] += 1
+        else:
+            raise TypeError('Unknown operation type.')
+
+
+def run_workload(sequence, capacity, mode='4k-align', sample_every=1000, *, compare=False):
+    """Build the adapter, then measure an iterable of Alloc and Free operations."""
+    if not isinstance(capacity, int) or not 0 < capacity <= MAX_SIZE or sample_every <= 0:
+        raise ValueError('Capacity and sample interval must be positive and valid.')
+    if mode not in ('4k-align', 'max-value-align'):
+        raise ValueError('Unknown mode. Use 4k-align or max-value-align.')
+    native = build_native()
+    modes = [False, True] if compare else [mode == 'max-value-align']
+    measurements = {
+        ('max-value-align' if enabled else '4k-align'): Measurement(native, capacity, enabled) for enabled in modes
+    }
+    for measurement in measurements.values():
+        measurement.sample(0, 'initial', True)
+    index = 0
+    previous_phase = None
+    try:
+        for index, operation in enumerate(sequence, 1):
+            phase = operation.phase
+            if previous_phase is not None and phase != previous_phase:
+                for measurement in measurements.values():
+                    measurement.sample(index - 1, previous_phase, True)
+            for measurement in measurements.values():
+                measurement.apply(operation)
+                if index % sample_every == 0:
+                    measurement.sample(index, phase, True)
+            previous_phase = phase
+        return {
+            mode: {
+                'final': measurement.sample(index, 'final', True),
+                'counters': dict(measurement.counts),
+                'per_size': measurement.per_size,
+                'samples': measurement.samples,
+            }
+            for mode, measurement in measurements.items()
+        }
+    except Exception as error:
+        raise RuntimeError(f'Operation {index}: {error}') from error
+
+
+def parser():
+    result = argparse.ArgumentParser(
+        description='Measure the real C++ blob allocator.',
+        epilog=(TOOL / 'workload_help.txt').read_text(encoding='utf-8'),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    result.add_argument('--capacity', default='1GiB', help='Region size. Default: 1GiB. All workloads.')
+    result.add_argument(
+        '--block-sizes',
+        '--block-size',
+        default='4KiB,64KiB,1MiB',
+        help='Request sizes and optional probabilities. Default: 4KiB,64KiB,1MiB.',
+    )
+    result.add_argument(
+        '--workload',
+        choices=['random', 'fifo', 'alternating'],
+        default='random',
+        help='Operation strategy. Default: random. See the workload descriptions below.',
+    )
+    result.add_argument(
+        '--steps',
+        type=int,
+        default=None,
+        help='Operation count for random/fifo. Default: 100000. Invalid for alternating.',
+    )
+    result.add_argument(
+        '--alloc-probability',
+        type=float,
+        default=None,
+        help='Allocation probability for random/fifo. Default: 0.6. Invalid for alternating.',
+    )
+    result.add_argument(
+        '--seed', type=int, default=42, help='Random/fifo seed. Default: 42. No effect for alternating.'
+    )
+    result.add_argument(
+        '--mode',
+        choices=['4k-align', 'max-value-align'],
+        default='4k-align',
+        help='Alignment policy. Default: 4k-align. All workloads. See the mode descriptions below.',
+    )
+    result.add_argument(
+        '--compare',
+        action='store_true',
+        help='Run both modes with identical operations. Overrides --mode. Default: disabled.',
+    )
+    result.add_argument(
+        '--sample-every', type=int, default=1000, help='Sample interval in operations. Default: 1000. All workloads.'
+    )
+    result.add_argument(
+        '--json-report-path', type=Path, help='Optional JSON destination. Default: no file. All workloads.'
+    )
+    result.add_argument(
+        '--csv-report-path', type=Path, help='Optional CSV destination. Default: no file. All workloads.'
+    )
+    return result
+
+
+def human_size(size):
+    units = ('B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB')
+    value = size
+    for unit in units:
+        if value < 1024 or unit == units[-1]:
+            return f'{value:.2f} {unit}' if unit != 'B' else f'{value} B'
+        value /= 1024
+    raise AssertionError('Unreachable size unit.')
+
+
+def readable_bytes(size):
+    return f'{size:,} bytes ({human_size(size)})'
+
+
+def print_table(headers, rows):
+    rows = [[str(cell) for cell in row] for row in rows]
+    widths = [max([len(header), *(len(row[index]) for row in rows)]) for index, header in enumerate(headers)]
+    for row in (headers, ['-' * width for width in widths], *rows):
+        print(
+            '  '.join(
+                f'{cell:<{width}}' if index == 0 else f'{cell:>{width}}'
+                for index, (cell, width) in enumerate(zip(row, widths, strict=True))
+            )
+        )
+
+
+def print_report(report):
+    configuration = dict(report['configuration'])
+    configuration['capacity'] = readable_bytes(configuration['capacity'])
+    configuration['sizes'] = [readable_bytes(size) for size in configuration['sizes']]
+    configuration['weights'] = [
+        f'{human_size(size)} : {weight * PERCENT:.2f}%'
+        for size, weight in zip(report['configuration']['sizes'], report['configuration']['weights'], strict=True)
+    ]
+    print('Configuration:')
+    print(json.dumps(configuration, indent=2, sort_keys=True))
+    if report['configuration']['workload'] == 'alternating':
+        print('Alternating uses the smallest and largest sizes. Size probabilities do not apply.')
+    for mode, outcome in report['modes'].items():
+        state = outcome['final']
+        print(f'\nMode: {mode}')
+        print('\nCounters:')
+        print_table(
+            ['Operation', 'Count'],
+            [(key.replace('_', ' '), f'{value:,}') for key, value in outcome['counters'].items()],
+        )
+        print('\nMemory:')
+        byte_metrics = (
+            ('capacity', 'Capacity'),
+            ('requested', 'Requested'),
+            ('reserved', 'Reserved'),
+            ('free', 'Free'),
+            ('internal_bytes', 'Internal fragmentation'),
+            ('alignment_waste', 'Alignment waste'),
+            ('max_value_alignment_padding', 'Max-value-align padding'),
+            ('largest_free', 'Largest free range'),
+        )
+        print_table(['Metric', 'Size'], [(label, readable_bytes(state[key])) for key, label in byte_metrics])
+        print(f"Free ranges: {state['free_range_count']:,}")
+        for key, denominator in [('internal_percent', 'reserved bytes'), ('external_percent', 'free bytes')]:
+            value = state[key]
+            formatted = 'N/A' if value is None else f'{value:.2f}%'
+            label = 'Internal fragmentation' if key == 'internal_percent' else 'External fragmentation'
+            print(f'{label}: {formatted} (denominator: {denominator})')
+        print('\nAllocation attempts by size:')
+        categories = ('attempts', 'successes', 'capacity_failures', 'fragmentation_failures')
+        print_table(
+            ['Requested size', 'Attempts', 'Successes', 'Capacity failures', 'Fragmentation failures'],
+            [
+                [readable_bytes(int(size)), *(f'{counts.get(key, 0):,}' for key in categories)]
+                for size, counts in sorted(outcome['per_size'].items(), key=lambda item: int(item[0]))
+            ],
+        )
+        print('\nFree-range histogram:')
+        print_table(
+            ['Range size (lower exclusive, upper inclusive)', 'Count', 'Actual free space'],
+            [
+                [
+                    f"({human_size(bucket['lower'])}, {human_size(bucket['upper'])}]",
+                    f"{bucket['count']:,}",
+                    readable_bytes(bucket['bytes']),
+                ]
+                for bucket in state['histogram']
+            ],
+        )
+
+
+def write_reports(report, json_path, csv_path):
+    """Prepare all requested files before publishing any report."""
+    paths = [path.resolve() for path in (json_path, csv_path) if path is not None]
+    if len(set(paths)) != len(paths):
+        raise ValueError('JSON and CSV destinations must differ.')
+    staged = []
+    try:
+        for path, kind in ((json_path, 'json'), (csv_path, 'csv')):
+            if path is None:
+                continue
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                mode='w', encoding='utf-8', newline='', dir=path.parent, delete=False
+            ) as stream:
+                staged.append((Path(stream.name), path))
+                if kind == 'json':
+                    json.dump(report, stream, indent=2)
+                    stream.write('\n')
+                else:
+                    rows = [
+                        dict(mode=mode, **sample)
+                        for mode, outcome in report['modes'].items()
+                        for sample in outcome['samples']
+                    ]
+                    fields = sorted(set().union(*(row.keys() for row in rows)))
+                    writer = csv.DictWriter(stream, fieldnames=fields)
+                    writer.writeheader()
+                    writer.writerows(rows)
+        for temporary, destination in staged:
+            temporary.replace(destination)
+    finally:
+        for temporary, _ in staged:
+            temporary.unlink(missing_ok=True)
+
+
+def main(argv=None):
+    args = parser().parse_args(argv)
+    try:
+        sizes, weights = distribution(args.block_sizes)
+        capacity = size_value(args.capacity)
+        if args.workload == 'alternating' and (args.steps is not None or args.alloc_probability is not None):
+            raise ValueError('Alternating rejects --steps and --alloc-probability.')
+        steps = 100000 if args.steps is None else args.steps
+        probability = 0.6 if args.alloc_probability is None else args.alloc_probability
+        if steps <= 0 or args.sample_every <= 0 or not 0 <= probability <= 1:
+            raise ValueError('Counts must be positive. Allocation probability must be between zero and one.')
+        if args.workload == 'alternating' and (
+            align(min(sizes)) == align(max(sizes)) or capacity < align(min(sizes)) + align(max(sizes))
+        ):
+            raise ValueError('Alternating requires distinct aligned sizes and capacity for one pair.')
+        config = {
+            'capacity': capacity,
+            'sizes': sizes,
+            'weights': weights,
+            'steps': steps if args.workload != 'alternating' else None,
+            'alloc_probability': probability if args.workload != 'alternating' else None,
+            'seed': args.seed,
+            'workload': args.workload,
+            'mode': args.mode,
+            'compare': args.compare,
+            'sample_every': args.sample_every,
+        }
+        modes = run_workload(operations(config), capacity, args.mode, args.sample_every, compare=args.compare)
+        report = {'configuration': config, 'modes': modes}
+        repo = TOOL.parents[3]
+        if shutil.which('git'):
+            revision = subprocess.run(
+                ['git', '-C', str(repo), 'rev-parse', 'HEAD'], capture_output=True, text=True, check=False
+            )
+            report['source_revision'] = revision.stdout.strip() if revision.returncode == 0 else None
+        write_reports(report, args.json_report_path, args.csv_report_path)
+        print_report(report)
+        return 0
+    except (ValueError, RuntimeError, OSError, subprocess.CalledProcessError, ImportError) as error:
+        print(f'Measurement aborted: {error}', file=sys.stderr)
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())
