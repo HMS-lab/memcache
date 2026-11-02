@@ -14,81 +14,45 @@ The option descriptions must also state defaults and workload restrictions.
 Requesting help must not compile code or start a measurement.
 Every measurement run must invoke the standalone incremental build.
 
-## Requests and steps
+## Allocation and eviction
 
-An allocation request asks the allocator for one block of a specified size.
-A logical ID identifies each request independently of its success.
-An outstanding request has no corresponding release yet.
-It remains outstanding even if its allocation failed.
+The region starts empty. Each step attempts one allocation.
+The simulator samples its size from `--block-sizes`.
+`--steps` counts allocation attempts, including failures. Its default is 100000.
+Evictions do not consume steps. Releases are not randomly selected operations.
 
-For random and FIFO workloads, `--steps` counts generated operations.
-Each step contains one allocation attempt or one release selection.
-Failed allocations and skipped releases each count as one step.
+Calculate occupancy as reserved bytes divided by capacity, expressed as a percentage.
+Reserved bytes include alignment waste and max-value-align padding.
+After a successful allocation reaches or exceeds the maximum, the simulator pauses allocations.
+It evicts live blocks until occupancy reaches or falls below the minimum.
+Then it resumes allocation attempts. There is no background eviction thread.
 
-## Random workload
+Set `--min-water-level 80` and `--max-water-level 90` to use the defaults.
+Supply integers without a percent sign. Require `0 <= minimum < maximum <= 100`.
+The simulator uses exact integer comparisons:
 
-The region starts empty.
-The simulator does not fill the region before selecting releases.
+```text
+Start: 100 * reserved >= maximum * capacity
+Stop:  100 * reserved <= minimum * capacity
 
-At each step, the simulator applies these rules:
+Allocation: occupancy rises to 90% or more
+Eviction:   occupancy falls to 80% or less
+Allocation: resumes
+```
 
-1. If no request awaits release, attempt an allocation.
-2. Otherwise, select allocation with probability `P`.
-3. Select release with probability `1 - P`.
+An allocation can exceed the maximum. Releasing a whole block can cross below the minimum.
+The simulator completes eviction even if the last allocation attempt triggers it.
+Each eviction selects uniformly from successfully allocated blocks that remain live.
+Selection does not depend on size, age, or address.
+The seed controls request sizes and eviction targets through separate random generators.
+Eviction does not modify the request-size sequence.
 
-`--alloc-probability` specifies `P`.
-Its default value is `0.6`.
-It accepts values from zero through one.
-With `0.6`, eligible steps select allocation with 60% probability and release with 40% probability.
-The actual operation counts can differ from these percentages.
-
-For an allocation, sample a size from `--block-sizes`.
-For a release, select uniformly from outstanding requests.
-Uniform selection gives each outstanding request the same probability.
-Remove the selected request from the outstanding requests.
-
-## FIFO workload
-
-FIFO means first in, first out.
-This workload uses the same operation probabilities as the random workload.
-It also starts empty without a separate phase that fills the region.
-Its release order differs from the random workload.
-
-Each release selects the oldest outstanding request.
-The oldest request is the request with the earliest allocation attempt.
-Remove that request from the outstanding requests.
-
-## Alternating workload
-
-This workload creates a controlled arrangement of small and large blocks.
-It uses the smallest and largest configured request sizes.
-Their sizes must differ after alignment to 4 KiB.
-The capacity must accommodate at least one pair in 4k-align mode.
-
-The simulator uses this fixed sequence:
-
-1. Calculate how many small/large pairs fit in 4k-align capacity.
-2. Allocate those pairs in small, large, small, large order.
-3. Allocate any remaining whole-page tail as one additional block.
-4. Release the small requests in allocation order.
-5. Attempt one additional large allocation.
-
-The allocator rounds requests to multiples of 4 KiB.
-A whole-page tail contains the remaining free bytes rounded down to a multiple of 4 KiB.
-Any smaller remainder stays free.
-The tail allocation remains active during the final probe.
-
-The schedule aims to leave small holes between active large blocks.
-A later large request can fail despite sufficient total free space.
-This outcome depends on the selected sizes and capacity.
-
-This workload does not sample size probabilities.
-It does not randomly select allocation versus release.
-The CLI rejects explicit `--steps` and `--alloc-probability` options for this workload.
+The CLI no longer accepts `--workload`, `--alloc-probability`, or `--compare`.
+Use a separate invocation for each alignment mode.
 
 ## Block-size probabilities
 
-`--block-sizes` determines request sizes for the random and FIFO workloads.
+`--block-sizes` determines request sizes for allocation attempts.
 `--block-size` is an alias.
 
 For example, `'4KiB:25%,64KiB:25%,1MiB:50%'` assigns a sampling probability to each size.
@@ -108,9 +72,10 @@ External fragmentation means that separate free ranges cannot accommodate the re
 The simulator records the failure and continues with the next operation.
 It does not retry the request automatically.
 
-If a later release selects that failed request, the simulator records a skipped release.
-It does not call the allocator's release method for that request.
-The request then stops being outstanding.
+Failed requests never become eviction candidates.
+A failure does not trigger eviction or a retry.
+Failures can repeat below the maximum water level.
+This simulator does not model MemCache fragmentation recovery or LRU selection.
 
 A double free is a second release of the same request.
 Unknown handles, double frees, invalid sizes, and unexpected native failures abort the measurement.
@@ -118,21 +83,11 @@ The CLI reports the operation index and error cause.
 It exits with a nonzero status.
 It does not print a success summary or write a normal report.
 
-## Comparing allocator modes
+## Allocator modes
 
 The `4k-align` mode rounds each request up to a multiple of 4 KiB.
 Max-value-align mode reserves at least the largest aligned request size successfully allocated so far.
 Releasing the largest block does not reduce this maximum.
-
-Comparison mode uses two independent allocators.
-Both receive the same logical operations and request sizes.
-Each allocator has its own maximum-size history.
-One allocator's failures do not modify the shared sequence.
-A release can succeed in one mode and count as skipped in the other.
-
-The alternating schedule derives its length from 4k-align capacity.
-It can produce different occupancy in max-value-align mode.
-Comparison mode does not generate a separate filling sequence for each allocator.
 
 ## Reports
 
@@ -184,13 +139,12 @@ python3 script/tools/sim/blob_allocator/allocator_sim.py --help
 python3 script/tools/sim/blob_allocator/allocator_sim.py \
   --capacity 64MiB --steps 10000 \
   --block-sizes '4KiB:25%,64KiB:25%,1MiB:50%' \
-  --compare
+  --mode 4k-align
 ```
 
 The `--mode` choices are `4k-align` and `max-value-align`.
 The default is `4k-align`.
-The `--compare` flag runs both modes with identical operations.
-It overrides `--mode`.
+Run each mode separately with the same seed to use the same request-size sequence.
 The tool always configures and invokes the incremental native build before measurement.
 Unmodified sources do not require recompilation.
 
@@ -295,10 +249,6 @@ For example, `4KiB:25%` gives that size a sampling probability of 0.25.
 The observed counts can differ because each selection is random.
 These percentages do not describe fragmentation or successful allocation counts.
 
-`--alloc-probability 0.6` selects allocation with probability 0.6 when a release is possible.
-It selects release with probability 0.4.
-An empty list of outstanding requests forces allocation instead.
-
 ### Histogram accounting
 
 Histogram intervals do not overlap.
@@ -316,23 +266,6 @@ A 16 KiB range never also appears as two 8 KiB ranges.
 The report prints integer bytes to preserve exact sizes.
 Divide bytes by 1073741824 to express a total in GiB.
 
-## Custom Python workloads
-
-Import the local module from this directory or add this directory to Python's module search path.
-Importing the module does not compile code.
-Calling `run_workload` invokes the build before measurement.
-
-```python
-from allocator_sim import Alloc, Free, run_workload
-
-trace = [Alloc(0, 4097), Alloc(1, 8192), Free(0)]
-results = run_workload(iter(trace), capacity=65536,
-                       compare=True)
-```
-
-Each request ID must be unique within a run.
-Each release must refer to an outstanding request.
-A second release aborts the measurement, including a repeated release for a failed request.
 
 ## Tests
 
@@ -354,3 +287,29 @@ A skip does not establish that native code works.
 
 Set `BLOB_SIM_PYTHON_HEADERS` to the Python header directory when CMake cannot locate an existing installation.
 The directory must contain `Python.h` for the current interpreter.
+
+## Sampling and eviction counters
+
+`--sample-every` counts allocation attempts. Its default is 1000.
+Periodic samples follow any eviction that the allocation triggers.
+The simulator also records initial, eviction-start, eviction-end, and final samples.
+`allocation_index` counts allocation attempts.
+`operation_index` counts allocation attempts plus individual releases.
+Eviction samples can share an allocation index.
+
+`eviction_cycles` counts completed cycles. `evictions` counts released blocks.
+`evicted_reserved_bytes` sums the reserved bytes returned by eviction over the entire run.
+This cumulative counter is not current free space.
+For water-level runs, releases equal evictions and skipped releases equal zero.
+Occupancy percentage uses capacity as its denominator.
+Fragmentation percentages retain the denominators defined above.
+
+## Custom experiments
+
+`run_simulation(config)` runs the water-level policy and always invokes the build first.
+The CLI configuration contains sizes, weights, capacity, steps, seed, mode, sample interval, and both water levels.
+The configuration uses numeric percentages such as `80`, not strings such as `80%`.
+
+`run_workload(sequence, capacity, mode='4k-align', sample_every=1000)` runs explicit `Alloc` and `Free` operations.
+This custom runner does not add eviction. Use it for controlled experiments and allocator tests.
+It measures one mode per invocation.
