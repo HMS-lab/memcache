@@ -1,0 +1,33 @@
+Modes:
+  4k-align (default): Round each request up to a multiple of 4 KiB.
+  max-value-align: Apply 4 KiB alignment, then reserve at least the historical maximum aligned request size.
+    Successful allocations can increase this maximum. Releases do not decrease it.
+  --compare runs both modes with identical operations and overrides --mode.
+
+Workloads:
+  random (default): Select allocation with probability P at each step.
+    Otherwise, select a release. Select its target uniformly from outstanding requests.
+  fifo: Select allocation or release as in random.
+    Release the oldest outstanding request first.
+  Both start empty. Neither fills the region before selecting releases.
+  If no request awaits release, attempt an allocation.
+  P is --alloc-probability (default: 0.6). The release probability is 1 - P.
+  --steps counts all operations, including failed allocations and skipped releases.
+
+  alternating: Allocate the smallest and largest configured sizes in alternating pairs.
+    Use a schedule that fills 4k-align capacity, including any whole-page tail.
+    Release the small requests in allocation order. Then attempt one largest request.
+    Size percentages do not apply. Reject explicit --steps and --alloc-probability options.
+
+Sizes and failures:
+  For random and fifo, sample each request size from --block-sizes.
+  Percentages specify probabilities of allocation attempts. Omitted percentages give equal probabilities.
+  Supply all percentages or omit all. Explicit percentages must total 100%.
+  An outstanding request awaits release, even if its allocation failed.
+  Record capacity and fragmentation failures. Continue without retrying.
+  Skip a release whose allocation failed. Count it separately.
+  Invalid operations, including double frees, abort the measurement.
+
+Comparison:
+  Both modes receive the same logical operations. Failures can differ between modes.
+  The alternating schedule fills 4k-align mode. Max-value-align mode can fill differently.
