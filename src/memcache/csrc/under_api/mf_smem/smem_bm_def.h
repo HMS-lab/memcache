@@ -23,6 +23,9 @@ typedef void *smem_bm_t;
 #define SMEM_BM_TIMEOUT_MAX UINT32_MAX /* all timeout must <= UINT32_MAX */
 #define SMEM_TLS_PATH_SIZE  256
 
+/* libmf_smem interface return codes, keep in sync with MemFabric definitions */
+#define SMEM_BM_GVA_NOT_FOUND (-2017) /* GVA registration missing or already unregistered */
+
 // SMEM_BM_BIND_NUMA_FLAG start index When SMEM_BM_PERFORMANCE_MODE_FLAG == 1, this field is used
 #define SMEM_BM_BIND_NUMA_FLAG_INDEX        0
 #define SMEM_BM_BIND_NUMA_FLAG_LEN          7

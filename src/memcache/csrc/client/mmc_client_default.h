@@ -193,6 +193,9 @@ private:
                        BatchCopyDesc &copyDesc, bool blobIsSrc);
     Result PrepareMultiBlobs(const MmcBufferArray &bufArr, const std::vector<MmcMemBlobDesc> &blobs,
                              MediaType &mediaType, BatchCopyDesc &copyDesc, bool blobIsSrc);
+    Result DoPut(const std::string &key, const MmcBufferArray &bufArr, mmc_put_options &options, uint32_t flags);
+    Result DoBatchPut(const std::vector<std::string> &keys, const std::vector<MmcBufferArray> &bufArrs,
+                      mmc_put_options &options, uint32_t flags, std::vector<int> &batchResult);
     Result PutData2Blobs(const std::vector<std::string> &keys, const std::vector<MmcBufferArray> &bufArrs,
                          const BatchAllocResponse &allocResponse, std::vector<int> &batchResult);
     Result RegisterBatchAllocBlobs(const std::string &key, const std::vector<MmcMemBlobDesc> &blobs, uint64_t operateId,
@@ -268,6 +271,12 @@ uint32_t MmcClientDefault::RankId(const affinity_policy &policy)
         return 0;
     }
 }
+
+// -2017（MemFabric 透传：GVA 注册不存在/已卸载）时可重试。
+bool IsHybmCopyRetryable(Result ret);
+std::vector<size_t> CollectPutRetryKeys(const std::vector<int> &batchResult);
+// 仅本轮 RPC 均成功（拷贝错误不进 DoBatchPut 返回值）且仍有可重试 key 时返回 true。
+bool ShouldContinuePutRetry(Result roundRet, const std::vector<size_t> &retryIndices);
 using MmcClientDefaultPtr = MmcRef<MmcClientDefault>;
 } // namespace mmc
 } // namespace ock

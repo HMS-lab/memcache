@@ -80,6 +80,7 @@ constexpr uint32_t KEY_MAX_LENTH = 256U;
 constexpr uint32_t GVA_LEASE_CLEANUP_INTERVAL_SECONDS = 1U;
 constexpr uint32_t CLIENT_METRIC_REPORT_INTERVAL_SECONDS = 30U;
 constexpr uint64_t PROMOTE_INTERVAL_MS = 500;
+constexpr int32_t MAX_PUT_RETRY_TIMES = 2;
 
 MmcClientDefault *MmcClientDefault::gClientHandler = nullptr;
 std::mutex MmcClientDefault::gClientHandlerMtx;
@@ -309,6 +310,27 @@ Result MmcClientDefault::Put(const std::string &key, const MmcBufferArray &bufAr
     MMC_VALIDATE_RETURN(bmProxy_ != nullptr, "BmProxy is null", MMC_CLIENT_NOT_INIT);
     MMC_VALIDATE_RETURN(metaNetClient_ != nullptr, "MetaNetClient is null", MMC_CLIENT_NOT_INIT);
     MMC_ASSERT_LOG_AND_RETURN(!bufArr.Buffers().empty(), "bufArr.Buffers() is empty", MMC_ERROR);
+
+    auto ret = DoPut(key, bufArr, options, flags);
+
+    // 防呆重试：DoPut 返回 -2017 隐含 WRITE_FAIL 已成功上报（RPC 失败会返回错误码）。
+    for (int32_t retryRound = 1; retryRound <= MAX_PUT_RETRY_TIMES; ++retryRound) {
+        if (!IsHybmCopyRetryable(ret)) {
+            break;
+        }
+        MMC_LOG_WARN("client " << name_ << " put " << key << " copy failed with error " << ret << ", retry round "
+                               << retryRound << "/" << MAX_PUT_RETRY_TIMES);
+        mmc_put_options retryOptions = options;
+        std::fill(std::begin(retryOptions.preferredLocalServiceIDs), std::end(retryOptions.preferredLocalServiceIDs),
+                  -1);
+        ret = DoPut(key, bufArr, retryOptions, flags);
+    }
+    return ret;
+}
+
+Result MmcClientDefault::DoPut(const std::string &key, const MmcBufferArray &bufArr, mmc_put_options &options,
+                               uint32_t flags)
+{
     uint64_t operateId = GenerateOperateId(rankId_);
     AllocRequest request{key, {}, operateId};
     MMC_VALIDATE_RETURN(PrepareAllocOpt(bufArr.TotalSize(), options, flags, request.options_) == MMC_OK, "put error",
@@ -402,6 +424,73 @@ Result MmcClientDefault::BatchPut(const std::vector<std::string> &keys, const st
         return MMC_INVALID_PARAM;
     }
 
+    // batchResult 由 DoBatchPut 统一 assign：alloc RPC 失败早退时保持调用方原值。
+    auto ret = DoBatchPut(keys, bufArrs, options, flags, batchResult);
+
+    // 防呆重试：-2017 表示 GVA 注册不存在/已卸载，失败 key 已随 WRITE_FAIL 上报释放，可重新
+    // 申请空间重写；重试轮清空 preferredLocalServiceIDs 以切换节点；仅本轮 RPC 均成功才重试。
+    for (int32_t retryRound = 1; retryRound <= MAX_PUT_RETRY_TIMES; ++retryRound) {
+        const std::vector<size_t> retryIndices = CollectPutRetryKeys(batchResult);
+        if (!ShouldContinuePutRetry(ret, retryIndices)) {
+            if (ret != MMC_OK) {
+                MMC_LOG_WARN("client " << name_ << " batch put retry skipped, ret: " << ret);
+            }
+            break;
+        }
+        std::vector<std::string> retryKeys;
+        std::vector<MmcBufferArray> retryBufArrs;
+        retryKeys.reserve(retryIndices.size());
+        retryBufArrs.reserve(retryIndices.size());
+        for (size_t index : retryIndices) {
+            retryKeys.push_back(keys[index]);
+            retryBufArrs.push_back(bufArrs[index]);
+        }
+        MMC_LOG_WARN("client " << name_ << " batch put " << retryKeys.size() << " keys copy failed, retry round "
+                               << retryRound << "/" << MAX_PUT_RETRY_TIMES);
+        mmc_put_options retryOptions = options;
+        std::fill(std::begin(retryOptions.preferredLocalServiceIDs), std::end(retryOptions.preferredLocalServiceIDs),
+                  -1);
+        // 初值保持 -2017：重试轮 alloc RPC 失败早退时不覆盖原失败结果。
+        std::vector<int> retryResult(retryKeys.size(), SMEM_BM_GVA_NOT_FOUND);
+        const Result retryRet = DoBatchPut(retryKeys, retryBufArrs, retryOptions, flags, retryResult);
+        for (size_t j = 0; j < retryIndices.size(); ++j) {
+            batchResult[retryIndices[j]] = retryResult[j];
+        }
+        if (retryRet != MMC_OK && ret == MMC_OK) {
+            ret = retryRet;
+        }
+    }
+
+    if (ret != MMC_OK) {
+        MMC_LOG_ERROR("client " << name_ << " batch put failed: " << ret);
+    }
+    return ret;
+}
+
+bool IsHybmCopyRetryable(Result ret)
+{
+    return ret == SMEM_BM_GVA_NOT_FOUND;
+}
+
+std::vector<size_t> CollectPutRetryKeys(const std::vector<int> &batchResult)
+{
+    std::vector<size_t> retryIndices;
+    for (size_t i = 0; i < batchResult.size(); ++i) {
+        if (IsHybmCopyRetryable(batchResult[i])) {
+            retryIndices.push_back(i);
+        }
+    }
+    return retryIndices;
+}
+
+bool ShouldContinuePutRetry(Result roundRet, const std::vector<size_t> &retryIndices)
+{
+    return roundRet == MMC_OK && !retryIndices.empty();
+}
+
+Result MmcClientDefault::DoBatchPut(const std::vector<std::string> &keys, const std::vector<MmcBufferArray> &bufArrs,
+                                    mmc_put_options &options, uint32_t flags, std::vector<int> &batchResult)
+{
     // alloc blobs
     uint64_t operateId = GenerateOperateId(rankId_);
     BatchAllocRequest request(keys, {}, flags, operateId);
