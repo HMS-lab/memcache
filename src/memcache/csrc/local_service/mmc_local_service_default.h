@@ -84,6 +84,8 @@ public:
 private:
     Result GetExternalConfig();
 
+    Result UnregisterBm();
+
     struct BatchIoParams {
         std::vector<std::string> keys;
         std::vector<void *> vas;

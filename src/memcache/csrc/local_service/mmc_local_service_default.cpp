@@ -135,8 +135,8 @@ Result MmcLocalServiceDefault::Start(const mmc_local_service_config_t &config)
         options.logFunc = options_.logFunc;
 
         if (ConnectMetaNetServer(options) != MMC_OK) {
-            DestroyBm();
             metaNetClient_->Stop();
+            DestroyBm();
             return MMC_ERROR;
         }
     }
@@ -144,8 +144,8 @@ Result MmcLocalServiceDefault::Start(const mmc_local_service_config_t &config)
     Result configRet = GetExternalConfig();
     if (configRet != MMC_OK) {
         MMC_LOG_ERROR("Failed to query initialization config from MetaService, ret=" << configRet);
-        DestroyBm();
         metaNetClient_->Stop();
+        DestroyBm();
         return configRet;
     }
 
@@ -157,8 +157,8 @@ Result MmcLocalServiceDefault::Start(const mmc_local_service_config_t &config)
         if (InitUbsIo(config.deviceId, config.configFilePath) != MMC_OK) {
             MMC_LOG_ERROR("Failed to init ubsIo of local service " << name_);
             ubsioEventPool_->Destroy();
-            DestroyBm();
             metaNetClient_->Stop();
+            DestroyBm();
             return MMC_ERROR;
         }
     } else {
@@ -175,8 +175,8 @@ Result MmcLocalServiceDefault::Start(const mmc_local_service_config_t &config)
         if (ubsioEventPool_ != nullptr) {
             ubsioEventPool_->Destroy();
         }
-        DestroyBm();
         metaNetClient_->Stop();
+        DestroyBm();
         return MMC_ERROR;
     }
     metaNetClient_->SetBackupPool(ubsioEventPool_);
@@ -277,11 +277,16 @@ void MmcLocalServiceDefault::Stop()
         ubsIoProxyPtr_ = nullptr;
     }
 
-    DestroyBm();
+    // 注销 RPC 依赖链路存活，须在断链前发送（best-effort，失败由断链自动清理兜底）
+    UnregisterBm();
+    // 先断链再销毁 MF：链路的重发现/重连/拷贝回调依赖 MF（etcd leader 发现、ReconnectBm、
+    // CopyBlob 均触达 bmProxyPtr_），MF 先销毁会留下链路回调打进死区的窗口
     if (metaNetClient_ != nullptr) {
         metaNetClient_->Stop();
         metaNetClient_ = nullptr;
     }
+    DestroyBm();
+
     std::lock_guard<std::mutex> guardBlob(blobMutex_);
     blobMap_.clear();
     MMC_LOG_TRACE("Stop MmcLocalServiceDefault (" << name_ << ") server " << options_.discoveryURL
@@ -349,7 +354,7 @@ Result MmcLocalServiceDefault::GetExternalConfig()
     return MMC_OK;
 }
 
-Result MmcLocalServiceDefault::DestroyBm()
+Result MmcLocalServiceDefault::UnregisterBm()
 {
     MMC_RETURN_ERROR(bmProxyPtr_ == nullptr, "bm proxy has not been initialized.");
 
@@ -365,11 +370,17 @@ Result MmcLocalServiceDefault::DestroyBm()
     Response resp;
     // Best-effort unregister: MetaService auto-cleans on link break, so don't block shutdown.
     Result ret = SyncCallMeta(req, resp, BM_UNREGISTER_TIMEOUT_SECOND);
-    bmProxyPtr_->DestroyBm();
-    bmProxyPtr_ = nullptr;
     if (ret || resp.ret_) {
         MMC_LOG_WARN("unregister ret: " << ret << ", respRet: " << resp.ret_);
     }
+    return MMC_OK;
+}
+
+Result MmcLocalServiceDefault::DestroyBm()
+{
+    MMC_RETURN_ERROR(bmProxyPtr_ == nullptr, "bm proxy has not been initialized.");
+    bmProxyPtr_->DestroyBm();
+    bmProxyPtr_ = nullptr;
     return MMC_OK;
 }
 
