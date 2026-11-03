@@ -627,9 +627,15 @@ void MmcMetaManager::RollbackEntry(const std::string &key, const MmcMemObjMetaPt
     auto blobs = rbFilter != nullptr ? memObj->DetachBlobs(rbFilter) : std::vector<MmcMemBlobPtr>{};
     guard.unlock();
     memObj->FinalizeBlobs(key, globalAllocator_, blobs, false);
-    guard.lock();
-    if (memObj->NumBlobs() == 0) {
-        metaContainer_->Erase(key);
+    metaContainer_->EraseIfEmpty(key, [&memObj, &guard](const MmcMemObjMetaPtr &current) {
+        if (current.Get() != memObj.Get()) {
+            return false;
+        }
+        guard.lock();
+        return current->NumBlobs() == 0;
+    });
+    if (!guard.owns_lock()) {
+        guard.lock();
     }
     memObj->NotifyReadable();
 
@@ -690,9 +696,15 @@ Result MmcMetaManager::ApplyRewarm(const std::string &key, const MmcMemObjMetaPt
         auto blobs = memObj->DetachBlobs(rbFilter);
         guard.unlock();
         memObj->FinalizeBlobs(key, globalAllocator_, blobs, false);
-        guard.lock();
-        if (memObj->NumBlobs() == 0) {
-            metaContainer_->Erase(key);
+        metaContainer_->EraseIfEmpty(key, [&memObj, &guard](const MmcMemObjMetaPtr &current) {
+            if (current.Get() != memObj.Get()) {
+                return false;
+            }
+            guard.lock();
+            return current->NumBlobs() == 0;
+        });
+        if (!guard.owns_lock()) {
+            guard.lock();
         }
         releaseSsdLease("after WRITE_OK failed");
         memObj->NotifyReadable();
@@ -710,9 +722,15 @@ Result MmcMetaManager::ApplyRewarm(const std::string &key, const MmcMemObjMetaPt
             auto blobs = memObj->DetachBlobs(rbFilter);
             guard.unlock();
             memObj->FinalizeBlobs(key, globalAllocator_, blobs, false);
-            guard.lock();
-            if (memObj->NumBlobs() == 0) {
-                metaContainer_->Erase(key);
+            metaContainer_->EraseIfEmpty(key, [&memObj, &guard](const MmcMemObjMetaPtr &current) {
+                if (current.Get() != memObj.Get()) {
+                    return false;
+                }
+                guard.lock();
+                return current->NumBlobs() == 0;
+            });
+            if (!guard.owns_lock()) {
+                guard.lock();
             }
             releaseSsdLease("after READ_START failed");
             memObj->NotifyReadable();

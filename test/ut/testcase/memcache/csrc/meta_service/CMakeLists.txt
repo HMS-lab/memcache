@@ -2,6 +2,7 @@ file(GLOB_RECURSE meta_service_src
         ${CMAKE_CURRENT_SOURCE_DIR}/mmc_meta_backup_mgr_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/meta_alloc_fragmentation_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_meta_manager.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rewarm_lock_order_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_meta_service_net.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_meta_service_url_resolve.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/mmc_meta_service_http_test.cpp
@@ -17,6 +18,7 @@ ADD_UNIT_TEST(test_meta_service
 
 file(GLOB_RECURSE meta_manager_src
         ${CMAKE_CURRENT_SOURCE_DIR}/test_meta_manager.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rewarm_lock_order_test.cpp
 )
 ADD_UNIT_TEST(test_meta_manager
         FILES ${meta_manager_src} ${TEST_SRC_PATHS}/ut_main.cpp
