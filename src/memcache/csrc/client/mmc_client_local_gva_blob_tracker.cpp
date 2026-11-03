@@ -244,6 +244,10 @@ uint64_t LocalGvaBlobTracker::ReleaseLease(const std::string &key)
     }
     auto opId = info->operateQueue.front();
     info->operateQueue.pop();
+    if (info->operateQueue.empty()) {
+        (void)intervals_.RemoveAt(keyIt->second);
+        blobStartByKey_.erase(keyIt);
+    }
     return opId;
 }
 

@@ -403,7 +403,17 @@ TEST_F(TestMmcacheStore, BatchMalloc)
     auto finishResults = store->BatchWriteFinish(keys, writeOkResults);
     EXPECT_EQ(finishResults, std::vector<int>(keys.size(), MMC_OK));
     ret = store->BatchCopy(gvas, buffer1, sizes, 0);
-    EXPECT_EQ(ret, 0);
+    EXPECT_EQ(ret, MMC_UNMATCHED_KEY);
+
+    // Reacquire the cached objects after the last write operation removes their local intervals.
+    const auto reacquiredGvas = store->BatchMalloc(keys, sizes, media);
+    gvas.clear();
+    for (const auto gva : reacquiredGvas) {
+        EXPECT_NE(gva, 0);
+        gvas.push_back(reinterpret_cast<void *>(gva));
+    }
+    EXPECT_EQ(store->BatchCopy(gvas, buffer1, sizes, 0), MMC_OK);
+    EXPECT_EQ(store->BatchWriteFinish(keys, writeOkResults), std::vector<int>(keys.size(), MMC_OK));
 
     store->BatchRemove(keys);
     store->TearDown();
@@ -1209,7 +1219,8 @@ TEST_F(TestMmcacheStore, BatchCopySkipsReadableBlob)
     ret = store->BatchCopy(gvas, buffer1, sizes, 0);
     EXPECT_EQ(ret, 0);
 
-    store->BatchRemoveLease(keys);
+    EXPECT_EQ(store->BatchRemoveLease(keys), MMC_OK);
+    EXPECT_EQ(store->BatchCopy(gvas, buffer1, sizes, 0), MMC_UNMATCHED_KEY);
     store->BatchRemove(keys);
     store->TearDown();
     mmcs_meta_service_stop(meta_service);

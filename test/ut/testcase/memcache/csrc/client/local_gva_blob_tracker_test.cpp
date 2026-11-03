@@ -28,6 +28,8 @@ constexpr uint64_t testOperateId = 1;
 constexpr uint32_t promoteWaitMs = 10;
 constexpr uint64_t secondaryGva1 = testGva + testSize;
 constexpr uint64_t secondaryGva2 = testGva + testSize * 2;
+constexpr uint64_t kSecondOperateId = 2;
+constexpr size_t kOnePendingOperation = 1;
 
 uint64_t NowMs()
 {
@@ -152,4 +154,56 @@ TEST_F(TestLocalGvaBlobTracker, MarkPromoted_MultipleKeys)
     LocalGvaBlobInfo info2b;
     ASSERT_EQ(tracker.FindWritable(secondaryGva2, testSize, info2b), MMC_OK);
     EXPECT_GT(info2b.lastPromoteMs, initialMs2);
+}
+
+TEST_F(TestLocalGvaBlobTracker, ReleaseLease_LastWriteRemovesBothIndexesImmediately)
+{
+    RegisterBlob(key);
+
+    EXPECT_EQ(tracker.ReleaseLease(key), testOperateId);
+    LocalGvaBlobInfo info;
+    EXPECT_EQ(tracker.FindBlobByKey(key, info), MMC_UNMATCHED_KEY);
+    EXPECT_EQ(tracker.FindWritable(testGva, testSize, info), MMC_UNMATCHED_KEY);
+    EXPECT_EQ(tracker.ReleaseLease(key), UINT64_MAX);
+
+    // Both the old address and the old key can be registered again without a cleanup scan.
+    RegisterBlob("reused_address", testGva);
+    RegisterBlob(key, secondaryGva1);
+}
+
+TEST_F(TestLocalGvaBlobTracker, ReleaseLease_LastReadRemovesBothIndexesImmediately)
+{
+    const MmcMemBlobDesc desc{testRank, testGva, testSize, MEDIA_DRAM, READABLE, testLeaseTtlMs};
+    ASSERT_EQ(tracker.UpdateFromQuery(key, desc, testOperateId, NowMs() + testLeaseTtlMs), MMC_OK);
+
+    EXPECT_EQ(tracker.ReleaseLease(key), testOperateId);
+    LocalGvaBlobInfo info;
+    EXPECT_EQ(tracker.FindBlobByKey(key, info), MMC_UNMATCHED_KEY);
+    EXPECT_EQ(tracker.FindReadable(testGva, testSize, info), MMC_UNMATCHED_KEY);
+    RegisterBlob("reused_read_address", testGva);
+}
+
+TEST_F(TestLocalGvaBlobTracker, ReleaseLease_KeepsIntervalUntilLastOperation)
+{
+    for (const auto state : {ALLOCATED, READABLE}) {
+        const MmcMemBlobDesc desc{testRank, testGva, testSize, MEDIA_DRAM, state, testLeaseTtlMs};
+        ASSERT_EQ(tracker.RegisterFromBatchAlloc(key, desc, testOperateId), MMC_OK);
+        ASSERT_EQ(tracker.RegisterFromBatchAlloc(key, desc, kSecondOperateId), MMC_OK);
+
+        EXPECT_EQ(tracker.ReleaseLease(key), testOperateId);
+        LocalGvaBlobInfo info;
+        ASSERT_EQ(tracker.FindBlobByKey(key, info), MMC_OK);
+        ASSERT_EQ(info.operateQueue.size(), kOnePendingOperation);
+        EXPECT_EQ(info.operateQueue.front(), kSecondOperateId);
+        if (state == READABLE) {
+            EXPECT_EQ(tracker.FindReadable(testGva, testSize, info), MMC_OK);
+        } else {
+            EXPECT_EQ(tracker.FindWritable(testGva, testSize, info), MMC_OK);
+        }
+
+        EXPECT_EQ(tracker.ReleaseLease(key), kSecondOperateId);
+        EXPECT_EQ(tracker.FindBlobByKey(key, info), MMC_UNMATCHED_KEY);
+        EXPECT_EQ(tracker.FindReadable(testGva, testSize, info), MMC_UNMATCHED_KEY);
+        EXPECT_EQ(tracker.FindWritable(testGva, testSize, info), MMC_UNMATCHED_KEY);
+    }
 }
