@@ -86,6 +86,8 @@ Select uniformly from successful live allocations for random eviction.
 Select the least recently used block for LRU eviction. Allocation and reads count as use.
 Do not select failed requests.
 Count steps as allocation attempts. Eviction does not consume steps.
+Show CLI progress automatically. Do not add progress options or explanations to user documentation.
+Print 100% only after the final sample succeeds.
 Do not retry failures or trigger eviction because of a failure.
 Keep size, eviction, classification, and read random generators separate and seeded.
 Preserve the existing size and random eviction streams.
