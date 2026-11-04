@@ -560,8 +560,6 @@ def run_simulation(config, progress=None):
 def parser():
     result = argparse.ArgumentParser(
         description='Measure the real C++ blob allocator.',
-        epilog=(TOOL / 'workload_help.txt').read_text(encoding='utf-8'),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     result.add_argument('--capacity', default='1GiB', help='Region size. Default: 1GiB.')
     result.add_argument(
@@ -592,7 +590,7 @@ def parser():
         '--eviction-policy',
         choices=['random', 'lru'],
         default=SIMULATION_DEFAULTS['eviction_policy'],
-        help='Victim selection. Default: random. See the policy descriptions below.',
+        help='Evict a random block or the least recently used block. Default: random.',
     )
     result.add_argument(
         '--reads-per-allocation',
@@ -622,7 +620,7 @@ def parser():
         '--mode',
         choices=['4k-align', 'max-value-align'],
         default='4k-align',
-        help='Alignment policy. Default: 4k-align. See the mode descriptions below.',
+        help='Alignment policy. Default: 4k-align.',
     )
     result.add_argument(
         '--sample-every',

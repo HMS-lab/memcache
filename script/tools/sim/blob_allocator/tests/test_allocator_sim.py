@@ -118,14 +118,11 @@ class PythonTests(unittest.TestCase):
                 sim.main(['--help'])
             self.assertEqual(error.exception.code, 0)
             for phrase in (
-                'Start empty',
+                '--steps',
                 'at or above',
-                'without retrying',
                 'max-value-align',
                 'least recently used',
-                'Before each allocation attempt',
-                'If it is empty',
-                'FIFO',
+                '--reads-per-allocation',
             ):
                 self.assertIn(phrase, output.getvalue())
 
