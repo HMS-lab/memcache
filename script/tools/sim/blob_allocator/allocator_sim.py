@@ -16,7 +16,7 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
-from collections import Counter
+from collections import Counter, OrderedDict
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -25,6 +25,23 @@ TOOL = Path(__file__).resolve().parent
 ALIGNMENT = 4096
 MAX_SIZE = (1 << 64) - ALIGNMENT
 PERCENT = 100
+SIMULATION_DEFAULTS = {
+    'eviction_policy': 'random',
+    'reads_per_allocation': 4,
+    'hot_block_percent': 20,
+    'hot_read_percent': 80,
+}
+SIMULATION_COUNTERS = (
+    'eviction_cycles',
+    'evictions',
+    'evicted_reserved_bytes',
+    'reads',
+    'hot_reads',
+    'cold_reads',
+    'skipped_reads',
+    'hot_assignments',
+    'cold_assignments',
+)
 
 
 def size_value(text):
@@ -336,8 +353,84 @@ def run_workload(sequence, capacity, mode='4k-align', sample_every=1000):
         raise RuntimeError(f'Operation {index}: {error}') from error
 
 
+class LiveBlocks:
+    """Track live blocks, fixed hot/cold groups, and least-recently-used order."""
+
+    def __init__(self):
+        self.order = OrderedDict()
+        self.ids = []
+        self.positions = {}
+        self.groups = {True: [], False: []}
+        self.group_positions = {}
+
+    def add(self, request_id, hot):
+        if request_id in self.order:
+            raise ValueError('The block is already live.')
+        self.positions[request_id] = len(self.ids)
+        self.ids.append(request_id)
+        self.group_positions[request_id] = len(self.groups[hot])
+        self.groups[hot].append(request_id)
+        self.order[request_id] = hot
+
+    def touch(self, request_id):
+        if request_id not in self.order:
+            raise ValueError('Cannot read a block that is not live.')
+        self.order.move_to_end(request_id)
+        return self.order[request_id]
+
+    def remove(self, request_id):
+        if request_id not in self.order:
+            raise ValueError('Cannot remove a block that is not live.')
+        hot = self.order[request_id]
+        for ids, positions in ((self.ids, self.positions), (self.groups[hot], self.group_positions)):
+            position = positions.pop(request_id)
+            last = ids.pop()
+            if last != request_id:
+                ids[position] = last
+                positions[last] = position
+        del self.order[request_id]
+
+    def read_target(self, rng, hot_percent):
+        if not self.order:
+            return None
+        hot = rng.randrange(PERCENT) < hot_percent
+        candidates = self.groups[hot] or self.groups[not hot]
+        return candidates[rng.randrange(len(candidates))]
+
+    def victim(self, policy, rng):
+        if not self.order:
+            raise RuntimeError('Eviction requires a live block.')
+        if policy == 'lru':
+            return next(iter(self.order))
+        return self.ids[rng.randrange(len(self.ids))]
+
+    def snapshot(self, requests):
+        if (
+            self.order.keys() != requests.keys()
+            or self.positions != {request_id: index for index, request_id in enumerate(self.ids)}
+            or self.positions.keys() != self.order.keys()
+            or self.group_positions
+            != {request_id: index for group in self.groups.values() for index, request_id in enumerate(group)}
+            or self.group_positions.keys() != self.order.keys()
+            or sum(len(group) for group in self.groups.values()) != len(self.order)
+            or any(self.order[request_id] != hot for hot, group in self.groups.items() for request_id in group)
+        ):
+            raise RuntimeError('Live blocks and access bookkeeping are inconsistent.')
+        return {'live_hot_blocks': len(self.groups[True]), 'live_cold_blocks': len(self.groups[False])}
+
+
 def run_simulation(config):
     """Build and run allocation attempts with synchronous water-level eviction."""
+    config = {**SIMULATION_DEFAULTS, **config}
+    policy = config['eviction_policy']
+    if policy not in ('random', 'lru'):
+        raise ValueError('Unknown eviction policy. Use random or lru.')
+    reads = config['reads_per_allocation']
+    if type(reads) is not int or reads < 0:
+        raise ValueError('Reads per allocation must be a nonnegative integer.')
+    for key in ('hot_block_percent', 'hot_read_percent'):
+        if type(config[key]) is not int or not 0 <= config[key] <= PERCENT:
+            raise ValueError(f'{key} must be an integer from 0 through 100.')
     low, high = config['min_water_level'], config['max_water_level']
     if any(type(value) is not int for value in (low, high)) or not 0 <= low < high <= PERCENT:
         raise ValueError('Water levels must be integers: 0 <= minimum < maximum <= 100.')
@@ -350,42 +443,63 @@ def run_simulation(config):
     if mode not in ('4k-align', 'max-value-align'):
         raise ValueError('Unknown mode. Use 4k-align or max-value-align.')
     measurement = Measurement(build_native(), capacity, mode == 'max-value-align')
-    measurement.counts.update(eviction_cycles=0, evictions=0, evicted_reserved_bytes=0)
+    measurement.counts.update({key: 0 for key in SIMULATION_COUNTERS})
     rng = random.Random(config['seed'])
-    live = []
-    index = allocation_index = 0
+    group_rng = random.Random(f'{config["seed"]}:hot-groups')
+    read_rng = random.Random(f'{config["seed"]}:reads')
+    live = LiveBlocks()
+    index = allocation_index = read_index = 0
 
     def sample(phase):
         state = measurement.sample(index, phase, True)
         state['allocation_index'] = allocation_index
-        measurement.samples[-1]['allocation_index'] = allocation_index
+        state['eviction_policy'] = policy
+        state.update(live.snapshot(measurement.requests))
         measurement.samples[-1].update(
-            {key: measurement.counts[key] for key in ('eviction_cycles', 'evictions', 'evicted_reserved_bytes')}
+            {
+                key: state[key]
+                for key in (
+                    'allocation_index',
+                    'eviction_policy',
+                    'live_hot_blocks',
+                    'live_cold_blocks',
+                )
+            }
         )
+        measurement.samples[-1].update({key: measurement.counts[key] for key in SIMULATION_COUNTERS})
         return state
 
     sample('initial')
     try:
         for operation in operations(config):
             allocation_index += 1
+            for read_index in range(1, reads + 1):
+                target = live.read_target(read_rng, config['hot_read_percent'])
+                if target is None:
+                    measurement.counts['skipped_reads'] += 1
+                else:
+                    if target not in measurement.requests:
+                        raise RuntimeError('The read target is not a live allocation.')
+                    hot = live.touch(target)
+                    measurement.counts['reads'] += 1
+                    measurement.counts['hot_reads' if hot else 'cold_reads'] += 1
+            read_index = 0
+            hot = group_rng.randrange(PERCENT) < config['hot_block_percent']
             index += 1
             measurement.apply(operation)
             if measurement.requests[operation.request_id] is None:
                 del measurement.requests[operation.request_id]
             else:
-                live.append(operation.request_id)
+                live.add(operation.request_id, hot)
+                measurement.counts['hot_assignments' if hot else 'cold_assignments'] += 1
                 if PERCENT * measurement.reserved >= high * capacity:
                     sample('eviction-start')
                     while PERCENT * measurement.reserved > low * capacity:
-                        if not live:
-                            raise RuntimeError('Eviction has no live blocks but occupancy exceeds the minimum.')
-                        target = rng.randrange(len(live))
-                        request_id = live[target]
+                        request_id = live.victim(policy, rng)
                         reserved = measurement.requests[request_id][1]['reserved']
                         index += 1
                         measurement.apply(Free(request_id, 'evict'))
-                        live[target] = live[-1]
-                        live.pop()
+                        live.remove(request_id)
                         measurement.counts['evictions'] += 1
                         measurement.counts['evicted_reserved_bytes'] += reserved
                     measurement.counts['eviction_cycles'] += 1
@@ -401,7 +515,10 @@ def run_simulation(config):
             }
         }
     except Exception as error:
-        raise RuntimeError(f'Allocation attempt {allocation_index}, Operation {index}: {error}') from error
+        context = f'Allocation attempt {allocation_index}, Operation {index}'
+        if read_index:
+            context += f', Read {read_index}'
+        raise RuntimeError(f'{context}: {error}') from error
 
 
 def parser():
@@ -436,10 +553,34 @@ def parser():
         help='Start eviction at or above this percent. Default: 90. Use an integer without a percent sign.',
     )
     result.add_argument(
+        '--eviction-policy',
+        choices=['random', 'lru'],
+        default=SIMULATION_DEFAULTS['eviction_policy'],
+        help='Victim selection. Default: random. See the policy descriptions below.',
+    )
+    result.add_argument(
+        '--reads-per-allocation',
+        type=int,
+        default=SIMULATION_DEFAULTS['reads_per_allocation'],
+        help='Synthetic reads before each allocation attempt. Default: 4. Use a nonnegative integer.',
+    )
+    result.add_argument(
+        '--hot-block-percent',
+        type=int,
+        default=SIMULATION_DEFAULTS['hot_block_percent'],
+        help='Hot assignment probability. Default: 20. Use an integer from 0 through 100, without a percent sign.',
+    )
+    result.add_argument(
+        '--hot-read-percent',
+        type=int,
+        default=SIMULATION_DEFAULTS['hot_read_percent'],
+        help='Hot group selection probability per read. Default: 80. Use an integer from 0 through 100.',
+    )
+    result.add_argument(
         '--seed',
         type=int,
         default=42,
-        help='Seed for sizes and eviction targets. Default: 42.',
+        help='Seed for sizes, eviction targets, groups, and reads. Default: 42.',
     )
     result.add_argument(
         '--mode',
@@ -495,8 +636,9 @@ def print_table(headers, rows):
 def print_report(report):
     configuration = dict(report['configuration'])
     configuration['capacity'] = readable_bytes(configuration['capacity'])
-    for key in ('min_water_level', 'max_water_level'):
-        configuration[key] = f'{configuration[key]}%'
+    for key in ('min_water_level', 'max_water_level', 'hot_block_percent', 'hot_read_percent'):
+        if key in configuration:
+            configuration[key] = f'{configuration[key]}%'
     configuration['sizes'] = [readable_bytes(size) for size in configuration['sizes']]
     configuration['weights'] = [
         f'{human_size(size)} : {weight * PERCENT:.2f}%'
@@ -511,9 +653,11 @@ def print_report(report):
     for mode, outcome in report['modes'].items():
         state = outcome['final']
         print(f'\nMode: {mode}')
+        if 'eviction_policy' in state:
+            print(f'Eviction policy: {state["eviction_policy"]}')
         print('\nCounters:')
         print_table(
-            ['Operation', 'Count'],
+            ['Counter', 'Value'],
             [
                 (key.replace('_', ' '), readable_bytes(value) if key == 'evicted_reserved_bytes' else f'{value:,}')
                 for key, value in outcome['counters'].items()
@@ -536,6 +680,8 @@ def print_report(report):
         )
         print(f'Occupancy: {state["occupancy_percent"]:.2f}% (denominator: capacity bytes)')
         print(f'Free ranges: {state["free_range_count"]:,}')
+        if 'live_hot_blocks' in state:
+            print(f'Live blocks: {state["live_hot_blocks"]:,} hot, {state["live_cold_blocks"]:,} cold')
         for key, denominator in [
             ('internal_percent', 'reserved bytes'),
             ('external_percent', 'free bytes'),
@@ -640,6 +786,7 @@ def main(argv=None):
             'workload': 'water-level',
             'mode': args.mode,
             'sample_every': args.sample_every,
+            **{key: getattr(args, key) for key in SIMULATION_DEFAULTS},
         }
         modes = run_simulation(config)
         report = {'configuration': config, 'modes': modes}
