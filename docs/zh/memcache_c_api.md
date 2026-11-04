@@ -292,7 +292,7 @@ int32_t mmcc_remove(const char *key, uint32_t flags);
 **参数**
 
 - `key`：数据的键，长度小于256个字节。
-- `flags`：可选标志，保留字段。
+- `flags`：可选标志位，默认为 `0`（立即删除）。支持 `MMC_REMOVE_FLAG_LAZY`（值为 `1`），开启懒删除模式：key 不立即删除，而是标记为优先淘汰（多个懒删除 key 按首次懒删除先后顺序淘汰，先删先淘汰），淘汰前仍可被 Get/Query 访问；支持 `MMC_REMOVE_FLAG_KEEP_SSD`（值为 `2`），仅释放内存层（HBM/DRAM）数据与元数据，key 的 SSD 副本（数据与元数据）保留，效果等同将该 key 从内存层淘汰降级为 SSD-only：后续 Get 仍可命中并从 SSD 回热；key 无 SSD 副本时等同于默认删除；`MMC_REMOVE_FLAG_LAZY` 与 `MMC_REMOVE_FLAG_KEEP_SSD` 同时置位时表示「内存层懒删除 + SSD 副本保留」：key 的内存层按懒删除优先淘汰，淘汰时只释放内存层，SSD 数据与元数据始终保留；key 仅有 SSD 副本时不执行删除并返回成功；key 仅有内存副本时等同于普通懒删除。
 
 **返回值**
 
@@ -481,7 +481,7 @@ int32_t mmcc_batch_remove(const char **keys, uint32_t keys_count, int32_t *remov
 - `keys`：要从 BM 中删除的键列表，每个键长度小于256个字节。
 - `keys_count`：键的数量。
 - `remove_results`：每个删除操作的结果。
-- `flags`：操作标志。
+- `flags`：操作标志位，默认为 `0`（立即删除）。支持 `MMC_REMOVE_FLAG_LAZY`（值为 `1`），开启懒删除模式：key 不立即删除，而是标记为优先淘汰（多个懒删除 key 按首次懒删除先后顺序淘汰，先删先淘汰）；期间 Get/Exist/Query 等访问会恢复其正常热度并取消该标记；若因内存压力被淘汰并降级到更低层介质，则视为删除完成，在低层按普通数据对待；对已停泊为 SSD-only 的 key（如经 KEEP_SSD 删除或淘汰降级后）执行懒删除时（未同时置位 `KEEP_SSD`），因无内存层 LRU 可降级，退化为立即全量删除；分片 LRU（lruType=sharded_lru）模式下仍保证懒删除 key 优先于普通 key 淘汰；自动淘汰时同一分片内按首次懒删除先后淘汰，不同分片之间不保证全局 FIFO；碎片整理、强制释放等按候选列表处理的路径只保证懒删除 key 优先进入候选，候选之间的先后顺序不保证；支持 `MMC_REMOVE_FLAG_KEEP_SSD`（值为 `2`），仅释放内存层（HBM/DRAM）数据与元数据，key 的 SSD 副本（数据与元数据）保留，效果等同将该 key 从内存层淘汰降级为 SSD-only：后续 Get 仍可命中并从 SSD 回热；key 无 SSD 副本时等同于默认删除；`MMC_REMOVE_FLAG_LAZY` 与 `MMC_REMOVE_FLAG_KEEP_SSD` 同时置位时表示「内存层懒删除 + SSD 副本保留」：key 的内存层按懒删除优先淘汰，淘汰时只释放内存层，SSD 数据与元数据始终保留；key 仅有 SSD 副本时不执行删除并返回成功；key 仅有内存副本时等同于普通懒删除。
 
 **返回值**
 

@@ -1080,3 +1080,141 @@ TEST_F(MmcMetaServiceHttpTest, MemoryPrefetch_MissingChunkHashes_ReturnsError)
     EXPECT_FALSE(responseJson.at("success").get<bool>());
     EXPECT_EQ(responseJson.at("error_message"), "Missing 'chunk_hashes' in request body");
 }
+
+TEST_F(MmcMetaServiceHttpTest, RemoveKey_LazyFlagKeepsKeyUntilEvicted)
+{
+    MockMmcHttpClient client(kHttpLocalHost, httpPort_);
+
+    // flags=MMC_REMOVE_FLAG_LAZY：只做 Demote，key 仍可查询
+    auto lazyResponse =
+        client.Delete(std::string("/key?key=") + kHttpAllocKey + "&flags=" + std::to_string(MMC_REMOVE_FLAG_LAZY));
+    ASSERT_NE(lazyResponse, nullptr);
+    ASSERT_EQ(lazyResponse->status, kHttpStatusOk);
+    auto lazyJson = nlohmann::json::parse(lazyResponse->body);
+    EXPECT_TRUE(lazyJson.at("success").get<bool>());
+    EXPECT_EQ(lazyJson.at("message"), "key deleted");
+
+    auto queryResponse = WaitForResponse(client, std::string("/query_key?key=") + kHttpAllocKey);
+    ASSERT_NE(queryResponse, nullptr);
+    auto queryJson = nlohmann::json::parse(queryResponse->body);
+    EXPECT_TRUE(queryJson.at("valid").get<bool>());
+}
+
+TEST_F(MmcMetaServiceHttpTest, RemoveKey_InvalidFlags_ReturnsError)
+{
+    MockMmcHttpClient client(kHttpLocalHost, httpPort_);
+
+    // 未知标志位：明确报错，且 key 不被删除
+    constexpr uint32_t unknownFlags = 0x8U;
+    auto unknownResponse =
+        client.Delete(std::string("/key?key=") + kHttpAllocKey + "&flags=" + std::to_string(unknownFlags));
+    ASSERT_NE(unknownResponse, nullptr);
+    ASSERT_EQ(unknownResponse->status, kHttpStatusOk);
+    auto unknownJson = nlohmann::json::parse(unknownResponse->body);
+    EXPECT_FALSE(unknownJson.at("success").get<bool>());
+    EXPECT_EQ(unknownJson.at("error_message"), "Invalid 'flags' parameter");
+
+    // 非数字取值：同样在入口被拦截
+    auto malformedResponse = client.Delete(std::string("/key?key=") + kHttpAllocKey + "&flags=abc");
+    ASSERT_NE(malformedResponse, nullptr);
+    ASSERT_EQ(malformedResponse->status, kHttpStatusOk);
+    auto malformedJson = nlohmann::json::parse(malformedResponse->body);
+    EXPECT_FALSE(malformedJson.at("success").get<bool>());
+    EXPECT_EQ(malformedJson.at("error_message"), "Invalid 'flags' parameter");
+
+    auto queryResponse = WaitForResponse(client, std::string("/query_key?key=") + kHttpAllocKey);
+    ASSERT_NE(queryResponse, nullptr);
+    auto queryJson = nlohmann::json::parse(queryResponse->body);
+    EXPECT_TRUE(queryJson.at("valid").get<bool>());
+}
+
+TEST_F(MmcMetaServiceHttpTest, MemoryEvict_FlagsWithLocations_ReturnsError)
+{
+    MockMmcHttpClient client(kHttpLocalHost, httpPort_);
+
+    nlohmann::json requestBody;
+    requestBody["chunk_hashes"] = {kHttpAllocKey};
+    requestBody["locations"] = {"LocalCPUBackend"};
+    requestBody["flags"] = MMC_REMOVE_FLAG_LAZY;
+
+    auto response = client.Post("/memory/evict", requestBody.dump(), "application/json");
+    ASSERT_NE(response, nullptr);
+    ASSERT_EQ(response->status, kHttpStatusOk);
+    auto responseJson = nlohmann::json::parse(response->body);
+    EXPECT_FALSE(responseJson.at("success").get<bool>());
+    EXPECT_EQ(responseJson.at("error_message"), "'flags' is only supported when 'locations' is absent");
+}
+
+TEST_F(MmcMetaServiceHttpTest, MemoryEvict_ZeroFlagsWithLocations_EvictsKeys)
+{
+    MockMmcHttpClient client(kHttpLocalHost, httpPort_);
+
+    nlohmann::json requestBody;
+    requestBody["chunk_hashes"] = {kHttpAllocKey};
+    requestBody["locations"] = {"LocalCPUBackend"};
+    // 显式传 flags=0 等价于不传，不应与 locations 冲突
+    requestBody["flags"] = 0;
+
+    auto response = client.Post("/memory/evict", requestBody.dump(), "application/json");
+    ASSERT_NE(response, nullptr);
+    ASSERT_EQ(response->status, kHttpStatusOk);
+    auto responseJson = nlohmann::json::parse(response->body);
+    EXPECT_EQ(responseJson.at("status"), "success");
+    EXPECT_EQ(responseJson.at("num_evicted").get<size_t>(), 1u);
+
+    usleep(100000U);
+}
+
+TEST_F(MmcMetaServiceHttpTest, MemoryEvict_LazyFlag_ReportsMarkedInsteadOfEvicted)
+{
+    MockMmcHttpClient client(kHttpLocalHost, httpPort_);
+
+    nlohmann::json requestBody;
+    requestBody["chunk_hashes"] = {kHttpAllocKey};
+    requestBody["flags"] = MMC_REMOVE_FLAG_LAZY;
+
+    auto response = client.Post("/memory/evict", requestBody.dump(), "application/json");
+    ASSERT_NE(response, nullptr);
+    ASSERT_EQ(response->status, kHttpStatusOk);
+    auto responseJson = nlohmann::json::parse(response->body);
+    EXPECT_EQ(responseJson.at("status"), "success");
+    // 懒删除只做标记，内存尚未释放，不计入 num_evicted
+    EXPECT_EQ(responseJson.at("num_evicted").get<size_t>(), 0u);
+    EXPECT_EQ(responseJson.at("num_marked").get<size_t>(), 1u);
+
+    // 懒删除后 key 仍可访问
+    auto queryResponse = WaitForResponse(client, std::string("/query_key?key=") + kHttpAllocKey);
+    ASSERT_NE(queryResponse, nullptr);
+    auto queryJson = nlohmann::json::parse(queryResponse->body);
+    EXPECT_TRUE(queryJson.at("valid").get<bool>());
+}
+
+// SSD-only key 上的懒删除会退化为立即全量删除：必须按实际结果计入 num_evicted，而不是 num_marked
+TEST_F(MmcMetaServiceHttpTest, MemoryEvict_LazyFlagOnSsdOnlyKey_ReportsEvicted)
+{
+    MockMmcHttpClient client(kHttpLocalHost, httpPort_);
+
+    // 制造 SSD-only key：补 SSD 副本后按 KEEP_SSD 停泊出内存层
+    ASSERT_EQ(metaManager_->AddSsdBlob(kHttpAllocKey, MmcMemBlobDesc{0, 0, SIZE_32K, MEDIA_SSD, READABLE, 0}), MMC_OK);
+    ASSERT_EQ(metaManager_->Remove(kHttpAllocKey, MMC_REMOVE_FLAG_KEEP_SSD), MMC_OK);
+    usleep(100000U);
+
+    nlohmann::json requestBody;
+    requestBody["chunk_hashes"] = {kHttpAllocKey};
+    requestBody["flags"] = MMC_REMOVE_FLAG_LAZY;
+
+    auto response = client.Post("/memory/evict", requestBody.dump(), "application/json");
+    ASSERT_NE(response, nullptr);
+    ASSERT_EQ(response->status, kHttpStatusOk);
+    auto responseJson = nlohmann::json::parse(response->body);
+    EXPECT_EQ(responseJson.at("status"), "success");
+    EXPECT_EQ(responseJson.at("num_evicted").get<size_t>(), 1u);
+    EXPECT_EQ(responseJson.at("num_marked").get<size_t>(), 0u);
+
+    // key 已被真实删除
+    auto queryResponse = WaitForResponse(client, std::string("/query_key?key=") + kHttpAllocKey);
+    ASSERT_NE(queryResponse, nullptr);
+    auto queryJson = nlohmann::json::parse(queryResponse->body);
+    EXPECT_FALSE(queryJson.at("success").get<bool>());
+    EXPECT_EQ(queryJson.at("error_message"), "Key not found");
+}

@@ -68,6 +68,11 @@ public:
         return ShardOf(key).Erase(key, value);
     }
 
+    Result EraseIfMatch(const Key &key, const Value &expected) override
+    {
+        return ShardOf(key).EraseIfMatch(key, expected);
+    }
+
     Result EraseIfEmpty(const Key &key, std::function<bool(const Value &)> isEmptyFunc) override
     {
         return ShardOf(key).EraseIfEmpty(key, isEmptyFunc);
@@ -204,6 +209,16 @@ public:
         return ShardOf(key).Promote(key);
     }
 
+    Result Demote(const Key &key) override
+    {
+        return ShardOf(key).Demote(key);
+    }
+
+    Result DemoteIfMatch(const Key &key, const Value &expected) override
+    {
+        return ShardOf(key).DemoteIfMatch(key, expected);
+    }
+
     MediaType GetMediaType(const Key &key) override
     {
         return ShardOf(key).GetMediaType(key);
@@ -212,6 +227,11 @@ public:
     Result InsertLru(const Key &key, MediaType type) override
     {
         return ShardOf(key).InsertLru(key, type);
+    }
+
+    Result InsertLruIfMatch(const Key &key, const Value &expected, MediaType type) override
+    {
+        return ShardOf(key).InsertLruIfMatch(key, expected, type);
     }
 
     Result RemoveFromLru(const Key &key, MediaType type) override

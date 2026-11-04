@@ -281,17 +281,19 @@ public:
     /**
      * @brief remove the object
      * @param key Key of the object to remove
+     * @param flags Optional flags: MMC_REMOVE_FLAG_LAZY for lazy removal, MMC_REMOVE_FLAG_KEEP_SSD to keep the SSD copy
      * @return 0 on success, negative value on error
      */
-    virtual int Remove(const std::string &key) = 0;
+    virtual int Remove(const std::string &key, uint32_t flags = 0) = 0;
 
     /**
      * @brief Remove objects with keys
      * @param keys Keys of the objects
+     * @param flags Optional flags: MMC_REMOVE_FLAG_LAZY for lazy removal, MMC_REMOVE_FLAG_KEEP_SSD to keep the SSD copy
      * @return std::vector<int> Remove status for each key, 0 if success, -1 if error
      * exist
      */
-    virtual std::vector<int> BatchRemove(const std::vector<std::string> &keys) = 0;
+    virtual std::vector<int> BatchRemove(const std::vector<std::string> &keys, uint32_t flags = 0) = 0;
 
     /**
      * @brief Remove all objects

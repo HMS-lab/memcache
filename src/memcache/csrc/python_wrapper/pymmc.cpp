@@ -746,6 +746,8 @@ void DefineMmcStructModule(py::module_ &m)
 PYBIND11_MODULE(_pymmc, m)
 {
     DefineMmcStructModule(m);
+    m.attr("MMC_REMOVE_FLAG_LAZY") = MMC_REMOVE_FLAG_LAZY;
+    m.attr("MMC_REMOVE_FLAG_KEEP_SSD") = MMC_REMOVE_FLAG_KEEP_SSD;
     ock::mmc::ReplicateConfig defaultConfig;
     // Support starting the meta service from python
     py::class_<MmcMetaServiceProcess>(m, "MetaService", R"pbdoc(
@@ -767,8 +769,10 @@ PYBIND11_MODULE(_pymmc, m)
              "Setup local configuration")
         .def("init", &MmcacheStore::Init, py::call_guard<py::gil_scoped_release>(), py::arg("device_id"),
              py::arg("init_bm") = true)
-        .def("remove", &MmcacheStore::Remove, py::call_guard<py::gil_scoped_release>())
-        .def("remove_batch", &MmcacheStore::BatchRemove, py::call_guard<py::gil_scoped_release>())
+        .def("remove", &MmcacheStore::Remove, py::call_guard<py::gil_scoped_release>(), py::arg("key"),
+             py::arg("flags") = 0)
+        .def("remove_batch", &MmcacheStore::BatchRemove, py::call_guard<py::gil_scoped_release>(), py::arg("keys"),
+             py::arg("flags") = 0)
         .def("remove_all", &MmcacheStore::RemoveAll, py::call_guard<py::gil_scoped_release>())
         .def("is_exist", &MmcacheStore::IsExist, py::call_guard<py::gil_scoped_release>())
         .def("batch_is_exist", &MmcacheStore::BatchIsExist, py::call_guard<py::gil_scoped_release>(), py::arg("keys"),

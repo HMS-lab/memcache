@@ -323,12 +323,12 @@ Result MmcRestApiFacade::DeleteMetadata(const std::string &key) const
     return metaService_->DeleteMetadata(key);
 }
 
-Result MmcRestApiFacade::RemoveKey(const std::string &key) const
+Result MmcRestApiFacade::RemoveKey(const std::string &key, uint32_t flags, MmcMetaManager::RemoveOutcome *outcome) const
 {
     MMC_VALIDATE_RETURN(metaMgrProxy_ != nullptr, "meta manager proxy is nullptr", MMC_NOT_INITIALIZED);
-    RemoveRequest request(key);
+    RemoveRequest request(key, flags);
     Response response;
-    return metaMgrProxy_->Remove(request, response);
+    return metaMgrProxy_->Remove(request, response, outcome);
 }
 
 Result MmcRestApiFacade::RemoveAllKeys() const

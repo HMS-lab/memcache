@@ -13,6 +13,7 @@
 #define MEM_FABRIC_MMC_MEM_OBJ_META_H
 
 #include <vector>
+#include <atomic>
 #include <mutex>
 #include <list>
 #include <chrono>
@@ -83,6 +84,17 @@ public:
     uint16_t NumBlobs();
 
     /**
+     * @brief 标记「淘汰时保留 SSD 副本」：LAZY|KEEP_SSD 组合请求下，key 仍按懒删除优先淘汰，
+     *        但淘汰时只释放内存层，SSD 副本始终保留
+     */
+    void SetKeepSsdOnEvict(bool keepSsdOnEvict);
+
+    /**
+     * @brief 是否需要在淘汰时保留 SSD 副本
+     */
+    bool KeepSsdOnEvict() const;
+
+    /**
      * @brief Get blobs with filter
      * @return blobs passing the filter
      */
@@ -149,13 +161,14 @@ private:
 
 private:
     /* make sure the size of this class is 64 bytes */
-    uint16_t prot_{0};                   /* prot of the mem object, i.e. accessibility */
-    uint8_t priority_{0};                /* priority of the memory object, used for eviction */
-    uint8_t numBlobs_{0};                /* number of blob that the memory object, i.e. replica count */
-    std::list<MmcMemBlobPtr> blobs_;     /* 24 bytes */
-    uint64_t size_{0};                   /* byteSize of each blob */
-    std::mutex mutex_;                   /* must lock before read/write this meta */
-    mutable std::condition_variable cv_; /* key-level: 回温/状态变化时唤醒等待中的并发 Get() */
+    uint16_t prot_{0};                        /* prot of the mem object, i.e. accessibility */
+    uint8_t priority_{0};                     /* priority of the memory object, used for eviction */
+    uint8_t numBlobs_{0};                     /* number of blob that the memory object, i.e. replica count */
+    std::atomic<bool> keepSsdOnEvict_{false}; /* 淘汰时仅释放内存层，保留 SSD 副本（LAZY|KEEP_SSD） */
+    std::list<MmcMemBlobPtr> blobs_;          /* 24 bytes */
+    uint64_t size_{0};                        /* byteSize of each blob */
+    std::mutex mutex_;                        /* must lock before read/write this meta */
+    mutable std::condition_variable cv_;      /* key-level: 回温/状态变化时唤醒等待中的并发 Get() */
 };
 
 using MmcMemObjMetaPtr = MmcRef<MmcMemObjMeta>;
@@ -174,6 +187,16 @@ inline uint16_t MmcMemObjMeta::Prot()
 inline uint8_t MmcMemObjMeta::Priority()
 {
     return priority_;
+}
+
+inline void MmcMemObjMeta::SetKeepSsdOnEvict(bool keepSsdOnEvict)
+{
+    keepSsdOnEvict_.store(keepSsdOnEvict, std::memory_order_relaxed);
+}
+
+inline bool MmcMemObjMeta::KeepSsdOnEvict() const
+{
+    return keepSsdOnEvict_.load(std::memory_order_relaxed);
 }
 
 inline uint16_t MmcMemObjMeta::NumBlobs()

@@ -328,9 +328,11 @@ struct BatchAllocResponse : MsgBase {
 
 struct RemoveRequest : MsgBase {
     std::string key_;
+    uint32_t flags_{0};
 
     RemoveRequest() : MsgBase{0, ML_REMOVE_REQ, 0} {}
-    explicit RemoveRequest(const std::string &key) : MsgBase{0, ML_REMOVE_REQ, 0}, key_(key) {};
+    explicit RemoveRequest(const std::string &key, uint32_t flags = 0)
+        : MsgBase{0, ML_REMOVE_REQ, 0}, key_(key), flags_(flags) {};
 
     Result Serialize(NetMsgPacker &packer) const override
     {
@@ -338,6 +340,7 @@ struct RemoveRequest : MsgBase {
         packer.Serialize(msgId);
         packer.Serialize(destRankId);
         packer.Serialize(key_);
+        packer.Serialize(flags_);
         return MMC_OK;
     }
 
@@ -347,15 +350,21 @@ struct RemoveRequest : MsgBase {
         packer.Deserialize(msgId);
         packer.Deserialize(destRankId);
         packer.Deserialize(key_);
+        if (packer.Deserialize(flags_) != MMC_OK) {
+            // 旧版本客户端报文不携带 flags 字段，按默认语义(0)处理，保证新旧版本互通
+            flags_ = 0;
+        }
         return MMC_OK;
     }
 };
 
 struct BatchRemoveRequest : MsgBase {
     std::vector<std::string> keys_;
+    uint32_t flags_{0};
 
     BatchRemoveRequest() : MsgBase{0, ML_BATCH_REMOVE_REQ, 0} {}
-    explicit BatchRemoveRequest(const std::vector<std::string> &keys) : MsgBase{0, ML_BATCH_REMOVE_REQ, 0}, keys_(keys)
+    explicit BatchRemoveRequest(const std::vector<std::string> &keys, uint32_t flags = 0)
+        : MsgBase{0, ML_BATCH_REMOVE_REQ, 0}, keys_(keys), flags_(flags)
     {}
 
     Result Serialize(NetMsgPacker &packer) const override
@@ -364,6 +373,7 @@ struct BatchRemoveRequest : MsgBase {
         packer.Serialize(msgId);
         packer.Serialize(destRankId);
         packer.Serialize(keys_);
+        packer.Serialize(flags_);
         return MMC_OK;
     }
 
@@ -373,6 +383,10 @@ struct BatchRemoveRequest : MsgBase {
         packer.Deserialize(msgId);
         packer.Deserialize(destRankId);
         packer.Deserialize(keys_);
+        if (packer.Deserialize(flags_) != MMC_OK) {
+            // 旧版本客户端报文不携带 flags 字段，按默认语义(0)处理，保证新旧版本互通
+            flags_ = 0;
+        }
         return MMC_OK;
     }
 };

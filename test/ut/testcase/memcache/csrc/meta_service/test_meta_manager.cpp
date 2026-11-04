@@ -65,6 +65,18 @@ protected:
     {
         return mgr->EvictCallBackFunction(key, object, media);
     }
+    // 驱动一次 DRAM 层自然淘汰：watermark 取 high=100/low=0、当前阈值 100，至少淘汰 1 个 key
+    static void EvictLeastRecentlyUsedDramOnce(MmcRef<MmcMetaManager> &mgr)
+    {
+        constexpr uint16_t kWatermarkHigh = 100;
+        constexpr uint16_t kWatermarkLow = 0;
+        std::vector<std::pair<uint16_t, uint16_t>> watermarks(MEDIA_NONE, {kWatermarkLow, kWatermarkLow});
+        watermarks[MEDIA_DRAM] = {kWatermarkHigh, kWatermarkLow};
+        auto moveFunc = [&mgr](const std::string &key, const MmcMemObjMetaPtr &object, MediaType media) {
+            return mgr->EvictCallBackFunction(key, object, media);
+        };
+        mgr->metaContainer_->MultiLevelElimination(watermarks, {MEDIA_DRAM}, {kWatermarkHigh}, moveFunc);
+    }
     static MmcMemBlobPtr AddRewarmTestBlob(MmcMetaManagerPtr &mgr, const std::string &key,
                                            const MmcMemObjMetaPtr &object, MediaType media, BlobState state)
     {
@@ -1380,6 +1392,415 @@ TEST_F(TestMmcMetaManager, DramOnlyRemove_SsdPreFreeNoop)
         if (s["medium"] == "DRAM")
             EXPECT_EQ(s["allocatedSize"], 0u);
     }
+
+    metaMng->Stop();
+}
+
+// KEEP_SSD flag Remove — key with DRAM + SSD blobs
+// Verify: only memory tier freed, SSD blob meta kept in container, no SsdPreFree (no SSD data delete RPC)
+TEST_F(TestMmcMetaManager, KeepSsdRemove_FreesMemoryOnlyKeepsSsdMeta)
+{
+    MmcLocation dramLoc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo dramInfo{0, 128 * 1024};
+
+    uint64_t defaultTtl = 2000;
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 50U);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+
+    std::string key = "keep_ssd_key";
+    AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+    MmcMemMetaDesc objMeta;
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->UpdateState(key, dramLoc, MMC_WRITE_OK, 1), MMC_OK);
+    ASSERT_EQ(metaMng->AddSsdBlob(key, MmcMemBlobDesc{0, 0, SIZE_32K, MEDIA_SSD, READABLE, 0}), MMC_OK);
+
+    // spy 覆写 SsdPreFree 处理器（Stop 会置空，无需手动恢复）
+    std::atomic<uint32_t> spyCount{0};
+    MmcMemBlob::ssdPreFreeHandler_ = [&spyCount](const std::string &key, const MmcMemBlobDesc &desc) {
+        (void)key;
+        (void)desc;
+        spyCount.fetch_add(1, std::memory_order_relaxed);
+    };
+
+    auto getDramUsed = [&metaMng]() -> uint64_t {
+        for (const auto &s : metaMng->GetAllSegmentInfo()) {
+            if (s["medium"] == "DRAM")
+                return s["allocatedSize"];
+        }
+        return 0;
+    };
+    EXPECT_GT(getDramUsed(), 0u);
+
+    ASSERT_EQ(metaMng->Remove(key, MMC_REMOVE_FLAG_KEEP_SSD), MMC_OK);
+    usleep(100000U);
+
+    // 内存层释放，SSD 未触发预释放
+    EXPECT_EQ(getDramUsed(), 0u) << "DRAM should be freed after KEEP_SSD Remove";
+    EXPECT_EQ(spyCount.load(), 0u) << "SsdPreFree must not be triggered with KEEP_SSD flag";
+
+    // key 与 SSD blob 元数据仍在容器中：再次普通删除成功并触发一次 SsdPreFree
+    ASSERT_EQ(metaMng->Remove(key), MMC_OK);
+    usleep(100000U);
+    EXPECT_EQ(spyCount.load(), 1u) << "follow-up full Remove should free SSD blob via SsdPreFree";
+
+    metaMng->Stop();
+}
+
+// 对照组：默认 Remove — key with DRAM + SSD blobs
+// Verify: full remove frees all tiers and triggers SsdPreFree once
+TEST_F(TestMmcMetaManager, RemoveDefault_DramSsdKey_TriggersSsdPreFree)
+{
+    MmcLocation dramLoc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo dramInfo{0, 128 * 1024};
+
+    uint64_t defaultTtl = 2000;
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 50U);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+
+    std::string key = "full_remove_key";
+    AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+    MmcMemMetaDesc objMeta;
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->UpdateState(key, dramLoc, MMC_WRITE_OK, 1), MMC_OK);
+    ASSERT_EQ(metaMng->AddSsdBlob(key, MmcMemBlobDesc{0, 0, SIZE_32K, MEDIA_SSD, READABLE, 0}), MMC_OK);
+
+    std::atomic<uint32_t> spyCount{0};
+    MmcMemBlob::ssdPreFreeHandler_ = [&spyCount](const std::string &key, const MmcMemBlobDesc &desc) {
+        (void)key;
+        (void)desc;
+        spyCount.fetch_add(1, std::memory_order_relaxed);
+    };
+
+    ASSERT_EQ(metaMng->Remove(key), MMC_OK);
+    usleep(100000U);
+
+    EXPECT_EQ(spyCount.load(), 1u) << "default Remove should free SSD blob via SsdPreFree";
+    EXPECT_EQ(metaMng->Remove(key), MMC_UNMATCHED_KEY) << "key should be fully removed from container";
+
+    metaMng->Stop();
+}
+
+// KEEP_SSD flag Remove — key has no SSD blob
+// Verify: degrades to full remove, key erased, no SsdPreFree
+TEST_F(TestMmcMetaManager, KeepSsdRemove_NoSsdBlob_DegradesToFullRemove)
+{
+    MmcLocation dramLoc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo dramInfo{0, 128 * 1024};
+
+    uint64_t defaultTtl = 2000;
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 50U);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+
+    std::string key = "no_ssd_key";
+    AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+    MmcMemMetaDesc objMeta;
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->UpdateState(key, dramLoc, MMC_WRITE_OK, 1), MMC_OK);
+
+    std::atomic<uint32_t> spyCount{0};
+    MmcMemBlob::ssdPreFreeHandler_ = [&spyCount](const std::string &key, const MmcMemBlobDesc &desc) {
+        (void)key;
+        (void)desc;
+        spyCount.fetch_add(1, std::memory_order_relaxed);
+    };
+
+    ASSERT_EQ(metaMng->Remove(key, MMC_REMOVE_FLAG_KEEP_SSD), MMC_OK);
+    usleep(100000U);
+
+    auto getDramUsed = [&metaMng]() -> uint64_t {
+        for (const auto &s : metaMng->GetAllSegmentInfo()) {
+            if (s["medium"] == "DRAM")
+                return s["allocatedSize"];
+        }
+        return 0;
+    };
+    EXPECT_EQ(getDramUsed(), 0u) << "DRAM should be freed after degraded full Remove";
+    EXPECT_EQ(spyCount.load(), 0u) << "no SSD blob exists, SsdPreFree never triggered";
+    EXPECT_EQ(metaMng->Remove(key), MMC_UNMATCHED_KEY) << "key should be fully removed";
+
+    metaMng->Stop();
+}
+
+// LAZY flag Remove — key with DRAM blob only
+// Verify: lazy remove only marks the key, memory is not freed until a real eviction/removal happens
+TEST_F(TestMmcMetaManager, LazyRemove_DramKey_MarksLazyWithoutErasing)
+{
+    MmcLocation dramLoc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo dramInfo{0, 128 * 1024};
+
+    uint64_t defaultTtl = 2000;
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 50U);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+
+    std::string key = "lazy_remove_key";
+    AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+    MmcMemMetaDesc objMeta;
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->UpdateState(key, dramLoc, MMC_WRITE_OK, 1), MMC_OK);
+
+    auto getDramUsed = [&metaMng]() -> uint64_t {
+        for (const auto &s : metaMng->GetAllSegmentInfo()) {
+            if (s["medium"] == "DRAM")
+                return s["allocatedSize"];
+        }
+        return 0;
+    };
+
+    ASSERT_EQ(metaMng->Remove(key, MMC_REMOVE_FLAG_LAZY), MMC_OK);
+    usleep(100000U);
+
+    // 懒删除只标记不释放：key 仍在容器中，DRAM 占用不变
+    EXPECT_GT(getDramUsed(), 0u) << "lazy remove must not free memory immediately";
+    EXPECT_EQ(metaMng->Remove(key), MMC_OK) << "lazy key must still be present for follow-up full remove";
+    usleep(100000U);
+
+    EXPECT_EQ(getDramUsed(), 0u) << "DRAM should be freed after follow-up full remove";
+    EXPECT_EQ(metaMng->Remove(key), MMC_UNMATCHED_KEY) << "key should be fully removed";
+
+    metaMng->Stop();
+}
+
+// LAZY flag Remove — key already parked as SSD-only (via KEEP_SSD)
+// Verify: degrades to full remove so the SSD-only key cannot leak forever; SSD blob freed via SsdPreFree
+TEST_F(TestMmcMetaManager, LazyRemove_SsdOnlyKey_DegradesToFullRemove)
+{
+    MmcLocation dramLoc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo dramInfo{0, 128 * 1024};
+
+    uint64_t defaultTtl = 2000;
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 50U);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+
+    std::string key = "lazy_remove_ssd_only_key";
+    AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+    MmcMemMetaDesc objMeta;
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->UpdateState(key, dramLoc, MMC_WRITE_OK, 1), MMC_OK);
+    ASSERT_EQ(metaMng->AddSsdBlob(key, MmcMemBlobDesc{0, 0, SIZE_32K, MEDIA_SSD, READABLE, 0}), MMC_OK);
+
+    // 先用 KEEP_SSD 停泊为 SSD-only：无内存层 LRU，自然淘汰无法触及
+    ASSERT_EQ(metaMng->Remove(key, MMC_REMOVE_FLAG_KEEP_SSD), MMC_OK);
+    usleep(100000U);
+
+    std::atomic<uint32_t> spyCount{0};
+    MmcMemBlob::ssdPreFreeHandler_ = [&spyCount](const std::string &key, const MmcMemBlobDesc &desc) {
+        (void)key;
+        (void)desc;
+        spyCount.fetch_add(1, std::memory_order_relaxed);
+    };
+
+    ASSERT_EQ(metaMng->Remove(key, MMC_REMOVE_FLAG_LAZY), MMC_OK);
+    usleep(100000U);
+
+    EXPECT_EQ(spyCount.load(), 1u) << "degraded lazy remove should free SSD blob via SsdPreFree";
+    EXPECT_EQ(metaMng->Remove(key), MMC_UNMATCHED_KEY) << "key should be fully removed";
+
+    metaMng->Stop();
+}
+
+// LAZY|KEEP_SSD 同时置位 — 内存层懒删除、SSD 副本保留：
+// 先只标记懒删除（内存仍可访问），淘汰时仅释放内存层，SSD 数据与元数据始终保留
+TEST_F(TestMmcMetaManager, RemoveBothFlags_DramSsdKey_MarksLazyAndKeepsSsd)
+{
+    MmcLocation dramLoc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo dramInfo{0, 128 * 1024};
+
+    uint64_t defaultTtl = 2000;
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 50U);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+
+    std::string key = "both_flags_dram_ssd_key";
+    AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+    MmcMemMetaDesc objMeta;
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->UpdateState(key, dramLoc, MMC_WRITE_OK, 1), MMC_OK);
+    ASSERT_EQ(metaMng->AddSsdBlob(key, MmcMemBlobDesc{0, 0, SIZE_32K, MEDIA_SSD, READABLE, 0}), MMC_OK);
+
+    std::atomic<uint32_t> spyCount{0};
+    MmcMemBlob::ssdPreFreeHandler_ = [&spyCount](const std::string &key, const MmcMemBlobDesc &desc) {
+        (void)key;
+        (void)desc;
+        spyCount.fetch_add(1, std::memory_order_relaxed);
+    };
+
+    auto getDramUsed = [&metaMng]() -> uint64_t {
+        for (const auto &s : metaMng->GetAllSegmentInfo()) {
+            if (s["medium"] == "DRAM")
+                return s["allocatedSize"];
+        }
+        return 0;
+    };
+    EXPECT_GT(getDramUsed(), 0u);
+
+    MmcMetaManager::RemoveOutcome outcome = MmcMetaManager::RemoveOutcome::kMarkedLazy;
+    ASSERT_EQ(metaMng->Remove(key, MMC_REMOVE_FLAG_LAZY | MMC_REMOVE_FLAG_KEEP_SSD, &outcome), MMC_OK);
+    usleep(100000U);
+
+    // 懒删除：只标记为优先淘汰，内存层不会立即释放，SSD 副本也不删除
+    EXPECT_EQ(outcome, MmcMetaManager::RemoveOutcome::kMarkedLazy);
+    EXPECT_GT(getDramUsed(), 0u) << "lazy remove must not free DRAM immediately";
+    EXPECT_EQ(spyCount.load(), 0u) << "SsdPreFree must not be triggered by the remove request";
+    MmcMemObjMetaPtr markedMeta;
+    ASSERT_EQ(TestMmcMetaManager::MetaContainer(metaMng)->Get(key, markedMeta), MMC_OK);
+    EXPECT_TRUE(markedMeta->KeepSsdOnEvict()) << "combined flags must mark keep-ssd-on-evict";
+
+    // 手动驱动一次淘汰：只释放内存层，SSD 副本保留（不搬运新副本、不删除原副本）
+    TestMmcMetaManager::EvictLeastRecentlyUsedDramOnce(metaMng);
+    usleep(100000U);
+
+    EXPECT_EQ(getDramUsed(), 0u) << "DRAM should be freed by eviction";
+    EXPECT_EQ(spyCount.load(), 0u) << "SSD blob must be kept when KEEP_SSD is set";
+    MmcMemObjMetaPtr evictedMeta;
+    ASSERT_EQ(TestMmcMetaManager::MetaContainer(metaMng)->Get(key, evictedMeta), MMC_OK);
+    EXPECT_FALSE(evictedMeta->KeepSsdOnEvict()) << "keep-ssd intent is fulfilled once memory is evicted";
+    // key 仍以 SSD-only 形式存在：后续普通删除成功并触发一次 SSD 释放
+    ASSERT_EQ(metaMng->Remove(key), MMC_OK);
+    usleep(100000U);
+    EXPECT_EQ(spyCount.load(), 1u) << "follow-up full Remove should free SSD blob";
+
+    metaMng->Stop();
+}
+
+// LAZY|KEEP_SSD 且仅有内存副本：无 SSD 可保留，等同于普通懒删除，淘汰后整 key 删除
+TEST_F(TestMmcMetaManager, RemoveBothFlags_DramOnlyKey_MarksLazyOnly)
+{
+    MmcLocation dramLoc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo dramInfo{0, 128 * 1024};
+
+    uint64_t defaultTtl = 2000;
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 50U);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+
+    std::string key = "both_flags_dram_only_key";
+    AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+    MmcMemMetaDesc objMeta;
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->UpdateState(key, dramLoc, MMC_WRITE_OK, 1), MMC_OK);
+
+    auto getDramUsed = [&metaMng]() -> uint64_t {
+        for (const auto &s : metaMng->GetAllSegmentInfo()) {
+            if (s["medium"] == "DRAM")
+                return s["allocatedSize"];
+        }
+        return 0;
+    };
+
+    MmcMetaManager::RemoveOutcome outcome = MmcMetaManager::RemoveOutcome::kRemoved;
+    ASSERT_EQ(metaMng->Remove(key, MMC_REMOVE_FLAG_LAZY | MMC_REMOVE_FLAG_KEEP_SSD, &outcome), MMC_OK);
+    usleep(100000U);
+    EXPECT_EQ(outcome, MmcMetaManager::RemoveOutcome::kMarkedLazy);
+    EXPECT_GT(getDramUsed(), 0u) << "lazy remove must not free DRAM immediately";
+
+    TestMmcMetaManager::EvictLeastRecentlyUsedDramOnce(metaMng);
+    usleep(100000U);
+
+    // 无 SSD 副本可保留：淘汰即完整删除
+    EXPECT_EQ(metaMng->Remove(key), MMC_UNMATCHED_KEY);
+
+    metaMng->Stop();
+}
+
+// LAZY|KEEP_SSD 同时置位 — key 已是 SSD-only：无内存层可释放，接口成功但不产生实际删除
+TEST_F(TestMmcMetaManager, RemoveBothFlags_SsdOnlyKey_IsNoopButReturnsOk)
+{
+    MmcLocation dramLoc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo dramInfo{0, 128 * 1024};
+
+    uint64_t defaultTtl = 2000;
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 50U);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+
+    std::string key = "both_flags_ssd_only_key";
+    AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+    MmcMemMetaDesc objMeta;
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->UpdateState(key, dramLoc, MMC_WRITE_OK, 1), MMC_OK);
+    ASSERT_EQ(metaMng->AddSsdBlob(key, MmcMemBlobDesc{0, 0, SIZE_32K, MEDIA_SSD, READABLE, 0}), MMC_OK);
+    ASSERT_EQ(metaMng->Remove(key, MMC_REMOVE_FLAG_KEEP_SSD), MMC_OK);
+    usleep(100000U);
+
+    std::atomic<uint32_t> spyCount{0};
+    MmcMemBlob::ssdPreFreeHandler_ = [&spyCount](const std::string &key, const MmcMemBlobDesc &desc) {
+        (void)key;
+        (void)desc;
+        spyCount.fetch_add(1, std::memory_order_relaxed);
+    };
+
+    MmcMetaManager::RemoveOutcome outcome = MmcMetaManager::RemoveOutcome::kMarkedLazy;
+    ASSERT_EQ(metaMng->Remove(key, MMC_REMOVE_FLAG_LAZY | MMC_REMOVE_FLAG_KEEP_SSD, &outcome), MMC_OK);
+    usleep(100000U);
+
+    // 无内存层可释放、SSD 副本保留：既不标记懒删除，也不产生实际释放
+    EXPECT_EQ(outcome, MmcMetaManager::RemoveOutcome::kNoop);
+    EXPECT_EQ(spyCount.load(), 0u) << "SSD blob must never be freed when KEEP_SSD is set";
+    // 数据仍在：普通删除仍能成功
+    ASSERT_EQ(metaMng->Remove(key), MMC_OK);
+    usleep(100000U);
+    EXPECT_EQ(spyCount.load(), 1u);
+
+    metaMng->Stop();
+}
+
+// 懒删除实际结果：内存层 key → 仅标记；SSD-only key → 退化为立即全量删除
+TEST_F(TestMmcMetaManager, RemoveOutcome_LazyReportsActualResult)
+{
+    MmcLocation dramLoc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo dramInfo{0, 128 * 1024};
+
+    uint64_t defaultTtl = 2000;
+    MmcRef<MmcMetaManager> metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 50U);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    metaMng->Mount(dramLoc, dramInfo, blobMap, false);
+
+    // 1) 内存层 key：懒删除只标记
+    std::string dramKey = "outcome_dram_key";
+    AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+    MmcMemMetaDesc objMeta;
+    ASSERT_EQ(metaMng->Alloc(dramKey, allocReq, 1, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->UpdateState(dramKey, dramLoc, MMC_WRITE_OK, 1), MMC_OK);
+
+    MmcMetaManager::RemoveOutcome outcome = MmcMetaManager::RemoveOutcome::kRemoved;
+    ASSERT_EQ(metaMng->Remove(dramKey, MMC_REMOVE_FLAG_LAZY, &outcome), MMC_OK);
+    EXPECT_EQ(outcome, MmcMetaManager::RemoveOutcome::kMarkedLazy);
+
+    // 2) SSD-only key：懒删除退化为立即全量删除，必须按 kRemoved 统计
+    std::string ssdOnlyKey = "outcome_ssd_only_key";
+    ASSERT_EQ(metaMng->Alloc(ssdOnlyKey, allocReq, 1, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->UpdateState(ssdOnlyKey, dramLoc, MMC_WRITE_OK, 1), MMC_OK);
+    ASSERT_EQ(metaMng->AddSsdBlob(ssdOnlyKey, MmcMemBlobDesc{0, 0, SIZE_32K, MEDIA_SSD, READABLE, 0}), MMC_OK);
+    ASSERT_EQ(metaMng->Remove(ssdOnlyKey, MMC_REMOVE_FLAG_KEEP_SSD), MMC_OK);
+    usleep(100000U);
+
+    outcome = MmcMetaManager::RemoveOutcome::kMarkedLazy;
+    ASSERT_EQ(metaMng->Remove(ssdOnlyKey, MMC_REMOVE_FLAG_LAZY, &outcome), MMC_OK);
+    EXPECT_EQ(outcome, MmcMetaManager::RemoveOutcome::kRemoved);
+    EXPECT_EQ(metaMng->Remove(ssdOnlyKey), MMC_UNMATCHED_KEY) << "SSD-only lazy remove must delete the key";
 
     metaMng->Stop();
 }

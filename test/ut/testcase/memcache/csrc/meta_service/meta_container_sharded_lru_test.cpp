@@ -146,6 +146,29 @@ TEST_F(TestMmcMetaContainerShardedLRU, GetGlobalEvictCandidateKeys)
     }
 }
 
+TEST_F(TestMmcMetaContainerShardedLRU, DemotePrioritizesLazyKeysInEviction)
+{
+    constexpr int keyCount = 24;
+    constexpr int lazyKeyIndex = keyCount - 1;
+    for (int i = 0; i < keyCount; ++i) {
+        ASSERT_EQ(container->Insert("key" + std::to_string(i), i), MMC_OK);
+    }
+    // Touch every key so the lazy-removed one is the most recently used.
+    for (int i = 0; i < keyCount; ++i) {
+        int value = 0;
+        ASSERT_EQ(container->Get("key" + std::to_string(i), value), MMC_OK);
+    }
+    const std::string lazyKey = "key" + std::to_string(lazyKeyIndex);
+    EXPECT_EQ(container->Demote(lazyKey), MMC_OK);
+    // Repeated lazy removal is idempotent and keeps the first FIFO position.
+    EXPECT_EQ(container->Demote(lazyKey), MMC_OK);
+    EXPECT_EQ(container->Demote("missing"), MMC_UNMATCHED_KEY);
+
+    const auto keys = container->GetEvictCandidateKeys(MEDIA_DRAM, 1);
+    ASSERT_EQ(keys.size(), 1U);
+    EXPECT_EQ(keys[0], lazyKey);
+}
+
 TEST_F(TestMmcMetaContainerShardedLRU, MultiLevelEliminationSelectsGlobalOldestKeys)
 {
     constexpr int keyCount = 96;
@@ -171,4 +194,41 @@ TEST_F(TestMmcMetaContainerShardedLRU, MultiLevelEliminationSelectsGlobalOldestK
     for (int i = 0; i < 16; ++i) {
         EXPECT_EQ(evictedValues[i], i);
     }
+}
+
+// 同名 key 重建后，旧对象的 LRU 更新不能作用到新对象上（分片层委托 + 身份校验）
+TEST_F(TestMmcMetaContainerShardedLRU, LruUpdateIfMatchSkipsReplacedObject)
+{
+    constexpr int valueFirst = 100;
+    constexpr int valueSecond = 200;
+    EXPECT_EQ(container->Insert("key1", valueFirst), MMC_OK);
+    EXPECT_EQ(container->Erase("key1"), MMC_OK);
+    EXPECT_EQ(container->Insert("key1", valueSecond), MMC_OK);
+
+    EXPECT_EQ(container->InsertLruIfMatch("key1", valueFirst, MEDIA_SSD), MMC_UNMATCHED_KEY);
+    EXPECT_EQ(container->DemoteIfMatch("key1", valueFirst), MMC_UNMATCHED_KEY);
+    EXPECT_EQ(container->GetMediaType("key1"), MEDIA_DRAM);
+
+    // 身份匹配时行为与 InsertLru / Demote 一致
+    EXPECT_EQ(container->DemoteIfMatch("key1", valueSecond), MMC_OK);
+    EXPECT_EQ(container->InsertLruIfMatch("key1", valueSecond, MEDIA_SSD), MMC_OK);
+    EXPECT_EQ(container->GetMediaType("key1"), MEDIA_NONE);
+}
+
+// 身份校验删除在分片容器中的转发：不匹配时不删除并发重建的新对象
+TEST_F(TestMmcMetaContainerShardedLRU, EraseIfMatchSkipsReplacedObject)
+{
+    constexpr int valueOld = 100;
+    constexpr int valueNew = 200;
+    EXPECT_EQ(container->Insert("key1", valueOld), MMC_OK);
+    EXPECT_EQ(container->Erase("key1"), MMC_OK);
+    EXPECT_EQ(container->Insert("key1", valueNew), MMC_OK);
+
+    EXPECT_EQ(container->EraseIfMatch("key1", valueOld), MMC_UNMATCHED_KEY);
+    int value = 0;
+    EXPECT_EQ(container->Get("key1", value), MMC_OK);
+    EXPECT_EQ(value, valueNew);
+
+    EXPECT_EQ(container->EraseIfMatch("key1", valueNew), MMC_OK);
+    EXPECT_EQ(container->Get("key1", value), MMC_UNMATCHED_KEY);
 }

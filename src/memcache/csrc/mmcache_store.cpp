@@ -244,15 +244,15 @@ int MmcacheStore::PutFrom(const std::string &key, void *buffer, size_t size, con
     return ret;
 }
 
-int MmcacheStore::Remove(const std::string &key)
+int MmcacheStore::Remove(const std::string &key, uint32_t flags)
 {
     TP_TRACE_BEGIN(TP_MMC_PY_REMOVE);
-    auto ret = mmcc_remove(key.c_str(), 0); // 0 - success, other - not success
+    auto ret = mmcc_remove(key.c_str(), flags);
     TP_TRACE_END(TP_MMC_PY_REMOVE, ret);
     return ret;
 }
 
-std::vector<int> MmcacheStore::BatchRemove(const std::vector<std::string> &keys)
+std::vector<int> MmcacheStore::BatchRemove(const std::vector<std::string> &keys, uint32_t flags)
 {
     std::vector<int> results;
 
@@ -271,7 +271,7 @@ std::vector<int> MmcacheStore::BatchRemove(const std::vector<std::string> &keys)
         c_keys[i] = keys[i].c_str();
     }
     TP_TRACE_BEGIN(TP_MMC_PY_BATCH_REMOVE);
-    int32_t res = mmcc_batch_remove(c_keys, keys.size(), results.data(), 0);
+    int32_t res = mmcc_batch_remove(c_keys, keys.size(), results.data(), flags);
     TP_TRACE_END(TP_MMC_PY_BATCH_REMOVE, res);
     if (res != 0) {
         MMC_LOG_ERROR("remove_batch failed, res=" << res << ", keys.size=" << keys.size());

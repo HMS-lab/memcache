@@ -463,3 +463,60 @@ TEST_F(TestProtoMsg, BatchPromoteResponse_SerializeDeserialize)
     EXPECT_EQ(resp2.results_, resp.results_);
     EXPECT_EQ(resp2.msgId, ML_BATCH_PROMOTE_RESP);
 }
+
+// RemoveRequest serialization/deserialization — flags roundtrip
+TEST_F(TestProtoMsg, RemoveRequest_FlagsRoundTrip)
+{
+    constexpr uint32_t lazyFlag = MMC_REMOVE_FLAG_LAZY;
+    RemoveRequest req{"lazy_key", lazyFlag};
+    EXPECT_EQ(req.msgId, ML_REMOVE_REQ);
+
+    NetMsgPacker packer;
+    ASSERT_EQ(req.Serialize(packer), MMC_OK);
+
+    RemoveRequest req2;
+    NetMsgUnpacker unpacker(packer.String());
+    ASSERT_EQ(req2.Deserialize(unpacker), MMC_OK);
+    EXPECT_EQ(req2.key_, req.key_);
+    EXPECT_EQ(req2.flags_, lazyFlag);
+}
+
+// RemoveRequest 旧版本报文不含 flags 字段：反序列化失败时降级为默认语义 0
+TEST_F(TestProtoMsg, RemoveRequest_LegacyPayloadWithoutFlags)
+{
+    constexpr int16_t legacyMsgVer = 0;
+    constexpr uint32_t legacyRank = 0;
+    const std::string legacyKey = "legacy_key";
+    NetMsgPacker packer;
+    packer.Serialize(legacyMsgVer);
+    packer.Serialize(static_cast<int16_t>(ML_REMOVE_REQ));
+    packer.Serialize(legacyRank);
+    packer.Serialize(legacyKey);
+
+    RemoveRequest req;
+    req.flags_ = MMC_REMOVE_FLAG_KEEP_SSD;
+    NetMsgUnpacker unpacker(packer.String());
+    ASSERT_EQ(req.Deserialize(unpacker), MMC_OK);
+    EXPECT_EQ(req.key_, legacyKey);
+    EXPECT_EQ(req.flags_, 0U);
+}
+
+// BatchRemoveRequest 旧版本报文不含 flags 字段：反序列化失败时降级为默认语义 0
+TEST_F(TestProtoMsg, BatchRemoveRequest_LegacyPayloadWithoutFlags)
+{
+    constexpr int16_t legacyMsgVer = 0;
+    constexpr uint32_t legacyRank = 0;
+    const std::vector<std::string> legacyKeys{"legacy_a", "legacy_b"};
+    NetMsgPacker packer;
+    packer.Serialize(legacyMsgVer);
+    packer.Serialize(static_cast<int16_t>(ML_BATCH_REMOVE_REQ));
+    packer.Serialize(legacyRank);
+    packer.Serialize(legacyKeys);
+
+    BatchRemoveRequest req;
+    req.flags_ = MMC_REMOVE_FLAG_LAZY;
+    NetMsgUnpacker unpacker(packer.String());
+    ASSERT_EQ(req.Deserialize(unpacker), MMC_OK);
+    EXPECT_EQ(req.keys_, legacyKeys);
+    EXPECT_EQ(req.flags_, 0U);
+}

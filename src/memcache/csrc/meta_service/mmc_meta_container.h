@@ -35,6 +35,9 @@ public:
     virtual Result Get(const Key &key, Value &value) = 0;
     virtual Result Erase(const Key &key) = 0;
     virtual Result Erase(const Key &key, Value &value) = 0;
+    // 身份校验版本：仅当容器内 key 仍映射到 expected 时才删除，否则返回 MMC_UNMATCHED_KEY 且不改动状态；
+    // 失败路径判定（如「无 SSD 副本则整体删除」）必须绑定到判定时的对象版本，避免删掉并发重建的新对象
+    virtual Result EraseIfMatch(const Key &key, const Value &expected) = 0;
     virtual Result EraseIfEmpty(const Key &key, std::function<bool(const Value &)> isEmptyFunc) = 0;
     virtual Result EraseAll(std::function<void(const Key &, const Value &)> removeFunc) = 0;
     virtual void EraseIf(std::function<bool(const Key &, const Value &)> matchFunc) = 0;
@@ -50,8 +53,13 @@ public:
     virtual size_t GetKeyCount(MediaType mediaType) = 0;
     virtual std::vector<Key> GetEvictCandidateKeys(MediaType mediaType, size_t count) = 0;
     virtual Result Promote(const Key &key) = 0;
+    virtual Result Demote(const Key &key) = 0;
+    // 身份校验版本：调用方持有 Get 得到的 Value 时使用。仅当容器内 key 仍映射到 expected 时才更新 LRU，
+    // 避免 Get 之后 key 被并发删除并同名重建时，把旧对象的懒删除/停泊状态误加到新对象上（ABA）
+    virtual Result DemoteIfMatch(const Key &key, const Value &expected) = 0;
     virtual MediaType GetMediaType(const Key &key) = 0;
     virtual Result InsertLru(const Key &key, MediaType type) = 0;
+    virtual Result InsertLruIfMatch(const Key &key, const Value &expected, MediaType type) = 0;
     virtual Result RemoveFromLru(const Key &key, MediaType type) = 0;
 
     virtual void MultiLevelElimination(const std::vector<std::pair<uint16_t, uint16_t>> &evictWatermarks,

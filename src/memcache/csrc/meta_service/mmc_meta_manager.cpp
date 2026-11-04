@@ -1776,7 +1776,110 @@ Result MmcMetaManager::AddSsdBlob(const std::string &key, const MmcMemBlobDesc &
     return MMC_OK;
 }
 
-Result MmcMetaManager::Remove(const std::string &key)
+bool MmcMetaManager::TryLazyRemove(const std::string &key, Result &ret, bool keepSsdOnEvict)
+{
+    MmcMemObjMetaPtr objMeta;
+    if (metaContainer_->Get(key, objMeta) != MMC_OK || objMeta == nullptr) {
+        MMC_LOG_DEBUG("LazyRemove: key=" << key << " not found");
+        ret = MMC_UNMATCHED_KEY;
+        return true;
+    }
+    // 先置位淘汰行为再标记懒删除，避免淘汰线程在两者之间把 SSD 副本一并删除；
+    // Demote 失败时回滚，交给后续路径决定按普通删除还是立即 KEEP_SSD 处理
+    if (keepSsdOnEvict) {
+        objMeta->SetKeepSsdOnEvict(true);
+    }
+    // 身份校验版本：Get 之后 key 可能已被删除并同名重建，不能把新对象标成懒删除
+    Result demoteRet = metaContainer_->DemoteIfMatch(key, objMeta);
+    if (demoteRet == MMC_OK) {
+        MMC_LOG_DEBUG("LazyRemove: key=" << key << " marked lazy, FIFO eviction order, keepSsd=" << keepSsdOnEvict);
+        ret = MMC_OK;
+        return true;
+    }
+    if (keepSsdOnEvict) {
+        objMeta->SetKeepSsdOnEvict(false);
+    }
+    if (demoteRet == MMC_SKIPPED) {
+        // key 不在内存层 LRU（SSD-only 停泊或迁移中）：自然淘汰不会触及，退化为立即全量删除，
+        // 避免返回成功却永不释放
+        MMC_LOG_DEBUG("LazyRemove: key=" << key << " has no memory-tier LRU entry, fallback to immediate remove");
+        return false;
+    }
+    if (demoteRet == MMC_UNMATCHED_KEY) {
+        // Get 与 Demote 之间被并发删除或同名重建：目标对象已不在容器中，按未命中返回，
+        // 既不再走立即删除（可能删掉重建后的新对象），也不改动新对象的淘汰状态
+        MMC_LOG_DEBUG("LazyRemove: key=" << key << " was removed or replaced concurrently");
+        ret = MMC_UNMATCHED_KEY;
+        return true;
+    }
+    MMC_LOG_WARN("LazyRemove: Demote failed for key=" << key << ", ret=" << demoteRet
+                                                      << ", falling back to immediate remove");
+    return false;
+}
+
+bool MmcMetaManager::TryKeepSsdRemove(const std::string &key, Result &ret, RemoveOutcome *outcome,
+                                      MmcMemObjMetaPtr &examinedObj)
+{
+    MmcMemObjMetaPtr objMeta;
+    if (metaContainer_->Get(key, objMeta) != MMC_OK || objMeta == nullptr) {
+        MMC_LOG_DEBUG("KeepSsdRemove: key=" << key << " not found");
+        ret = MMC_UNMATCHED_KEY;
+        return true;
+    }
+    examinedObj = objMeta;
+    MmcBlobFilterPtr ssdFilter = MmcMakeRef<MmcBlobFilter>(UINT32_MAX, MEDIA_SSD, NONE);
+    if (ssdFilter == nullptr) {
+        MMC_LOG_ERROR("KeepSsdRemove: create filter failed for key=" << key);
+        ret = MMC_MALLOC_FAILED;
+        return true;
+    }
+    // 先完成可能失败的资源准备，再提交 LRU 状态变更：否则分配失败时内存 blob 仍在，
+    // 而 key 已被移出内存层 LRU，后续内存压力无法再选中它
+    MmcBlobFilterPtr memFilter = MmcMakeRef<MmcBlobFilter>(UINT32_MAX, MEDIA_SSD, NONE, true);
+    if (memFilter == nullptr) {
+        MMC_LOG_ERROR("KeepSsdRemove: create mem filter failed for key=" << key);
+        ret = MMC_MALLOC_FAILED;
+        return true;
+    }
+    bool hasSsdBlob = false;
+    bool hasMemBlob = false;
+    {
+        std::unique_lock<std::mutex> guard(objMeta->Mutex());
+        hasSsdBlob = !objMeta->GetBlobs(ssdFilter).empty();
+        hasMemBlob = !objMeta->GetBlobs(memFilter).empty();
+    }
+    if (!hasSsdBlob) {
+        // 无 SSD 副本：退化为普通删除。删除必须绑定本次判定的对象版本（examinedObj），
+        // 否则 Get 之后该 key 被删除并同名重建时，会按 key 删掉新对象及其 SSD 副本
+        MMC_LOG_DEBUG("KeepSsdRemove: key=" << key << " has no SSD blob, fallback to full remove");
+        return false;
+    }
+    // 保留 SSD 元数据：key 移出内存层 LRU（SSD 停泊态），仅异步释放非 SSD blob。
+    // 用身份校验版本：Get 之后 key 可能已被删除并同名重建，停泊不能作用到新对象上
+    const Result lruRet = metaContainer_->InsertLruIfMatch(key, objMeta, MEDIA_SSD);
+    if (lruRet != MMC_OK) {
+        // 并发 Erase 或同名重建：目标对象已不在容器中，直接返回，不再用过期 objMeta 释放 blob，
+        // 也不改动新对象的 LRU 状态
+        MMC_LOG_WARN("KeepSsdRemove: InsertLru failed for key=" << key << ", ret=" << lruRet);
+        ret = lruRet;
+        return true;
+    }
+    {
+        // PushRemoveList 契约要求调用方持有对象锁：CheckActiveLease 需无锁竞争地遍历 blobs，
+        // 入队失败时 DoRemoveBlobs 也会接管该锁同步执行
+        std::unique_lock<std::mutex> guard(objMeta->Mutex());
+        PushRemoveList(key, objMeta, memFilter, false);
+    }
+    if (!hasMemBlob && outcome != nullptr) {
+        // 已无内存层数据可释放（典型为 SSD-only key）：本请求不产生实际变化
+        *outcome = RemoveOutcome::kNoop;
+    }
+    MMC_LOG_DEBUG("KeepSsdRemove: key=" << key << " demoted to SSD-only");
+    ret = MMC_OK;
+    return true;
+}
+
+Result MmcMetaManager::EraseAndRemove(const std::string &key)
 {
     MmcMemObjMetaPtr objMeta;
     auto ret = metaContainer_->Erase(key, objMeta);
@@ -1787,6 +1890,75 @@ Result MmcMetaManager::Remove(const std::string &key)
     std::unique_lock<std::mutex> guard(objMeta->Mutex());
     PushRemoveList(key, objMeta, nullptr, true);
     return MMC_OK;
+}
+
+Result MmcMetaManager::EraseAndRemoveIfMatch(const std::string &key, const MmcMemObjMetaPtr &expected)
+{
+    if (expected == nullptr) {
+        MMC_LOG_DEBUG("EraseAndRemoveIfMatch: null expected object for key: " << key);
+        return MMC_UNMATCHED_KEY;
+    }
+    auto ret = metaContainer_->EraseIfMatch(key, expected);
+    if (ret != MMC_OK) {
+        // Get 之后 key 已被删除或同名重建：目标对象已不在容器中，不能按 key 删除新对象
+        MMC_LOG_DEBUG("EraseIfMatch failed for key: " << key << ", ret=" << ret);
+        return ret;
+    }
+    std::unique_lock<std::mutex> guard(expected->Mutex());
+    PushRemoveList(key, expected, nullptr, true);
+    return MMC_OK;
+}
+
+Result MmcMetaManager::Remove(const std::string &key, uint32_t flags, RemoveOutcome *outcome)
+{
+    if (outcome != nullptr) {
+        *outcome = RemoveOutcome::kRemoved;
+    }
+    constexpr uint32_t knownRemoveFlags = MMC_REMOVE_FLAG_LAZY | MMC_REMOVE_FLAG_KEEP_SSD;
+    if ((flags & ~knownRemoveFlags) != 0) {
+        MMC_LOG_ERROR("Remove: unknown flags=" << flags << " for key=" << key);
+        return MMC_INVALID_PARAM;
+    }
+    Result ret = MMC_ERROR;
+    const bool lazyFlag = (flags & MMC_REMOVE_FLAG_LAZY) != 0;
+    const bool keepSsdFlag = (flags & MMC_REMOVE_FLAG_KEEP_SSD) != 0;
+    if (lazyFlag && keepSsdFlag) {
+        // 组合语义：内存层按懒删除优先淘汰，淘汰时只释放内存层、SSD 副本始终保留。
+        // 仅有 SSD 副本时无内存层可标记，直接保留并返回成功；仅有内存副本时等同普通懒删除。
+        if (TryLazyRemove(key, ret, true)) {
+            if (ret == MMC_OK && outcome != nullptr) {
+                *outcome = RemoveOutcome::kMarkedLazy;
+            }
+            return ret;
+        }
+        // 不在内存层 LRU（SSD-only 或迁移中）：SSD 副本保留，返回成功（无实际释放）
+        MmcMemObjMetaPtr examinedObj;
+        if (TryKeepSsdRemove(key, ret, outcome, examinedObj)) {
+            return ret;
+        }
+        // 无 SSD 副本：懒删除的立即删除兜底，且必须绑定判定时的对象版本
+        return EraseAndRemoveIfMatch(key, examinedObj);
+    }
+    // KEEP_SSD 单独置位：立即释放内存层、保留 SSD 副本
+    if (keepSsdFlag) {
+        MmcMemObjMetaPtr examinedObj;
+        if (TryKeepSsdRemove(key, ret, outcome, examinedObj)) {
+            return ret;
+        }
+        // 无 SSD 副本：退化为普通删除（不涉及 SSD 数据），且必须绑定判定时的对象版本
+        return EraseAndRemoveIfMatch(key, examinedObj);
+    }
+    if (lazyFlag) {
+        if (TryLazyRemove(key, ret)) {
+            if (ret == MMC_OK && outcome != nullptr) {
+                *outcome = RemoveOutcome::kMarkedLazy;
+            }
+            return ret;
+        }
+        // SSD-only 等无法 Demote 的场景：退化为立即全量删除，避免返回成功却永不释放
+        return EraseAndRemove(key);
+    }
+    return EraseAndRemove(key);
 }
 
 Result MmcMetaManager::RemoveAll()
@@ -2621,6 +2793,21 @@ EvictResult MmcMetaManager::EvictCallBackFunction(const std::string &key, const 
     }
 
     MediaType dstMedium = MoveDown(srcMediaType);
+    if (objMeta->KeepSsdOnEvict()) {
+        // LAZY|KEEP_SSD：懒删除意图已兑现。只释放非 SSD 副本，SSD 副本原样保留，
+        // 不再向 SSD 搬运一份新副本；无 SSD 副本时全部释放，容器侧按 REMOVE 处理
+        MmcBlobFilterPtr memFilter = MmcMakeRef<MmcBlobFilter>(UINT32_MAX, MEDIA_SSD, NONE, true);
+        if (memFilter == nullptr) {
+            MMC_LOG_ERROR("Evict keep-ssd key=" << key << ", create filter failed");
+            TP_TRACE_END(TP_MMC_META_EVICT, MMC_MALLOC_FAILED);
+            return EvictResult::FAIL;
+        }
+        objMeta->SetKeepSsdOnEvict(false);
+        EvictResult res = EvictRemoveSrc(key, objMeta, memFilter, dstMedium);
+        MMC_LOG_DEBUG("Evict keep-ssd key=" << key << " from " << srcMediaType << ", free memory only, ssd kept");
+        TP_TRACE_END(TP_MMC_META_EVICT, MMC_OK);
+        return res;
+    }
     MmcBlobFilterPtr srcFilter = MmcMakeRef<MmcBlobFilter>(UINT32_MAX, srcMediaType, READABLE);
 
     std::vector<MmcMemBlobDesc> evictBlobs;

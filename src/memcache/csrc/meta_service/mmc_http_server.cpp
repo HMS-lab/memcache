@@ -10,6 +10,10 @@
  * See the Mulan PSL v2 for more details.
  */
 
+#include <cctype>
+#include <cerrno>
+#include <climits>
+#include <cstdlib>
 #include <ctime>
 
 #include "nlohmann/json.hpp"
@@ -32,6 +36,7 @@ constexpr char kErrorInternalServer[] = "Internal server error";
 constexpr char kErrorKeyNotFound[] = "Key not found";
 constexpr char kErrorSegmentNotFound[] = "Segment not found";
 constexpr char kErrorMetadataNotFound[] = "Metadata key not found";
+constexpr char kErrorInvalidRemoveFlags[] = "Invalid 'flags' parameter";
 
 namespace {
 
@@ -82,6 +87,27 @@ bool GetRequiredParam(ock::acc::AccHttpRequestContext &ctx, const std::string &p
         return false;
     }
     value = paramIt->second;
+    return true;
+}
+
+bool GetOptionalUint32Param(ock::acc::AccHttpRequestContext &ctx, const std::string &paramName, uint32_t &value)
+{
+    const auto params = ctx.Params();
+    const auto paramIt = params.find(paramName);
+    if (paramIt == params.end()) {
+        return true; // 未传该参数时保持调用方默认值
+    }
+    constexpr int decimalBase = 10;
+    const std::string &raw = paramIt->second;
+    char *end = nullptr;
+    errno = 0;
+    const unsigned long parsed = std::strtoul(raw.c_str(), &end, decimalBase);
+    if (raw.empty() || !std::isdigit(static_cast<unsigned char>(raw[0])) || errno != 0 || end == raw.c_str() ||
+        *end != '\0' || parsed > UINT32_MAX) {
+        ReplyJsonError200(ctx, "Invalid '" + paramName + "' parameter");
+        return false;
+    }
+    value = static_cast<uint32_t>(parsed);
     return true;
 }
 
@@ -259,8 +285,16 @@ void MmcHttpServer::RegisterDataManagementEndpoints()
                 return acc::ACC_OK;
             }
 
-            const Result ret = restApiFacade_->RemoveKey(key);
+            uint32_t flags = 0;
+            if (!GetOptionalUint32Param(ctx, "flags", flags)) {
+                return acc::ACC_OK;
+            }
+
+            const Result ret = restApiFacade_->RemoveKey(key, flags);
             if (ret != MMC_OK) {
+                if (ret == MMC_INVALID_PARAM) {
+                    return ReplyJsonError200(ctx, kErrorInvalidRemoveFlags);
+                }
                 const std::string message = ret == MMC_UNMATCHED_KEY ? kErrorKeyNotFound : kErrorInternalServer;
                 return ReplyJsonError200(ctx, message);
             }
@@ -363,18 +397,40 @@ void MmcHttpServer::RegisterDataManagementEndpoints()
             }
 
             const bool hasLocations = body.contains("locations") && !body["locations"].is_null();
+            uint32_t flags = 0;
+            if (body.contains("flags") && !body["flags"].is_null()) {
+                if (!body["flags"].is_number_unsigned() || body["flags"].get<uint64_t>() > UINT32_MAX) {
+                    return ReplyJsonError200(ctx, kErrorInvalidRemoveFlags);
+                }
+                flags = static_cast<uint32_t>(body["flags"].get<uint64_t>());
+                if (hasLocations && flags != 0) {
+                    // flags 只作用于删除路径（无 locations），带 locations 时静默忽略会隐藏调用方错误；
+                    // 显式传 flags=0 等价于不传，保持兼容
+                    return ReplyJsonError200(ctx, "'flags' is only supported when 'locations' is absent");
+                }
+            }
+            // 按实际执行结果统计：懒删除只把 key 标记为优先淘汰，内存尚未释放，计入 num_marked；
+            // 其余真实释放了内存层的情况（含 SSD-only key 上懒删除退化为全量删除）计入 num_evicted
             size_t numEvicted = 0;
+            size_t numMarked = 0;
             Result ret = MMC_OK;
             if (!hasLocations) {
                 for (const auto &k : keys) {
-                    ret = restApiFacade_->RemoveKey(k);
-                    // MMC_UNMATCHED_KEY 说明 key 已被上层（如 LRU 淘汰）清除，属预期结果，
-                    // 与 MMC_OK 一样可继续处理后续 key；仅 MMC_ERROR 这类真实失败才终止。
-                    if (ret == MMC_ERROR) {
-                        break;
-                    }
+                    MmcMetaManager::RemoveOutcome outcome = MmcMetaManager::RemoveOutcome::kRemoved;
+                    ret = restApiFacade_->RemoveKey(k, flags, &outcome);
                     if (ret == MMC_OK) {
-                        ++numEvicted;
+                        if (outcome == MmcMetaManager::RemoveOutcome::kMarkedLazy) {
+                            ++numMarked;
+                        } else if (outcome == MmcMetaManager::RemoveOutcome::kRemoved) {
+                            ++numEvicted;
+                        }
+                        // kNoop：key 已在目标层（如 SSD-only 上再次请求 KEEP_SSD），不产生实际释放
+                        continue;
+                    }
+                    // MMC_UNMATCHED_KEY 说明 key 已被上层（如 LRU 淘汰）清除，属预期结果，
+                    // 与 MMC_OK 一样可继续处理后续 key；其余错误终止处理。
+                    if (ret != MMC_UNMATCHED_KEY) {
+                        break;
                     }
                 }
             } else {
@@ -385,9 +441,12 @@ void MmcHttpServer::RegisterDataManagementEndpoints()
             }
             // MMC_UNMATCHED_KEY 视为成功（key 已被清除），静默通过；仅真实失败才返回错误
             if (ret != MMC_OK && ret != MMC_UNMATCHED_KEY) {
+                if (ret == MMC_INVALID_PARAM) {
+                    return ReplyJsonError200(ctx, kErrorInvalidRemoveFlags);
+                }
                 return ReplyJsonError200(ctx, kErrorInternalServer);
             }
-            return ReplyJsonOk(ctx, {{"status", "success"}, {"num_evicted", numEvicted}});
+            return ReplyJsonOk(ctx, {{"status", "success"}, {"num_evicted", numEvicted}, {"num_marked", numMarked}});
         });
 
     // /memory/prefetch — JSON body: {"chunk_hashes": [...], "lookup_id": "..."}

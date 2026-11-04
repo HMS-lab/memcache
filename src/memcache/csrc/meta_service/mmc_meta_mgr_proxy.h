@@ -109,11 +109,11 @@ public:
 
     Result HandleUbsIoMetaDelete(const UbsIoMetaDeleteRequest &req);
 
-    Result Remove(const RemoveRequest &req, Response &resp)
+    Result Remove(const RemoveRequest &req, Response &resp, MmcMetaManager::RemoveOutcome *outcome = nullptr)
     {
         MmcMetaMetricManager &metricManager = MmcMetaMetricManager::GetInstance();
         metricManager.IncrementRequestCounter(RestMetricType::REMOVE, UINT32_MAX);
-        resp.ret_ = metaMangerPtr_->Remove(req.key_);
+        resp.ret_ = metaMangerPtr_->Remove(req.key_, req.flags_, outcome);
         IncrementResultCounter(metricManager, RestMetricType::REMOVE, resp.ret_, UINT32_MAX);
         return resp.ret_;
     }
@@ -125,7 +125,7 @@ public:
         resp.results_.reserve(req.keys_.size());
         for (const std::string &key : req.keys_) {
             metricManager.IncrementRequestCounter(RestMetricType::REMOVE, UINT32_MAX);
-            Result metaRet = metaMangerPtr_->Remove(key);
+            Result metaRet = metaMangerPtr_->Remove(key, req.flags_);
             resp.results_.emplace_back(metaRet);
             IncrementResultCounter(metricManager, RestMetricType::REMOVE, metaRet, UINT32_MAX);
         }

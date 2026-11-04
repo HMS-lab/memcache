@@ -75,8 +75,9 @@ struct MmcBlobFilter : public MmcReferable {
     uint32_t rank_{UINT32_MAX};
     MediaType mediaType_{MEDIA_NONE};
     BlobState state_{NONE};
-    MmcBlobFilter(const uint32_t &rank, const MediaType &mediaType, const BlobState &state)
-        : rank_(rank), mediaType_(mediaType), state_(state) {};
+    bool excludeMedia_{false}; /* true 时 mediaType_ 表示"排除该介质"而非"匹配该介质" */
+    MmcBlobFilter(const uint32_t &rank, const MediaType &mediaType, const BlobState &state, bool excludeMedia = false)
+        : rank_(rank), mediaType_(mediaType), state_(state), excludeMedia_(excludeMedia) {};
 };
 using MmcBlobFilterPtr = MmcRef<MmcBlobFilter>;
 
@@ -274,8 +275,9 @@ inline bool MmcMemBlob::MatchFilter(const MmcBlobFilterPtr &filter) const
         return true;
     }
 
-    return (filter->rank_ == UINT32_MAX || rank_ == filter->rank_) &&
-           (filter->mediaType_ == MEDIA_NONE || mediaType_ == filter->mediaType_) &&
+    bool mediaMatch = filter->excludeMedia_ ? (mediaType_ != filter->mediaType_)
+                                            : (filter->mediaType_ == MEDIA_NONE || mediaType_ == filter->mediaType_);
+    return (filter->rank_ == UINT32_MAX || rank_ == filter->rank_) && mediaMatch &&
            (filter->state_ == NONE || state_ == filter->state_);
 }
 

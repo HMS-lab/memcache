@@ -34,6 +34,8 @@ __all__ = [
     "G2H",
     "H2G",
     "AUTO",
+    "MMC_REMOVE_FLAG_LAZY",
+    "MMC_REMOVE_FLAG_KEEP_SSD",
 ]
 
 import memfabric_hybrid
@@ -53,6 +55,8 @@ for lib_name in _preload_list:
         ctypes.CDLL(so_path)
 
 from _pymmc import (
+    MMC_REMOVE_FLAG_KEEP_SSD,
+    MMC_REMOVE_FLAG_LAZY,
     DistributedObjectStore,
     KeyInfo,
     LocalConfig,

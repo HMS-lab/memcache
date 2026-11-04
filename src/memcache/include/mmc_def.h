@@ -180,6 +180,10 @@ enum affinity_policy : int {
 
 constexpr uint32_t GET_KEY_INFO_FOR_LAYER_WISE = 1;
 constexpr uint32_t GET_DATA_FOR_LAYER_WISE = 1;
+constexpr uint32_t MMC_REMOVE_FLAG_LAZY = 1U << 0; /* 懒删除：标记为优先淘汰，按首次懒删除的 FIFO 顺序自然淘汰 */
+/* 保留SSD副本：仅释放内存层，key降级为SSD-only，不删SSD数据与元数据 */
+/* 与 LAZY 同时置位时：内存层懒删除，淘汰时仅释放内存层，SSD 副本始终保留 */
+constexpr uint32_t MMC_REMOVE_FLAG_KEEP_SSD = 1U << 1;
 
 typedef struct {
     uint16_t mediaType;

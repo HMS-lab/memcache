@@ -55,6 +55,7 @@ enum MmcErrorCode : int32_t {
     MMC_LEASE_EXPIRED = -3106,
     MMC_GVA_RANGE_ALREADY_WRITTEN = -3107,
     MMC_WRITE_READABLE_BLOB = -3108,
+    MMC_SKIPPED = -3109,
 };
 
 inline std::ostream &operator<<(std::ostream &os, MmcErrorCode errCode)

@@ -172,7 +172,10 @@ int32_t mmcc_batch_write_finish(const char **keys, uint32_t keys_count, const in
  * This data operation supports both sync and async
  *
  * @param key              [in] key of data, less than 256
- * @param flags            [in] optional flags, reserved
+ * @param flags            [in] remove flags: MMC_REMOVE_FLAG_LAZY for lazy removal,
+ *                          MMC_REMOVE_FLAG_KEEP_SSD to keep the SSD copy (with LAZY: lazy-evict
+ *                          the memory tier and keep the SSD copy),
+ *                          0 for immediate full removal
  * @return  0 if successful
  */
 int32_t mmcc_remove(const char *key, uint32_t flags);

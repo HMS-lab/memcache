@@ -115,9 +115,9 @@ public:
                                         const std::vector<std::vector<size_t>> &sizes, const int32_t direct = 3,
                                         const ReplicateConfig &replicateConfig = {}) override;
 
-    int Remove(const std::string &key) override;
+    int Remove(const std::string &key, uint32_t flags = 0) override;
 
-    std::vector<int> BatchRemove(const std::vector<std::string> &keys) override;
+    std::vector<int> BatchRemove(const std::vector<std::string> &keys, uint32_t flags = 0) override;
 
     int RemoveAll() override;
 

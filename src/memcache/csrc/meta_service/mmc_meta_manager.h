@@ -258,11 +258,20 @@ public:
     Result UpdateState(const std::string &key, const MmcLocation &loc, const BlobActionResult &actRet,
                        uint64_t operateId);
 
+    // Remove 的实际执行结果，供 REST 等调用方按真实行为统计，而不是按请求标志猜测
+    enum class RemoveOutcome {
+        kRemoved = 0, // 已真实释放内存层（含 KEEP_SSD 仅释放内存层、SSD-only 退化为全量删除）
+        kMarkedLazy = 1, // 仅标记为优先淘汰，数据仍可访问
+        kNoop = 2        // 未产生实际释放：key 已在目标层（如 SSD-only key 上再次请求 KEEP_SSD）
+    };
+
     /**
      * @brief remove the meta object
      * @param key          [in] key of the to-be-removed meta object
+     * @param flags        [in] MMC_REMOVE_FLAG_* 组合
+     * @param outcome      [out] 实际执行结果，可为 nullptr
      */
-    Result Remove(const std::string &key);
+    Result Remove(const std::string &key, uint32_t flags = 0, RemoveOutcome *outcome = nullptr);
 
     /**
      * @brief remove all the keys
@@ -568,6 +577,19 @@ private:
     Result RemoveBlobsForDeadRank(uint32_t rank, MediaType mediaType);
 
     bool CheckActiveLease(const std::string &key, const MmcMemObjMetaPtr &meta, const MmcBlobFilterPtr &filter);
+
+    /* Remove 辅助：返回 true 表示请求已处理完毕(ret 为最终结果)，false 表示继续走普通删除路径。
+     * keepSsdOnEvict：懒删除淘汰时只释放内存层、保留 SSD 副本（LAZY|KEEP_SSD 组合语义） */
+    bool TryLazyRemove(const std::string &key, Result &ret, bool keepSsdOnEvict = false);
+
+    /* examinedObj：返回本次判定所依据的对象版本；返回 false（无 SSD 副本）时调用方必须用它做条件删除，
+     * 避免按 key 删掉并发重建的新对象 */
+    bool TryKeepSsdRemove(const std::string &key, Result &ret, RemoveOutcome *outcome, MmcMemObjMetaPtr &examinedObj);
+
+    Result EraseAndRemove(const std::string &key);
+
+    /* 仅当容器内 key 仍映射到 expected 时才删除并释放其全部 blob */
+    Result EraseAndRemoveIfMatch(const std::string &key, const MmcMemObjMetaPtr &expected);
 
     void PushRemoveList(const std::string &key, const MmcMemObjMetaPtr &meta, const MmcBlobFilterPtr &filter,
                         bool triggerSsdPreFree);
