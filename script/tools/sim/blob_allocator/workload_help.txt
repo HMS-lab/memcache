@@ -8,13 +8,29 @@ Allocation and eviction:
   Start empty. Each step attempts one allocation with a sampled request size.
   Occupancy = 100 * reserved bytes / capacity. Reserved bytes include padding.
   After success at or above the maximum, pause allocations and evict live blocks.
-  Select each block uniformly, without size or age weighting.
+  Select blocks with --eviction-policy: random (default) or lru.
+  random: Select uniformly from all live blocks, without size or age weighting.
+  lru: Select the least recently used block. Allocation and reads count as use.
   Stop at or below the minimum, then resume allocations. Use no background thread.
   Defaults: minimum 80%, maximum 90%. Supply integers: 0 <= minimum < maximum <= 100.
   Whole blocks can cross either threshold. Complete eviction after the last attempt too.
   --steps counts allocation attempts, including failures. Evictions do not consume steps.
   --sample-every counts allocation attempts. Sample after any eviction for that attempt.
   Also sample before and after each eviction cycle.
+
+Synthetic reads:
+  Before each allocation attempt, run --reads-per-allocation reads. Default: 4.
+  Reads also precede failed attempts. Reads do not consume steps or change memory.
+  Skip each read when no blocks are live. Permit repeated reads of one block.
+  With zero reads, lru evicts in allocation order (FIFO).
+  Assign each successful allocation to hot or cold until release.
+  --hot-block-percent sets the hot assignment probability. Default: 20.
+  --hot-read-percent sets the probability of selecting the hot group. Default: 80.
+  Supply integer percentages from 0 through 100, without a percent sign.
+  Select uniformly within that group. If it is empty, use the other group.
+  These probabilities do not guarantee exact counts or the live hot fraction.
+  Both policies generate reads. Only lru uses recency to select victims.
+  Reads update Python bookkeeping only. There are no cache misses or payload reads.
 
 Sizes and failures:
   Sample each request size from --block-sizes.
@@ -24,8 +40,9 @@ Sizes and failures:
   Record capacity and fragmentation failures. Continue without retrying or forced eviction.
   Failed requests never become eviction candidates. Failures can repeat below the maximum.
   Invalid operations, including double frees, abort the measurement.
-  --seed controls separate random generators for sizes and eviction targets.
-  Eviction does not change the request-size sequence.
+  --seed controls separate generators for sizes, victims, groups, and reads.
+  Access settings and eviction do not change the request-size sequence.
+  Different survivors can change the read-target sequence across policies.
 
 Metrics:
   Occupancy percent = 100 * reserved / capacity.
