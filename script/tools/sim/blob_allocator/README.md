@@ -8,9 +8,7 @@ The simulator reads shared MemCache sources without modifying them.
 
 ## CLI help
 
-The `--help` output includes the text in [workload_help.txt](workload_help.txt).
-That text defines operation selection and release order for each workload.
-The option descriptions must also state defaults and workload restrictions.
+Use `--help` to list options and defaults.
 Requesting help must not compile code or start a measurement.
 Every measurement run must invoke the standalone incremental build.
 
