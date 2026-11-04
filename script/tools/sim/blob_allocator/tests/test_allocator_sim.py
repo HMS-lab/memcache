@@ -129,6 +129,38 @@ class PythonTests(unittest.TestCase):
             ):
                 self.assertIn(phrase, output.getvalue())
 
+    def test_progress_percentages_and_redirected_output(self):
+        output = io.StringIO()
+        progress = sim.Progress(output)
+        for completed in (0, 1, 2, 3, 100, 300):
+            progress(completed, 300)
+        progress.close()
+        self.assertEqual(
+            output.getvalue().splitlines(),
+            [
+                'Progress:   0% (0/300 allocation attempts)',
+                'Progress:   1% (3/300 allocation attempts)',
+                'Progress:  33% (100/300 allocation attempts)',
+                'Progress: 100% (300/300 allocation attempts)',
+            ],
+        )
+        self.assertNotIn('\r', output.getvalue())
+
+    def test_terminal_progress_completion_and_abort(self):
+        for completed in (1, 3):
+            output = io.StringIO()
+            with patch.object(output, 'isatty', return_value=True):
+                progress = sim.Progress(output)
+            progress(0, 3)
+            self.assertFalse(output.getvalue().endswith('\n'))
+            progress(completed, 3)
+            progress.close()
+            progress.close()
+            self.assertEqual(output.getvalue().count('\r'), 2)
+            self.assertEqual(output.getvalue().count('\n'), 1)
+            self.assertTrue(output.getvalue().endswith('\n'))
+            self.assertEqual('100%' in output.getvalue(), completed == 3)
+
     def test_mode_choices_and_removed_flags(self):
         self.assertEqual(sim.parser().parse_args([]).mode, '4k-align')
         selected = sim.parser().parse_args(['--mode', 'max-value-align'])
@@ -327,7 +359,7 @@ class NativeTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'Operation 3'):
             sim.run_workload(iter([sim.Alloc(0, 128 * KiB), sim.Free(0), sim.Free(0)]), 64 * KiB)
 
-    def simulation(self, **overrides):
+    def simulation(self, progress=None, **overrides):
         config = PythonTests().config(
             sizes=[4 * KiB],
             weights=[1],
@@ -337,7 +369,29 @@ class NativeTests(unittest.TestCase):
             max_water_level=100,
         )
         config.update(overrides)
-        return sim.run_simulation(config)[config['mode']]
+        return sim.run_simulation(config, progress=progress)[config['mode']]
+
+    def test_progress_after_eviction_and_failures(self):
+        events = []
+        original = sim.Measurement.apply
+
+        def record(measurement, operation):
+            original(measurement, operation)
+            events.append(operation)
+
+        with patch.object(sim.Measurement, 'apply', record):
+            self.simulation(progress=lambda completed, total: events.append((completed, total)))
+        self.assertEqual([event for event in events if isinstance(event, tuple)], [(index, 4) for index in range(5)])
+        self.assertTrue(all(isinstance(event, sim.Free) for event in events[-3:-1]))
+        self.assertEqual(events[-1], (4, 4))
+        updates = []
+        result = self.simulation(
+            steps=3,
+            sizes=[32 * KiB],
+            progress=lambda completed, total: updates.append((completed, total)),
+        )
+        self.assertEqual(result['counters']['capacity_failures'], 3)
+        self.assertEqual(updates, [(index, 3) for index in range(4)])
 
     def record_simulation(self, **overrides):
         events = []
@@ -474,6 +528,7 @@ class NativeTests(unittest.TestCase):
 
     def test_simulation_abort_and_reports(self):
         original = sim.Measurement.apply
+        updates = []
 
         def fail_release(measurement, operation):
             if isinstance(operation, sim.Free):
@@ -484,7 +539,8 @@ class NativeTests(unittest.TestCase):
             patch.object(sim.Measurement, 'apply', fail_release),
             self.assertRaisesRegex(RuntimeError, 'Allocation attempt 4, Operation 5: Native release failed'),
         ):
-            self.simulation()
+            self.simulation(progress=lambda completed, total: updates.append((completed, total)))
+        self.assertEqual(updates[-1], (3, 4))
         result = self.simulation()
         report = {'configuration': {}, 'modes': {'4k-align': result}}
         with tempfile.TemporaryDirectory() as directory:

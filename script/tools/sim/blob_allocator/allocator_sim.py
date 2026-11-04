@@ -419,7 +419,36 @@ class LiveBlocks:
         return {'live_hot_blocks': len(self.groups[True]), 'live_cold_blocks': len(self.groups[False])}
 
 
-def run_simulation(config):
+class Progress:
+    """Print progress to stderr at each new integer percentage."""
+
+    def __init__(self, stream=None):
+        self.stream = sys.stderr if stream is None else stream
+        self.interactive = self.stream.isatty()
+        self.percent = -1
+        self.active = False
+
+    def __call__(self, completed, total):
+        percent = PERCENT * completed // total
+        if percent <= self.percent:
+            return
+        self.percent = percent
+        self.active = self.interactive and percent < PERCENT
+        prefix = '\r' if self.interactive else ''
+        print(
+            f'{prefix}Progress: {percent:3d}% ({completed:,}/{total:,} allocation attempts)',
+            file=self.stream,
+            end='' if self.active else '\n',
+            flush=True,
+        )
+
+    def close(self):
+        if self.active:
+            print(file=self.stream, flush=True)
+            self.active = False
+
+
+def run_simulation(config, progress=None):
     """Build and run allocation attempts with synchronous water-level eviction."""
     config = {**SIMULATION_DEFAULTS, **config}
     policy = config['eviction_policy']
@@ -470,6 +499,8 @@ def run_simulation(config):
         return state
 
     sample('initial')
+    if progress is not None:
+        progress(0, config['steps'])
     try:
         for operation in operations(config):
             allocation_index += 1
@@ -506,9 +537,14 @@ def run_simulation(config):
                     sample('eviction-end')
             if allocation_index % config['sample_every'] == 0:
                 sample('periodic')
+            if progress is not None and allocation_index < config['steps']:
+                progress(allocation_index, config['steps'])
+        final = sample('final')
+        if progress is not None:
+            progress(allocation_index, config['steps'])
         return {
             mode: {
-                'final': sample('final'),
+                'final': final,
                 'counters': dict(measurement.counts),
                 'per_size': measurement.per_size,
                 'samples': measurement.samples,
@@ -788,7 +824,11 @@ def main(argv=None):
             'sample_every': args.sample_every,
             **{key: getattr(args, key) for key in SIMULATION_DEFAULTS},
         }
-        modes = run_simulation(config)
+        progress = Progress()
+        try:
+            modes = run_simulation(config, progress=progress)
+        finally:
+            progress.close()
         report = {'configuration': config, 'modes': modes}
         repo = TOOL.parents[3]
         if shutil.which('git'):
