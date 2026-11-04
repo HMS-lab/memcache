@@ -81,10 +81,15 @@ The CLI uses allocation attempts and synchronous water-level eviction.
 Start eviction at or above maximum occupancy. Stop at or below minimum occupancy.
 Use reserved bytes divided by capacity. Include padding.
 Defaults: minimum 80%, maximum 90%. Require integer levels: 0 <= minimum < maximum <= 100.
-Select uniformly from successful live allocations. Do not select failed requests.
+Support random and LRU eviction through --eviction-policy. Default: random.
+Select uniformly from successful live allocations for random eviction.
+Select the least recently used block for LRU eviction. Allocation and reads count as use.
+Do not select failed requests.
 Count steps as allocation attempts. Eviction does not consume steps.
 Do not retry failures or trigger eviction because of a failure.
-Keep size and eviction random generators separate and seeded.
+Keep size, eviction, classification, and read random generators separate and seeded.
+Preserve the existing size and random eviction streams.
+Derive new streams from stable seed strings. Do not use Python hash().
 Remove workload selection, allocation probability, and comparison options.
 Keep help and README consistent. Help must not compile code.
 
@@ -100,6 +105,21 @@ Use a local random generator with a configurable seed.
 Use `4k-align` mode by default.
 Support max-value-align through --mode. Measure one mode per invocation.
 Keep run_workload for explicit Alloc/Free experiments without automatic eviction.
+
+Generate synthetic reads before every allocation attempt, including failed attempts.
+Default: four reads. Allow a nonnegative integer through --reads-per-allocation.
+Skip reads when no blocks are live. Permit repeated reads of the same block.
+Use Python bookkeeping only. Do not read payloads or call the native allocator for reads.
+With zero reads, LRU behaves as FIFO.
+Use --hot-block-percent for the hot assignment probability. Default: 20.
+Use --hot-read-percent for the hot group selection probability per read. Default: 80.
+Require integer percentages from zero through 100.
+Keep each successful allocation's classification until release.
+Draw a classification for each allocation attempt. Discard it after failure.
+Select uniformly within the chosen group. Use the other group when the chosen group is empty.
+Run the same read model for both eviction policies.
+Do not promise exact group sizes, read counts, or improved fragmentation with LRU.
+Keep native operation indices separate from synthetic read counters.
 
 ## Metrics and reports
 
@@ -142,6 +162,8 @@ Keep all simulator documentation in this directory.
 
 Use local Python tests that do not require a running service.
 Test sampling, reproducibility, report options, and eviction thresholds.
+Test LRU promotion, FIFO with zero reads, hot/cold selection, empty groups, and access counters.
+Test that access settings do not modify size sampling or random eviction behavior.
 Test that CLI help describes operation selection, release order, failures, and workload restrictions.
 Test that requesting help does not compile code or start a measurement.
 Test internal waste, external fragmentation, coalescing, and max-value-align padding against the real allocator.

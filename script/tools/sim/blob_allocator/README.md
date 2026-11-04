@@ -16,7 +16,7 @@ Every measurement run must invoke the standalone incremental build.
 
 ## Allocation and eviction
 
-The region starts empty. Each step attempts one allocation.
+The region starts empty. Each step runs synthetic reads, then attempts one allocation.
 The simulator samples its size from `--block-sizes`.
 `--steps` counts allocation attempts, including failures. Its default is 100000.
 Evictions do not consume steps. Releases are not randomly selected operations.
@@ -42,13 +42,71 @@ Allocation: resumes
 
 An allocation can exceed the maximum. Releasing a whole block can cross below the minimum.
 The simulator completes eviction even if the last allocation attempt triggers it.
-Each eviction selects uniformly from successfully allocated blocks that remain live.
-Selection does not depend on size, age, or address.
-The seed controls request sizes and eviction targets through separate random generators.
-Eviction does not modify the request-size sequence.
+Choose `--eviction-policy random` or `--eviction-policy lru`.
+The default `random` policy selects uniformly from all successful live allocations.
+Its selection does not depend on size, age, or address.
+The `lru` policy selects the least recently used block.
+Successful allocation and each synthetic read count as use.
 
 The CLI no longer accepts `--workload`, `--alloc-probability`, or `--compare`.
 Use a separate invocation for each alignment mode.
+
+## Synthetic reads and LRU
+
+LRU means least recently used. Each successful allocation becomes the most recently used block.
+A read makes its selected block the most recently used block.
+Eviction releases the block that remained unused for the longest interval.
+The simulator tracks event order, without a clock or background thread.
+
+```text
+Order: least recent -> most recent
+Allocate A:       A
+Allocate B:       A B
+Read A:           B A
+Evict with LRU:     A       (release B)
+```
+
+Before each allocation attempt, the simulator generates `--reads-per-allocation` synthetic reads.
+The default is four. Supply a nonnegative integer.
+Reads also precede failed allocation attempts.
+When no blocks are live, each scheduled read becomes a skipped read.
+The simulator permits repeated reads of the same block.
+Reads do not consume steps, reserve memory, or modify allocation metadata.
+They update Python bookkeeping without reading payloads or calling the native allocator.
+The simulator does not model cache misses or allocate blocks because of reads.
+
+With zero reads, only successful allocations update recency.
+LRU then behaves as FIFO: it releases the oldest allocation first.
+
+### Hot and cold groups
+
+The hot group represents blocks that receive more reads. Other blocks belong to the cold group.
+Use these options to configure synthetic popularity:
+
+| Option | Default | Meaning |
+|---|---:|---|
+| `--hot-block-percent` | 20 | Probability that a new successful allocation belongs to the hot group. |
+| `--hot-read-percent` | 80 | Probability that a synthetic read selects the hot group. |
+
+Supply integer percentages from zero through 100, without a percent sign.
+For example, `20` means a probability of `20 / 100 = 0.2`.
+The simulator selects uniformly among blocks in the chosen group, regardless of size.
+If that group is empty, it selects from the other group.
+The read counter records the group that actually supplied the block.
+
+Each block keeps its classification until release. Classification does not depend on request size.
+These percentages specify probabilities, so they do not guarantee exact assignment or read counts.
+The live hot fraction can exceed the assignment probability because LRU can retain hot blocks longer.
+The groups can be empty, including when either percentage equals zero or 100.
+
+Both eviction policies generate reads with the same rules. Random eviction ignores recency when selecting victims.
+The seed controls separate generators for sizes, random eviction victims, hot/cold assignments, and reads.
+The simulator draws a classification for every allocation attempt and discards it when allocation fails.
+This keeps classification draws aligned with request IDs across runs.
+Access settings do not modify the request-size sequence or random eviction draws.
+Identical configurations and seeds reproduce results.
+Different policies or alignment modes can retain different blocks, so their read targets can differ.
+LRU does not guarantee less fragmentation. Compare measured results for the configured workload.
 
 ## Block-size probabilities
 
@@ -75,7 +133,7 @@ It does not retry the request automatically.
 Failed requests never become eviction candidates.
 A failure does not trigger eviction or a retry.
 Failures can repeat below the maximum water level.
-This simulator does not model MemCache fragmentation recovery or LRU selection.
+This simulator does not model MemCache fragmentation recovery.
 
 A double free is a second release of the same request.
 Unknown handles, double frees, invalid sizes, and unexpected native failures abort the measurement.
@@ -102,6 +160,8 @@ JSON and CSV retain their numeric values without display formatting.
 The CLI pairs each weight with its block size, for example, `4.00 KiB : 33.33%`.
 These percentages describe size selection for allocation attempts.
 Rounded percentages can total slightly more or less than 100%.
+Reports also identify the eviction policy and current live hot/cold block counts.
+JSON configuration includes the access settings. CSV samples include the policy and access counters.
 
 `--json-report-path` enables a JSON report at the specified path.
 `--csv-report-path` enables a CSV report at the specified path.
@@ -140,6 +200,14 @@ python3 script/tools/sim/blob_allocator/allocator_sim.py \
   --capacity 64MiB --steps 10000 \
   --block-sizes '4KiB:25%,64KiB:25%,1MiB:50%' \
   --mode 4k-align
+```
+
+To use LRU with the default hot/cold read model, add `--eviction-policy lru`:
+
+```bash
+python3 script/tools/sim/blob_allocator/allocator_sim.py \
+  --capacity 64MiB --steps 10000 --eviction-policy lru \
+  --reads-per-allocation 4 --hot-block-percent 20 --hot-read-percent 80
 ```
 
 The `--mode` choices are `4k-align` and `max-value-align`.
@@ -295,6 +363,7 @@ Periodic samples follow any eviction that the allocation triggers.
 The simulator also records initial, eviction-start, eviction-end, and final samples.
 `allocation_index` counts allocation attempts.
 `operation_index` counts allocation attempts plus individual releases.
+Synthetic reads do not increase `operation_index`.
 Eviction samples can share an allocation index.
 
 `eviction_cycles` counts completed cycles. `evictions` counts released blocks.
@@ -304,11 +373,21 @@ For water-level runs, releases equal evictions and skipped releases equal zero.
 Occupancy percentage uses capacity as its denominator.
 Fragmentation percentages retain the denominators defined above.
 
+`reads` counts completed synthetic reads. It equals `hot_reads + cold_reads`.
+`skipped_reads` counts reads that could not select a block because no blocks were live.
+The sum of completed and skipped reads equals allocation attempts multiplied by `reads_per_allocation`.
+`hot_assignments` and `cold_assignments` count successful allocations in each group.
+Their sum equals successful allocations, including blocks that the simulator later evicts.
+`live_hot_blocks` and `live_cold_blocks` count blocks that remain allocated at each sample.
+
 ## Custom experiments
 
 `run_simulation(config)` runs the water-level policy and always invokes the build first.
 The CLI configuration contains sizes, weights, capacity, steps, seed, mode, sample interval, and both water levels.
 The configuration uses numeric percentages such as `80`, not strings such as `80%`.
+Optional keys are `eviction_policy`, `reads_per_allocation`, `hot_block_percent`, and `hot_read_percent`.
+Their defaults are `random`, `4`, `20`, and `80`, respectively.
+The function checks these options before invoking the build and does not modify the caller's configuration.
 
 `run_workload(sequence, capacity, mode='4k-align', sample_every=1000)` runs explicit `Alloc` and `Free` operations.
 This custom runner does not add eviction. Use it for controlled experiments and allocator tests.
