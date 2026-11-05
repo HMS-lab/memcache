@@ -1135,9 +1135,9 @@ TEST_F(TestMmcMetaManager, EvictCallback_AllocatedOnlyExpiredLease_GoesToRemove)
     metaMng->Stop();
 }
 
-TEST_F(TestMmcMetaManager, EvictCallback_PreservesActiveWriteLease)
+TEST_F(TestMmcMetaManager, EvictCallback_ReleasesCompletedWriteLease)
 {
-    constexpr uint64_t leaseTtlMs = 500;
+    constexpr uint64_t leaseTtlMs = 5000;
     constexpr uint16_t highWatermark = 70;
     constexpr uint16_t lowWatermark = 50;
     const MmcLocation dramLoc{0, MEDIA_DRAM};
@@ -1164,7 +1164,46 @@ TEST_F(TestMmcMetaManager, EvictCallback_PreservesActiveWriteLease)
         EXPECT_GT(object->GetBlobs()[0]->LeaseTimeoutTtlMs(), 0U);
         ASSERT_EQ(manager->UpdateState(key, dramLoc, MMC_WRITE_OK, operateId), MMC_OK);
         EXPECT_EQ(object->GetBlobs()[0]->UseCount(), 0U);
+        EXPECT_EQ(object->GetBlobs()[0]->LeaseTimeoutTtlMs(), 0U);
+        EXPECT_EQ(container->EvictDefragTargets({key}, evict, MEDIA_DRAM), 1U);
+        EXPECT_EQ(container->Get(key, object), MMC_UNMATCHED_KEY);
+        manager->Stop();
+    }
+}
+
+TEST_F(TestMmcMetaManager, EvictCallback_ReleasesCompletedReadLease)
+{
+    constexpr uint64_t leaseTtlMs = 5000;
+    constexpr uint16_t highWatermark = 70;
+    constexpr uint16_t lowWatermark = 50;
+    const MmcLocation dramLoc{0, MEDIA_DRAM};
+    const uint64_t operateId = 1;
+    const std::string key = "active_read_key";
+    for (auto lruType : {MetaLruType::LRU, MetaLruType::SHARDED_LRU}) {
+        auto manager = MmcMakeRef<MmcMetaManager>(leaseTtlMs, highWatermark, lowWatermark, MmcMetaExtConfig{}, 0, 0,
+                                                  MMC_DEFAULT_META_LRU_SHARD_COUNT, lruType);
+        ASSERT_EQ(manager->Start(), MMC_OK);
+        std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+        ASSERT_EQ(manager->Mount(dramLoc, {0, SIZE_32K}, blobMap), MMC_OK);
+        MmcMemMetaDesc descriptor;
+        ASSERT_EQ(manager->Alloc(key, {SIZE_32K, 1, MEDIA_DRAM, {0}, 0}, operateId, 0, descriptor), MMC_OK);
+        auto &container = MetaContainer(manager);
+        auto evict = [&manager](const std::string &candidate, const MmcMemObjMetaPtr &object, MediaType media) {
+            return EvictObject(manager, candidate, object, media);
+        };
+        ASSERT_EQ(manager->UpdateState(key, dramLoc, MMC_WRITE_OK, operateId), MMC_OK);
+        const uint64_t readOperateId = 2;
+        ASSERT_EQ(manager->UpdateState(key, dramLoc, MMC_READ_START, readOperateId), MMC_OK);
+        EXPECT_EQ(container->EvictDefragTargets({key}, evict, MEDIA_DRAM), 0U);
+        MmcMemObjMetaPtr object;
+        ASSERT_EQ(container->Get(key, object), MMC_OK);
+        ASSERT_EQ(object->GetBlobs().size(), 1U);
+        EXPECT_EQ(object->GetBlobs()[0]->State(), READABLE);
+        EXPECT_EQ(object->GetBlobs()[0]->UseCount(), 1U);
         EXPECT_GT(object->GetBlobs()[0]->LeaseTimeoutTtlMs(), 0U);
+        ASSERT_EQ(manager->UpdateState(key, dramLoc, MMC_READ_FINISH, readOperateId), MMC_OK);
+        EXPECT_EQ(object->GetBlobs()[0]->UseCount(), 0U);
+        EXPECT_EQ(object->GetBlobs()[0]->LeaseTimeoutTtlMs(), 0U);
         EXPECT_EQ(container->EvictDefragTargets({key}, evict, MEDIA_DRAM), 1U);
         EXPECT_EQ(container->Get(key, object), MMC_UNMATCHED_KEY);
         manager->Stop();

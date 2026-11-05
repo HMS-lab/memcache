@@ -39,6 +39,9 @@ Result MmcMetaLeaseManager::Remove(uint32_t id, uint32_t requestId)
 {
     MMC_LOG_DEBUG("MmcMetaLeaseManager Remove id " << id << " requestId " << requestId);
     useClient.erase(GenerateClientId(id, requestId));
+    if (useClient.empty()) {
+        lease_ = 0;
+    }
     return MMC_OK;
 }
 
