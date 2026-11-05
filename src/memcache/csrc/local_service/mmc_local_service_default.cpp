@@ -1017,10 +1017,12 @@ void MmcLocalServiceDefault::ExecuteBatchIo(BatchIoParams &params, bool srcIsSsd
         }
         if (batchRet == MMC_OK && batchResults[j] == 0) {
             results[params.validIdx[j]] = MMC_OK;
-            MMC_LOG_DEBUG("batch copy ok, key=" << params.keys[j] << ", size=" << params.sizes[j]);
+            MMC_LOG_DEBUG("batch copy ok, direction=" << (srcIsSsd ? "get" : "put") << ", key=" << params.keys[j]
+                                                      << ", size=" << params.sizes[j]);
         } else {
-            MMC_LOG_ERROR("batch copy failed, key=" << params.keys[j] << " batchRet: " << batchRet
-                                                    << " indexRet: " << batchResults[j]);
+            MMC_LOG_ERROR("batch copy failed, direction=" << (srcIsSsd ? "get" : "put") << ", key=" << params.keys[j]
+                                                          << " batchRet: " << batchRet
+                                                          << " indexRet: " << batchResults[j]);
         }
     }
 }
