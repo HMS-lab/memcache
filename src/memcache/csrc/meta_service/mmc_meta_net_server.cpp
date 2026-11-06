@@ -13,11 +13,16 @@
 #include "mmc_msg_base.h"
 #include "mmc_msg_client_meta.h"
 #include "mmc_meta_service.h"
+#include "mmc_locality_strategy.h"
 #include "mmc_ptracer.h"
 #include "mmc_client_metric_store.h"
 
+#include <algorithm>
+#include <random>
+
 namespace ock {
 namespace mmc {
+
 std::string Join(const std::vector<std::string> &vec)
 {
     std::string result = "[";
@@ -125,7 +130,7 @@ Result MetaNetServer::HandleBmRegister(const NetContextPtr &context)
     }
     TP_TRACE_BEGIN(TP_MMC_META_BM_REGISTER);
     auto result = metaService_->BmRegister(req.rank_, req.mediaType_, req.addr_, req.capacity_, req.blobList_,
-                                           req.storageEnabled_, req.backendId_);
+                                           req.storageEnabled_, req.backendId_, req.role_);
     TP_TRACE_END(TP_MMC_META_BM_REGISTER, result);
     MMC_LOG_TRACE("HandleBmRegister rank: " << req.rank_ << ", storageEnabled: " << req.storageEnabled_
                                             << ", rebuild blob size: " << req.blobList_.size() << ", ret: " << result);
@@ -205,6 +210,20 @@ Result MetaNetServer::HandleAlloc(const NetContextPtr &context)
     AllocRequest req;
     AllocResponse resp;
     context->GetRequest<AllocRequest>(req);
+    MMC_LOG_DEBUG("HandleAlloc: caller rankId=" << req.rankId_ << ", key=" << req.key_
+                                                << ", flags=" << req.options_.flags_);
+    // 全局分配策略由 MetaService 统一管理：per-writer 不再携带策略，请求默认 flags=0 走 InnerAlloc 的
+    // default:ArrangeLocality（无 preferred rank 时退化为随机分散）。meta 显式配置 arrrange/local_first
+    // 时统一覆盖请求侧(低字节)策略，高位 GVA 掩码保留。
+    const uint32_t metaStrategy = metaService_->Options().allocStrategy;
+    if (metaStrategy == ALLOC_ARRANGE || metaStrategy == ALLOC_LOCAL_FIRST) {
+        req.options_.flags_ = (req.options_.flags_ & ~0xFF) | metaStrategy;
+    }
+    // ALLOC_LOCAL_FIRST: preferredRank_扩展为权重选中backendId包含的所有ranks，
+    // alloc时LocalFirstAssign会先逐个尝试这些ranks，全部失败则回退到全局随机(ALLOC_RANDOM)
+    if ((req.options_.flags_ & 0xFF) == ALLOC_LOCAL_FIRST) {
+        metaService_->ExpandLocalFirstRanks(req.options_, req.rankId_);
+    }
     auto &metaMgrProxy = metaService_->GetMetaMgrProxy();
     TP_TRACE_BEGIN(TP_MMC_META_PUT);
     const auto result = metaMgrProxy->Alloc(req, resp);
@@ -232,9 +251,20 @@ Result MetaNetServer::HandleBatchAlloc(const NetContextPtr &context)
         return getResult;
     }
 
-    MMC_LOG_DEBUG("HandleBatchAlloc start. Keys count: " << req.keys_.size() << ", OperateId: " << req.operateId_
-                                                         << ", Flags: " << req.flags_
-                                                         << ", leaseTtlMs: " << req.leaseTtlMs_);
+    MMC_LOG_DEBUG("HandleBatchAlloc start. caller rankId=" << req.rankId_ << ", Keys count: " << req.keys_.size()
+                                                           << ", OperateId: " << req.operateId_ << ", Flags: "
+                                                           << req.flags_ << ", leaseTtlMs: " << req.leaseTtlMs_);
+    // ALLOC_LOCAL_FIRST: 扩展preferredRank_为目标backendId所有rank（expand+shuffle 在函数内打点）
+    const uint32_t metaStrategy = metaService_->Options().allocStrategy;
+    for (size_t i = 0; i < req.options_.size(); ++i) {
+        // 全局分配策略由 MetaService 统一管理：覆盖请求侧(低字节)策略，保留高位 GVA 掩码。
+        if (metaStrategy == ALLOC_ARRANGE || metaStrategy == ALLOC_LOCAL_FIRST) {
+            req.options_[i].flags_ = (req.options_[i].flags_ & ~0xFF) | metaStrategy;
+        }
+        if ((req.options_[i].flags_ & 0xFF) == ALLOC_LOCAL_FIRST) {
+            metaService_->ExpandLocalFirstRanks(req.options_[i], req.rankId_);
+        }
+    }
     auto &metaMgrProxy = metaService_->GetMetaMgrProxy();
     TP_TRACE_BEGIN(TP_MMC_META_BATCH_PUT);
     Result batchResult = metaMgrProxy->BatchAlloc(req, resp);

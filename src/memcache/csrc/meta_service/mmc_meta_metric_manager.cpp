@@ -116,7 +116,9 @@ MmcMetaMetricManager::MmcMetaMetricManager()
       rewarmBytesCurrentGauge_("memcache_rewarm_bytes_current", "Current bytes occupied by rewarmed data"),
       keyCountGauge_("memcache_stored_keys", "Current number of stored keys"),
       asyncFlushBlobAddedCounter_("memcache_flush_blobs_total", "Total number of SSD blobs registered via async flush"),
-      asyncFlushBlobBytesCounter_("memcache_flush_bytes_total", "Total bytes flushed to SSD via async flush")
+      asyncFlushBlobBytesCounter_("memcache_flush_bytes_total", "Total bytes flushed to SSD via async flush"),
+      localFirstFallbackCounter_("memcache_local_first_fallback_total",
+                                 "ALLOC_LOCAL_FIRST target backendId alloc failures falling back to random")
 // per-rank counters (pure data, metric names passed at serialization time)
 {}
 
@@ -192,6 +194,7 @@ MmcMetaMetricSnapshot MmcMetaMetricManager::GetSnapshot() const
     snapshot.keyCount = static_cast<uint64_t>(keyCountGauge_.value());
     snapshot.asyncFlushBlobAdded = static_cast<uint64_t>(asyncFlushBlobAddedCounter_.value());
     snapshot.asyncFlushBlobBytes = static_cast<uint64_t>(asyncFlushBlobBytesCounter_.value());
+    snapshot.localFirstFallbackCount = static_cast<uint64_t>(localFirstFallbackCounter_.value());
 
     // per-rank internal counters
     if (IsPerRankEnabled()) {

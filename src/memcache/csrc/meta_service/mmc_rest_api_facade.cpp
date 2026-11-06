@@ -746,6 +746,7 @@ Result MmcRestApiFacade::BuildMetricsSummary(bool serviceReady, std::string &res
         << " hbm_used=" << BuildUsedText(hbmUsage) << " dram_used=" << BuildUsedText(dramUsage)
         << " ssd_used=" << BuildUsedText(ssdUsage) << " alloc_req=" << metricSnapshot.allocRequestCount
         << " alloc_success=" << metricSnapshot.allocSuccessCount << " alloc_fail=" << metricSnapshot.allocFailureCount
+        << " local_first_fallback=" << metricSnapshot.localFirstFallbackCount
         << " batch_alloc_req=" << metricSnapshot.batchAllocRequestCount
         << " batch_alloc_success=" << metricSnapshot.batchAllocSuccessCount
         << " batch_alloc_fail=" << metricSnapshot.batchAllocFailureCount
@@ -901,6 +902,9 @@ Result MmcRestApiFacade::BuildPrometheusMetrics(bool serviceReady, std::string &
 
     AppendOperationMetrics(oss, "alloc", "Alloc", metricSnapshot.allocRequestCount, metricSnapshot.allocSuccessCount,
                            metricSnapshot.allocFailureCount);
+    AppendMetricHeader(oss, "memcache_local_first_fallback_total",
+                       "Total number of Alloc fallbacks when local-first ranks unavailable", "counter");
+    AppendMetricValue(oss, "memcache_local_first_fallback_total", metricSnapshot.localFirstFallbackCount);
     AppendOperationMetrics(oss, "batch_alloc", "BatchAlloc", metricSnapshot.batchAllocRequestCount,
                            metricSnapshot.batchAllocSuccessCount, metricSnapshot.batchAllocFailureCount);
     AppendOperationMetrics(oss, "get", "Get", metricSnapshot.getRequestCount, metricSnapshot.getSuccessCount,

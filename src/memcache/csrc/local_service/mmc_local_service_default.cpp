@@ -513,6 +513,7 @@ void MmcLocalServiceDefault::RegisterBaseInfo(BmRegisterRequest &req)
 {
     req.rank_ = options_.rankId;
     req.backendId_ = ResolveBackendId();
+    req.role_ = options_.role;
     req.storageEnabled_ = options_.storageEnabled;
     for (MediaType type = MEDIA_HBM; type != MEDIA_NONE;) {
         uint64_t gva = bmProxyPtr_->GetGva(type);

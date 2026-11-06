@@ -84,6 +84,7 @@ static int GenerateLocalConf(std::string confPath)
     outFile << "ock.mmc.tls.decrypter.path =" << std::endl;
 
     outFile << "ock.mmc.local_service.world_size = 1" << std::endl;
+    outFile << "ock.mmc.local_service.role = writer" << std::endl;
     outFile << "ock.mmc.local_service.config_store_url = " << kMmcacheStoreConfigStoreUrl << std::endl;
     outFile << "ock.mmc.config_store.tls.enable = false" << std::endl;
     outFile << "ock.mmc.config_store.tls.ca.path = /opt/ock/security/certs/ca.cert.pem" << std::endl;

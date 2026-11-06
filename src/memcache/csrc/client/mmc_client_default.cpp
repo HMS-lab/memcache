@@ -332,9 +332,15 @@ Result MmcClientDefault::DoPut(const std::string &key, const MmcBufferArray &buf
                                uint32_t flags)
 {
     uint64_t operateId = GenerateOperateId(rankId_);
-    AllocRequest request{key, {}, operateId};
+    AllocRequest request{key, {}, operateId, rankId_};
     MMC_VALIDATE_RETURN(PrepareAllocOpt(bufArr.TotalSize(), options, flags, request.options_) == MMC_OK, "put error",
                         MMC_ERROR);
+    MMC_LOG_DEBUG("ClientPut: key=" << key << ", caller rankId=" << rankId_
+                                    << ", allocFlags=" << request.options_.flags_ << ", numPreferredRank="
+                                    << request.options_.preferredRank_.size() << ", firstPreferredRank="
+                                    << (request.options_.preferredRank_.empty()
+                                            ? -1
+                                            : static_cast<int>(request.options_.preferredRank_[0])));
     AllocResponse response;
     MMC_RETURN_ERROR(metaNetClient_->SyncCall(request, response, rpcRetryTimeOut_),
                      "client " << name_ << " alloc " << key << " failed");
@@ -493,13 +499,15 @@ Result MmcClientDefault::DoBatchPut(const std::vector<std::string> &keys, const 
 {
     // alloc blobs
     uint64_t operateId = GenerateOperateId(rankId_);
-    BatchAllocRequest request(keys, {}, flags, operateId);
+    BatchAllocRequest request(keys, {}, flags, operateId, rankId_);
     for (const auto &bufArr : bufArrs) {
         AllocOptions tmpAllocOptions{};
         MMC_VALIDATE_RETURN(PrepareAllocOpt(bufArr.TotalSize(), options, flags, tmpAllocOptions) == MMC_OK,
                             "option param error", MMC_ERROR);
         request.options_.emplace_back(std::move(tmpAllocOptions));
     }
+    MMC_LOG_DEBUG("ClientBatchPut: keys=" << keys.size() << ", caller rankId=" << rankId_
+                                          << ", allocFlags=" << request.flags_);
     BatchAllocResponse allocResponse{};
     TP_TRACE_BEGIN(TP_MMC_CLIENT_BATCH_PUT_RPC);
     auto allocRpcRet = metaNetClient_->SyncCall(request, allocResponse, rpcRetryTimeOut_);
@@ -1440,7 +1448,7 @@ Result MmcClientDefault::BatchMalloc(const std::vector<std::string> &keys, const
     // alloc blobs
     uint32_t flags = ALLOC_RANDOM | ALLOC_FLAGS_GVA_MALLOC_MASK;
     uint64_t operateId = GenerateOperateId(rankId_);
-    BatchAllocRequest request(keys, {}, flags, operateId, leaseTtlMs);
+    BatchAllocRequest request(keys, {}, flags, operateId, rankId_, leaseTtlMs);
     for (const auto &size : sizes) {
         AllocOptions tmpAllocOptions{};
         MMC_VALIDATE_RETURN(PrepareAllocOpt(size, options, flags, tmpAllocOptions) == MMC_OK, "option param error",

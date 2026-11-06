@@ -87,6 +87,7 @@ TEST_F(TestLocalConfigUtils, LocalConfigToStringReturnsExpectedFormat)
     SafeCopy("tcp://10.0.0.1:5000", config.meta_service_url, sizeof(config.meta_service_url));
     SafeCopy("tcp://10.0.0.2:6000", config.config_store_url, sizeof(config.config_store_url));
     SafeCopy("10.0.0.99", config.backend_id, sizeof(config.backend_id));
+    SafeCopy("writer", config.role, sizeof(config.role));
 
     SafeCopy("debug", config.log_level, sizeof(config.log_level));
     config.world_size = 8UL;
@@ -130,6 +131,7 @@ TEST_F(TestLocalConfigUtils, LocalConfigToStringReturnsExpectedFormat)
                                  "  meta_service_url: tcp://10.0.0.1:5000\n"
                                  "  config_store_url: tcp://10.0.0.2:6000\n"
                                  "  backend_id: 10.0.0.99\n"
+                                 "  role: writer\n"
                                  "  log_level: debug\n"
                                  "  world_size: 8\n"
                                  "  protocol: device_rdma\n"

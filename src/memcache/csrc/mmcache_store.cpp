@@ -512,6 +512,9 @@ std::vector<int> MmcacheStore::BatchPutFrom(const std::vector<std::string> &keys
     auto temp = CopyPutOptions(replicateConfig, options);
     MMC_ASSERT_LOG_AND_RETURN(temp, "CopyPutOptions(replicateConfig, options) = " << temp, results);
     TP_TRACE_BEGIN(TP_MMC_PY_BATCH_PUT);
+    // 这里传 ALLOC_RANDOM 表示「未配置分配策略时」的默认行为（纯随机分配）；
+    // 若 MetaService 侧配置了 ock.mmc.alloc_strategy = local_first / arrange，
+    // meta 的 HandleAlloc/HandleBatchAlloc 会用 meta 配置覆盖请求侧低字节策略，以 meta 为准。
     mmcc_batch_put(keyArray.data(), count, bufferArray.data(), options, ALLOC_RANDOM, results.data());
     TP_TRACE_END(TP_MMC_PY_BATCH_PUT, 0);
     for (size_t i = 0; i < count; i++) {
@@ -689,6 +692,9 @@ std::vector<int> MmcacheStore::BatchPutFromLayers(const std::vector<std::string>
     TP_TRACE_BEGIN(TP_MMC_PY_BATCH_PUT_LAYERS);
     std::vector<MmcBufferArray> bufferArrays;
     GetBufferArrays(batchSize, type, buffers, sizes, bufferArrays);
+    // 这里传 ALLOC_RANDOM 表示「未配置分配策略时」的默认行为（纯随机分配）；
+    // 若 MetaService 侧配置了 ock.mmc.alloc_strategy = local_first / arrange，
+    // meta 的 HandleAlloc/HandleBatchAlloc 会用 meta 配置覆盖请求侧低字节策略，以 meta 为准。
     auto ret = MmcClientDefault::GetInstance()->BatchPut(keys, bufferArrays, options, ALLOC_RANDOM, results);
     TP_TRACE_END(TP_MMC_PY_BATCH_PUT_LAYERS, ret);
     (void)ret;
@@ -908,6 +914,9 @@ int MmcacheStore::PutBatch(const std::vector<std::string> &keys, std::vector<mmc
     auto temp = CopyPutOptions(replicateConfig, options);
     MMC_ASSERT_LOG_AND_RETURN(temp, "CopyPutOptions(replicateConfig, options) = " << temp, MMC_INVALID_PARAM);
     TP_TRACE_BEGIN(TP_MMC_PY_BATCH_PUT);
+    // 这里传 ALLOC_RANDOM 表示「未配置分配策略时」的默认行为（纯随机分配）；
+    // 若 MetaService 侧配置了 ock.mmc.alloc_strategy = local_first / arrange，
+    // meta 的 HandleAlloc/HandleBatchAlloc 会用 meta 配置覆盖请求侧低字节策略，以 meta 为准。
     mmcc_batch_put(keyArray.data(), count, bufferArray.data(), options, ALLOC_RANDOM, results.data());
     TP_TRACE_END(TP_MMC_PY_BATCH_PUT, 0);
     for (size_t i = 0; i < count; i++) {

@@ -119,6 +119,7 @@ TEST_F(TestProtoMsg, BmRegisterRequestKeepsOriginalPayloadLayout)
     const uint32_t destRankId = 0;
     const uint32_t rank = 9;
     const std::string backendId = "legacy_backend";
+    const std::string role = "memory";
     const std::vector<uint16_t> mediaTypes;
     const std::vector<uint64_t> addresses;
     const std::vector<uint64_t> capacities;
@@ -129,6 +130,7 @@ TEST_F(TestProtoMsg, BmRegisterRequestKeepsOriginalPayloadLayout)
     packer.Serialize(destRankId);
     packer.Serialize(rank);
     packer.Serialize(backendId);
+    packer.Serialize(role);
     packer.Serialize(mediaTypes);
     packer.Serialize(addresses);
     packer.Serialize(capacities);
@@ -139,6 +141,8 @@ TEST_F(TestProtoMsg, BmRegisterRequestKeepsOriginalPayloadLayout)
     NetMsgUnpacker unpacker(packer.String());
     ASSERT_EQ(decoded.Deserialize(unpacker), MMC_OK);
     EXPECT_EQ(decoded.rank_, rank);
+    EXPECT_EQ(decoded.backendId_, backendId);
+    EXPECT_EQ(decoded.role_, role);
     EXPECT_TRUE(decoded.storageEnabled_);
 }
 

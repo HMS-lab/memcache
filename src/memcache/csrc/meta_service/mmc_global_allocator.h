@@ -17,6 +17,7 @@
 #include "mmc_blob_allocator.h"
 #include "mmc_locality_strategy.h"
 #include "mmc_read_write_lock.h"
+#include "mmc_meta_metric_manager.h"
 
 namespace ock {
 namespace mmc {
@@ -56,7 +57,9 @@ public:
     Result Alloc(const AllocOptions &allocOpt, std::vector<MmcMemBlobPtr> &blobs)
     {
         std::unordered_set<uint32_t> uniqueRanks(allocOpt.preferredRank_.begin(), allocOpt.preferredRank_.end());
-        if (allocOpt.numBlobs_ < allocOpt.preferredRank_.size() ||
+        // ALLOC_LOCAL_FIRST: preferredRank_是候选本地rank集合，不需要numBlobs>=preferredRank_.size()
+        bool isLocalFirst = (allocOpt.flags_ & 0xFF) == ALLOC_LOCAL_FIRST;
+        if ((!isLocalFirst && allocOpt.numBlobs_ < allocOpt.preferredRank_.size()) ||
             uniqueRanks.size() != allocOpt.preferredRank_.size()) {
             MMC_LOG_ERROR("Invalid alloc option: " << allocOpt);
             return MMC_ERROR;
@@ -68,6 +71,36 @@ public:
         }
         std::unordered_set<uint32_t> excludeRanks;
         globalAllocLock_.LockRead();
+        // ALLOC_LOCAL_FIRST: preferredRank_已被HandleAlloc扩展为同节点所有rank，
+        if (isLocalFirst) {
+            auto ret = InnerAlloc(allocReq, blobs, excludeRanks);
+            if (ret == MMC_OK) {
+                globalAllocLock_.UnlockRead();
+                return ret;
+            }
+            // 权重选中的目标 backendId 内分配完全失败（空间不足/rank掉线），回退全 ranks 随机
+            // 注意：此处仍持有 globalAllocLock_ 读锁，而 Free() -> Free(blob) 会再次 LockRead()；
+            // std::shared_mutex 不可重入，若此时有写者（Mount/Unmount）排队，二次读锁会与写锁形成环。
+            // 因此先放锁、释放完成后再重新加锁进入回退重试（与文件内其它 Free 调用点保持一致）。
+            globalAllocLock_.UnlockRead();
+            Free(blobs);
+            globalAllocLock_.LockRead();
+            excludeRanks.clear();
+            AllocOptions randomReq = allocReq;
+            randomReq.flags_ = static_cast<uint32_t>(ALLOC_RANDOM);
+            randomReq.preferredRank_.clear();
+            MmcMetaMetricManager::GetInstance().IncrementLocalFirstFallbackCounter();
+            MMC_LOG_WARN("ALLOC_LOCAL_FIRST: target backendId[" << allocReq.targetBackendId_ << "] alloc failed for "
+                                                                << "callerRank=" << allocReq.callerRank_
+                                                                << ", retry with ALLOC_RANDOM");
+            ret = InnerAlloc(randomReq, blobs, excludeRanks);
+            globalAllocLock_.UnlockRead();
+            if (ret != MMC_OK) {
+                Free(blobs);
+                MMC_LOG_ERROR("Local first alloc failed, ret: " << ret << ", allocReq: " << allocReq);
+            }
+            return ret;
+        }
         if (allocReq.preferredRank_.size() <= 1u) {
             auto ret = InnerAlloc(allocReq, blobs, excludeRanks);
             globalAllocLock_.UnlockRead();
@@ -611,6 +644,10 @@ private:
 
             case ALLOC_RANDOM:
                 ret = MmcLocalityStrategy::RandomAssign(allocators_, allocReq, blobs, excludeRanks);
+                break;
+
+            case ALLOC_LOCAL_FIRST:
+                ret = MmcLocalityStrategy::LocalFirstAssign(allocators_, allocReq, blobs, excludeRanks);
                 break;
 
             default:

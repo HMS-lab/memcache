@@ -58,6 +58,7 @@ MetaConfig是元数据服务的启动配置类，用于设置MetaService的监�
 | meta_service_url | str | "tcp://127.0.0.1:5000" | 元数据服务启动地址 |
 | config_store_url | str | "tcp://127.0.0.1:6000" | Config store地址 |
 | metrics_url | str | `"http://127.0.0.1:8000"` | Metrics HTTP服务地址 |
+| alloc_strategy | str | "random" | 全局分配策略：`random`（随机）/ `arrange`（顺序）/ `local_first`（本地节点优先 + 跨节点回退）。由 MetaService 统一管理，per-writer 不再携带策略 |
 | ha_enable | bool | false | 是否启用高可用部署 |
 | log_level | str | "info" | 日志级别：debug, info, warn, error |
 | log_path | str | "/var/log/memcache_hybrid" | 日志目录 |
@@ -207,6 +208,8 @@ LocalConfig是分布式内存缓存的配置类，用于设置客户端的各种
 | 参数名称 | 类型 | 默认值 | 说明 |
 | --------- | ------ | ------- | ------ |
 | meta_service_url | str | "tcp://127.0.0.1:5000" | Meta service的URL地址，格式如"tcp://192.168.1.1:5000" |
+| backend_id | str | "" | kv_event 后端标识（如 Pod IP）；为空时回退到环境变量 `MMC_LOCAL_SERVICE_BACKEND_ID` |
+| role | str | "" | 节点角色：`writer`（P 侧，默认）/ `memory`（D 侧，只做内存）。留空表示不覆盖配置层取值（配置项 > 环境变量 > writer） |
 | config_store_url | str | "tcp://127.0.0.1:6000" | Config store的URL地址 |
 | log_level | str | "info" | 日志级别：debug, info, warn, error |
 | world_size | int | 256 | 最大支持的rank数量 |

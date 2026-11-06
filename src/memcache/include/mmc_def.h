@@ -111,6 +111,9 @@ typedef struct {
     uint32_t ssdMetadataMode; // 0: aggregated; 1: separated
     // 分配时 padding 到全局最大对齐值，全网统一，由 MetaService 统一管理。
     bool enableMaxValueMode;
+    // 全局分配策略由 MetaService 统一管理(AllocFlags): 0/未配置不强制(尊重请求侧策略,
+    // 请求默认 flags=0 走 InnerAlloc default→ArrangeLocality)、ALLOC_ARRANGE/ALLOC_LOCAL_FIRST 强制覆盖。
+    uint32_t allocStrategy;
     // MetaService 网络异步线程池线程数；0 表示使用默认值，有效范围 [4, 256]，重启生效。
     uint32_t netPoolBase;
 } mmc_meta_service_config_t;
@@ -123,6 +126,7 @@ typedef struct {
     char bmIpPort[DISCOVERY_URL_SIZE];
     char bmHcomUrl[DISCOVERY_URL_SIZE];
     char backendId[DISCOVERY_URL_SIZE]; // Backend identity for kv_event (pod IP etc.)
+    char role[PROTOCOL_SIZE];           // 本实例角色: "writer"(P,写者) / "memory"(D,仅提供内存)
     uint32_t createId;
     char dataOpType[PROTOCOL_SIZE];
     uint64_t localDRAMSize;

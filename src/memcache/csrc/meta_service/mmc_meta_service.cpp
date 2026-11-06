@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <random>
 #include <utility>
 
 #include "mmc_logger.h"
@@ -25,13 +26,32 @@
 #include "mmc_config_const.h"
 #include "mmc_rest_api_facade.h"
 #include "mmc_smem_bm_helper.h"
+#include "mmc_ptracer.h"
 #include "spdlogger4c.h"
 #include "spdlogger.h"
 
 namespace ock {
 namespace mmc {
 
+// 节点亲和分配：背选目标 backendId 的加权随机源；thread_local 避免跨线程竞争
+thread_local std::mt19937 gTargetBackendRng(std::random_device{}());
+// 节点亲和分配：目标 backendId 内部打乱 ranks 的随机源；thread_local 保证线程内可重入
+thread_local std::mt19937 gExpandRanksRng(std::random_device{}());
+
 namespace {
+
+std::string RanksToString(const std::vector<uint32_t> &ranks)
+{
+    std::string s = "[";
+    for (size_t i = 0; i < ranks.size(); ++i) {
+        if (i > 0) {
+            s += ",";
+        }
+        s += std::to_string(ranks[i]);
+    }
+    s += "]";
+    return s;
+}
 
 std::vector<uint32_t> CollectRanks(const std::unordered_map<uint32_t, std::unordered_set<uint16_t>> &rankMediaTypeMap)
 {
@@ -244,7 +264,7 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
 Result MmcMetaService::BmRegister(uint32_t rank, std::vector<uint16_t> mediaType, std::vector<uint64_t> bm,
                                   std::vector<uint64_t> capacity,
                                   std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList, bool storageEnabled,
-                                  const std::string &backendId)
+                                  const std::string &backendId, const std::string &role)
 {
     std::lock_guard<std::mutex> guard(mutex_);
     if (!started_) {
@@ -284,9 +304,47 @@ Result MmcMetaService::BmRegister(uint32_t rank, std::vector<uint16_t> mediaType
         }
     }
 
-    if (!backendId.empty()) {
-        std::lock_guard<std::mutex> backendLock(rankBackendIdMapLock_);
-        rankBackendIdMap_[rank] = backendId;
+    {
+        std::unique_lock<std::shared_mutex> backendLock(rankBackendIdMapLock_);
+        // 同一个 rank 重新注册时可能带来新的 backendId（换 IP、改配置、重连），
+        // 必须先把旧反向映射摘掉，否则该 rank 会同时挂在两个 backendId 上，
+        // 分布表会重复计权、写流量持续偏到旧 backendId；backendId 变为空时同样要摘。
+        auto oldIt = rankBackendIdMap_.find(rank);
+        const std::string oldBackendId = (oldIt == rankBackendIdMap_.end()) ? std::string() : oldIt->second;
+        const bool hasOldMapping = (oldIt != rankBackendIdMap_.end());
+        const bool backendChanged = hasOldMapping && (oldBackendId != backendId);
+        if (backendChanged) {
+            auto oldBidIt = backendIdRankMap_.find(oldBackendId);
+            if (oldBidIt != backendIdRankMap_.end()) {
+                oldBidIt->second.erase(rank);
+                if (oldBidIt->second.empty()) {
+                    backendIdRankMap_.erase(oldBidIt);
+                    backendIdRoleMap_.erase(oldBackendId);
+                }
+            }
+            rankBackendIdMap_.erase(oldIt);
+            MMC_LOG_INFO("BmRegister: rank=" << rank << " backends changed from [" << oldBackendId << "] to ["
+                                             << backendId << "]");
+        }
+        if (!backendId.empty()) {
+            rankBackendIdMap_[rank] = backendId;
+            backendIdRankMap_[backendId].insert(rank);
+            if (!role.empty()) {
+                // 同一 backendId 的 role 必须一致；后到者不再覆盖，冲突时告警，
+                // 避免默认 writer 的 client 静默把整台 memory 节点翻成 writer。
+                auto ins = backendIdRoleMap_.emplace(backendId, role);
+                if (!ins.second && ins.first->second != role) {
+                    MMC_LOG_WARN("ALLOC_LOCAL_FIRST: backendId[" << backendId << "] role conflict: keep ["
+                                                                 << ins.first->second << "], ignore [" << role
+                                                                 << "] from rank " << rank);
+                }
+            }
+            MMC_LOG_INFO("BmRegister: rank=" << rank << ", backendId[" << backendId << "], role[" << role
+                                             << "], effectiveRole[" << backendIdRoleMap_[backendId] << "]");
+        }
+        if (backendChanged || !backendId.empty()) {
+            RebuildWriteDistributionTable();
+        }
     }
 
     return MMC_OK;
@@ -321,8 +379,21 @@ Result MmcMetaService::BmUnregisterWithoutLock(uint32_t rank, uint16_t mediaType
         rankMediaTypeMap_.erase(rank);
     }
     if (rankMediaTypeMap_.find(rank) == rankMediaTypeMap_.end()) {
-        std::lock_guard<std::mutex> backendLock(rankBackendIdMapLock_);
-        rankBackendIdMap_.erase(rank);
+        std::unique_lock<std::shared_mutex> backendLock(rankBackendIdMapLock_);
+        auto it = rankBackendIdMap_.find(rank);
+        if (it != rankBackendIdMap_.end()) {
+            const std::string removedBackendId = it->second;
+            auto bidIt = backendIdRankMap_.find(removedBackendId);
+            if (bidIt != backendIdRankMap_.end()) {
+                bidIt->second.erase(rank);
+                if (bidIt->second.empty()) {
+                    backendIdRankMap_.erase(bidIt);
+                    backendIdRoleMap_.erase(removedBackendId);
+                    RebuildWriteDistributionTable();
+                }
+            }
+            rankBackendIdMap_.erase(it);
+        }
     }
     return MMC_OK;
 }
@@ -542,9 +613,119 @@ void MmcMetaService::PublishClearedForRanks(const std::vector<uint32_t> &ranks)
 
 std::string MmcMetaService::GetBackendIdForRank(uint32_t rank)
 {
-    std::lock_guard<std::mutex> backendLock(rankBackendIdMapLock_);
+    std::shared_lock<std::shared_mutex> backendLock(rankBackendIdMapLock_);
     const auto it = rankBackendIdMap_.find(rank);
     return (it != rankBackendIdMap_.end()) ? it->second : std::string();
+}
+
+std::vector<uint32_t> MmcMetaService::GetRanksForBackendId(const std::string &backendId)
+{
+    std::shared_lock<std::shared_mutex> backendLock(rankBackendIdMapLock_);
+    std::vector<uint32_t> ranks;
+    auto it = backendIdRankMap_.find(backendId);
+    if (it != backendIdRankMap_.end()) {
+        ranks.assign(it->second.begin(), it->second.end());
+    }
+    return ranks;
+}
+
+std::vector<std::string> MmcMetaService::GetAllBackendIds()
+{
+    std::shared_lock<std::shared_mutex> backendLock(rankBackendIdMapLock_);
+    std::vector<std::string> backendIds;
+    backendIds.reserve(backendIdRankMap_.size());
+    for (const auto &entry : backendIdRankMap_) {
+        backendIds.push_back(entry.first);
+    }
+    std::sort(backendIds.begin(), backendIds.end());
+    return backendIds;
+}
+
+std::string MmcMetaService::GetBackendRole(const std::string &backendId)
+{
+    std::shared_lock<std::shared_mutex> backendLock(rankBackendIdMapLock_);
+    auto it = backendIdRoleMap_.find(backendId);
+    return (it != backendIdRoleMap_.end()) ? it->second : std::string();
+}
+
+std::string MmcMetaService::SelectTargetBackendForRank(uint32_t callerRank)
+{
+    // caller rank 所在 backendId
+    const std::string callerBackendId = GetBackendIdForRank(callerRank);
+    if (callerBackendId.empty()) {
+        MMC_LOG_DEBUG("ALLOC_LOCAL_FIRST: caller rank " << callerRank << " has no backendId");
+        return std::string();
+    }
+    // 只有写者（P）才做目标选择；memory（D）不承载本地写入语义，返回空走随机回退
+    if (GetBackendRole(callerBackendId) != "writer") {
+        MMC_LOG_DEBUG("ALLOC_LOCAL_FIRST: caller backendId " << callerBackendId << " is not writer");
+        return std::string();
+    }
+    // 在分布表中找到该写者的分布，按权重选一个目标 backendId。
+    // 读共享锁保护 writeDistributionTable_（BmRegister/BmUnregister 持写锁重建，可能触发 vector 重新分配）
+    std::shared_lock<std::shared_mutex> backendLock(rankBackendIdMapLock_);
+    for (const auto &dist : writeDistributionTable_) {
+        if (dist.writerBackendId_ == callerBackendId) {
+            const BackendTarget *target = PickTargetByWeight(dist, gTargetBackendRng);
+            return (target == nullptr) ? std::string() : target->backendId_;
+        }
+    }
+    return std::string();
+}
+
+void MmcMetaService::ExpandLocalFirstRanks(AllocOptions &options, uint32_t callerRank)
+{
+    if ((options.flags_ & 0xFF) != ALLOC_LOCAL_FIRST) {
+        return;
+    }
+    TP_TRACE_BEGIN(TP_MMC_META_LOCAL_FIRST_EXPAND_RANK);
+    // 按写者分布表：权重选出目标 backendId（含本地高权重/均匀分流到 memory），
+    // 目标 backendId 的全部 ranks 随机打乱作为 preferredRank_ 候选集。
+    const std::string targetBackendId = SelectTargetBackendForRank(callerRank);
+    // 填充本地 debug 字段（fallback 日志用），不参与网络序列化
+    options.callerRank_ = callerRank;
+    options.targetBackendId_ = targetBackendId;
+    if (targetBackendId.empty()) {
+        MMC_LOG_ERROR("ALLOC_LOCAL_FIRST: no target backendId for caller rank " << callerRank
+                                                                                << ", falling back to ALLOC_ARRANGE");
+        options.flags_ = (options.flags_ & ~0xFF) | ALLOC_ARRANGE;
+        TP_TRACE_END(TP_MMC_META_LOCAL_FIRST_EXPAND_RANK, MMC_ERROR);
+        return;
+    }
+    MMC_LOG_DEBUG("ALLOC_LOCAL_FIRST: caller rank " << callerRank << " target backendId[" << targetBackendId << "]");
+    std::vector<uint32_t> targetRanks = GetRanksForBackendId(targetBackendId);
+    std::shuffle(targetRanks.begin(), targetRanks.end(), gExpandRanksRng);
+    options.preferredRank_ = std::move(targetRanks);
+    MMC_LOG_DEBUG("ALLOC_LOCAL_FIRST: caller rank " << callerRank << ", target backendId[" << targetBackendId
+                                                    << "], preferredRank_=" << RanksToString(options.preferredRank_));
+    TP_TRACE_END(TP_MMC_META_LOCAL_FIRST_EXPAND_RANK, MMC_OK);
+}
+
+void MmcMetaService::RebuildWriteDistributionTable()
+{
+    // 调用方需持有 rankBackendIdMapLock_（写锁）
+    TP_TRACE_BEGIN(TP_MMC_META_BUILD_DIST_TABLE);
+    std::vector<std::string> writeBackendIds;
+    std::vector<std::string> memoryBackendIds;
+    for (const auto &entry : backendIdRoleMap_) {
+        if (entry.second == "writer") {
+            writeBackendIds.push_back(entry.first);
+        } else if (entry.second == "memory") {
+            memoryBackendIds.push_back(entry.first);
+        } else {
+            MMC_LOG_WARN("ALLOC_LOCAL_FIRST: unrecognized role [" << entry.second << "] for backendId [" << entry.first
+                                                                  << "], fall back to writer");
+            writeBackendIds.push_back(entry.first);
+        }
+    }
+    std::sort(writeBackendIds.begin(), writeBackendIds.end());
+    std::sort(memoryBackendIds.begin(), memoryBackendIds.end());
+    std::vector<std::string> allBackendIds = writeBackendIds;
+    allBackendIds.insert(allBackendIds.end(), memoryBackendIds.begin(), memoryBackendIds.end());
+    writeDistributionTable_ = BuildBackendDistribution(allBackendIds, writeBackendIds, memoryBackendIds);
+    MMC_LOG_DEBUG("ALLOC_LOCAL_FIRST: rebuilt write distribution table, writers="
+                  << writeBackendIds.size() << ", memorys=" << memoryBackendIds.size());
+    TP_TRACE_END(TP_MMC_META_BUILD_DIST_TABLE, MMC_OK);
 }
 
 void MmcMetaService::StartMetricsReportTask()

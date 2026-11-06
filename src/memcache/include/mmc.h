@@ -45,6 +45,9 @@ typedef struct {
     // Backend identity for kv_event, e.g. pod IP. If empty, runtime falls back to MMC_LOCAL_SERVICE_BACKEND_ID env var.
     char backend_id[DISCOVERY_URL_SIZE];
 
+    // 本实例角色(节点亲和分配): "writer"(P,写者,有数据写入) / "memory"(D,仅提供内存不参与写入)。默认 "writer"。
+    char role[PROTOCOL_SIZE];
+
     // Log level: debug, info, warn, error
     char log_level[10];
 

@@ -26,12 +26,6 @@
 
 namespace ock {
 namespace mmc {
-#define ALLOC_FLAGS_GVA_MALLOC_MASK (1 << 8) // 标记 alloc 是由 malloc 接口触发
-enum AllocFlags {
-    ALLOC_FORCE_BY_RANK = 1 << 0, // 按照rank强制分配
-    ALLOC_RANDOM = 1 << 1,
-    ALLOC_ARRANGE = 1 << 2,
-};
 
 struct MmcLocalMemCurInfo {
     uint64_t capacity_;
@@ -80,6 +74,54 @@ public:
         tmpAllocReq.flags_ = static_cast<uint32_t>(ALLOC_RANDOM);
 
         return RandomAssign(allocators, tmpAllocReq, blobs, excludeRanks);
+    }
+
+    static Result LocalFirstAssign(const MmcAllocators &allocators, const AllocOptions &allocReq,
+                                   std::vector<MmcMemBlobPtr> &blobs, std::unordered_set<uint32_t> &excludeRanks)
+    {
+        if (allocators.empty()) {
+            MMC_LOG_ERROR("Cannot allocate blob, allocators empty");
+            return MMC_ERROR;
+        }
+        if (allocReq.preferredRank_.empty()) {
+            MMC_LOG_ERROR("Cannot allocate blob, preferredRank_ empty for ALLOC_LOCAL_FIRST");
+            return MMC_ERROR;
+        }
+        size_t allocatedCount = 0;
+        for (const uint32_t rank : allocReq.preferredRank_) {
+            if (excludeRanks.find(rank) != excludeRanks.end()) {
+                continue;
+            }
+            MmcLocation location{};
+            location.mediaType_ = static_cast<MediaType>(allocReq.mediaType_);
+            location.rank_ = rank;
+            auto it = allocators.find(location);
+            if (it == allocators.end()) {
+                MMC_LOG_DEBUG("ALLOC_LOCAL_FIRST: allocator not found for rank " << rank << ", mediaType "
+                                                                                 << location.mediaType_);
+                continue;
+            }
+            MmcMemBlobPtr blob = it->second->Alloc(allocReq.blobSize_);
+            if (blob != nullptr) {
+                MMC_LOG_DEBUG("LocalFirstAssign: blob[" << allocatedCount << "] allocated on rank=" << rank
+                                                        << ", mediaType=" << location.mediaType_
+                                                        << ", blobSize=" << allocReq.blobSize_);
+                excludeRanks.insert(rank);
+                blobs.push_back(blob);
+                allocatedCount++;
+                if (allocatedCount >= allocReq.numBlobs_) {
+                    break;
+                }
+            }
+        }
+        if (allocatedCount < allocReq.numBlobs_) {
+            MMC_LOG_WARN("ALLOC_LOCAL_FIRST: failed to allocate all blobs on local ranks. Requested: "
+                         << allocReq.numBlobs_ << ", allocated: " << allocatedCount << ", fallback to ALLOC_RANDOM");
+            return MMC_ERROR;
+        }
+        MMC_LOG_DEBUG("ALLOC_LOCAL_FIRST LocalFirstAssign: allocated " << allocatedCount << " blobs of size "
+                                                                       << allocReq.blobSize_);
+        return MMC_OK;
     }
 
     static Result ForceAssign(const MmcAllocators &allocators, const AllocOptions &allocReq,

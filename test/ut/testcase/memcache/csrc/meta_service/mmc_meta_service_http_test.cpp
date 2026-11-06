@@ -230,7 +230,7 @@ void MmcMetaServiceHttpTest::PrepareAllocatedKey()
 {
     AllocRequest allocRequest(
         kHttpAllocKey, AllocOptions(SIZE_32K, kHttpExpectedBlobCount, MEDIA_HBM, {kHttpRankId}, kHttpAllocOffset),
-        GenerateOperateId(kHttpRankId));
+        GenerateOperateId(kHttpRankId), kHttpRankId);
     AllocResponse allocResponse;
     ASSERT_EQ(metaMgrProxy_->Alloc(allocRequest, allocResponse), MMC_OK);
     ASSERT_EQ(allocResponse.numBlobs_, kHttpExpectedBlobCount);
@@ -477,6 +477,7 @@ TEST_F(MmcMetaServiceHttpTest, MetricsContract)
     EXPECT_NE(metricsResponse->body.find("memcache_batch_exist_key_not_found_total"), std::string::npos);
     EXPECT_NE(metricsResponse->body.find("memcache_mount_successes_total"), std::string::npos);
     EXPECT_NE(metricsResponse->body.find("memcache_unmount_successes_total"), std::string::npos);
+    EXPECT_NE(metricsResponse->body.find("memcache_local_first_fallback_total"), std::string::npos);
 
     const MmcMetaMetricSnapshot snapshot = MmcMetaMetricManager::GetInstance().GetSnapshot();
     std::ostringstream expectedSummary;
@@ -490,7 +491,8 @@ TEST_F(MmcMetaServiceHttpTest, MetricsContract)
         << " dram_used=" << FormatUsageHuman(kHttpZeroUsedBytes, kHttpSegmentCapacityBytes)
         << " ssd_used=" << FormatUsageHuman(kHttpZeroUsedBytes, kHttpZeroUsedBytes)
         << " alloc_req=" << snapshot.allocRequestCount << " alloc_success=" << snapshot.allocSuccessCount
-        << " alloc_fail=" << snapshot.allocFailureCount << " batch_alloc_req=" << snapshot.batchAllocRequestCount
+        << " alloc_fail=" << snapshot.allocFailureCount << " local_first_fallback=" << snapshot.localFirstFallbackCount
+        << " batch_alloc_req=" << snapshot.batchAllocRequestCount
         << " batch_alloc_success=" << snapshot.batchAllocSuccessCount
         << " batch_alloc_fail=" << snapshot.batchAllocFailureCount << " get_req=" << snapshot.getRequestCount
         << " get_success=" << snapshot.getSuccessCount << " get_fail=" << snapshot.getFailureCount
@@ -674,7 +676,8 @@ TEST_F(MmcMetaServiceHttpTest, ProxyDuplicateAllocCountersTrackFailures)
     MmcMetaMetricSnapshot beforeSnapshot = MmcMetaMetricManager::GetInstance().GetSnapshot();
 
     AllocResponse duplicateAllocResponse;
-    const AllocRequest duplicateAllocRequest(kHttpAllocKey, duplicateAllocOptions, GenerateOperateId(kHttpRankId));
+    const AllocRequest duplicateAllocRequest(kHttpAllocKey, duplicateAllocOptions, GenerateOperateId(kHttpRankId),
+                                             kHttpRankId);
     EXPECT_EQ(metaMgrProxy_->Alloc(duplicateAllocRequest, duplicateAllocResponse), MMC_DUPLICATED_OBJECT);
 
     MmcMetaMetricSnapshot afterSnapshot = MmcMetaMetricManager::GetInstance().GetSnapshot();
@@ -686,7 +689,7 @@ TEST_F(MmcMetaServiceHttpTest, ProxyDuplicateAllocCountersTrackFailures)
     const std::vector<std::string> batchKeys{kHttpAllocKey};
     const std::vector<AllocOptions> batchOptions{duplicateAllocOptions};
     BatchAllocResponse batchAllocResponse;
-    const BatchAllocRequest batchAllocRequest(batchKeys, batchOptions, 0, GenerateOperateId(kHttpRankId));
+    const BatchAllocRequest batchAllocRequest(batchKeys, batchOptions, 0, GenerateOperateId(kHttpRankId), kHttpRankId);
     EXPECT_EQ(metaMgrProxy_->BatchAlloc(batchAllocRequest, batchAllocResponse), MMC_OK);
     ASSERT_EQ(batchAllocResponse.results_.size(), batchDuplicateItemCount);
     EXPECT_EQ(batchAllocResponse.results_.at(kHttpFirstItemIndex), MMC_DUPLICATED_OBJECT);
@@ -709,14 +712,14 @@ TEST_F(MmcMetaServiceHttpTest, AllocAndBatchAllocDoNotRequireSeparatedStorageLoo
                                ALLOC_FLAGS_GVA_MALLOC_MASK);
     metaManager_->SetSsdMetadataMode(MMC_SSD_METADATA_SEPARATED);
 
-    AllocRequest allocRequest(allocKey, options, GenerateOperateId(kHttpRankId));
+    AllocRequest allocRequest(allocKey, options, GenerateOperateId(kHttpRankId), kHttpRankId);
     AllocResponse allocResponse;
     ASSERT_EQ(metaMgrProxy_->Alloc(allocRequest, allocResponse), MMC_OK);
     ASSERT_EQ(allocResponse.blobs_.size(), kHttpExpectedBlobCountSize);
     EXPECT_EQ(allocResponse.blobs_.front().size_, SIZE_32K);
 
     BatchAllocRequest batchAllocRequest({batchAllocKey}, {options}, ALLOC_FLAGS_GVA_MALLOC_MASK,
-                                        GenerateOperateId(kHttpRankId));
+                                        GenerateOperateId(kHttpRankId), kHttpRankId);
     BatchAllocResponse batchAllocResponse;
     ASSERT_EQ(metaMgrProxy_->BatchAlloc(batchAllocRequest, batchAllocResponse), MMC_OK);
     ASSERT_EQ(batchAllocResponse.results_.size(), kHttpExpectedBlobCountSize);

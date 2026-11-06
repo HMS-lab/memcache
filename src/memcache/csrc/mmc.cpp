@@ -161,6 +161,9 @@ local_config create_default_local_config()
     SafeCopy("tcp://127.0.0.1:5000", cfg.meta_service_url, sizeof(cfg.meta_service_url));
     SafeCopy("tcp://127.0.0.1:6000", cfg.config_store_url, sizeof(cfg.config_store_url));
     SafeCopy("", cfg.backend_id, sizeof(cfg.backend_id));
+    // 默认留空：真正的默认值 writer 由配置层（ock.mmc.local_service.role）提供，
+    // 否则 Python 侧默认 writer 会把配置文件/环境变量里的 memory 静默覆盖掉。
+    SafeCopy("", cfg.role, sizeof(cfg.role));
     SafeCopy("info", cfg.log_level, sizeof(cfg.log_level));
     cfg.world_size = 256UL;
     SafeCopy("host_rdma", cfg.protocol, sizeof(cfg.protocol));
@@ -190,6 +193,7 @@ std::string local_config_to_string(const local_config &config)
     oss << "  meta_service_url: " << config.meta_service_url << "\n";
     oss << "  config_store_url: " << config.config_store_url << "\n";
     oss << "  backend_id: " << config.backend_id << "\n";
+    oss << "  role: " << config.role << "\n";
     oss << "  log_level: " << config.log_level << "\n";
     oss << "  world_size: " << config.world_size << "\n";
     oss << "  protocol: " << config.protocol << "\n";
@@ -253,6 +257,14 @@ static int32_t LoadAndValidateConfig(const local_config *config)
 
     g_localServiceConfig.flags = 0;
     g_clientConfig.GetLocalServiceConfig(g_localServiceConfig);
+    // Python API override: if role is explicitly set in local_config, use it
+    if (config->role[0] != '\0' && std::string(config->role) != std::string(g_localServiceConfig.role)) {
+        SafeCopy(config->role, g_localServiceConfig.role, PROTOCOL_SIZE);
+    }
+    // 配置层已按 config > env > 内置默认(writer) 解析；这里只兜底空值，避免下游拿到空 role。
+    if (g_localServiceConfig.role[0] == '\0') {
+        SafeCopy("writer", g_localServiceConfig.role, PROTOCOL_SIZE);
+    }
     if (config->config_path[0] != '\0') {
         SafeCopy(config->config_path, g_localServiceConfig.configFilePath, PATH_MAX_SIZE);
     }

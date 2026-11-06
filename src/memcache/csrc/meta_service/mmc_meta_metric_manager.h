@@ -242,17 +242,19 @@ struct MmcMetaMetricSnapshot {
     uint64_t unmountSuccessCount{0};
     uint64_t unmountFailureCount{0};
     // internal global counters
-    uint64_t evictCount{0};          // total eviction operations
-    uint64_t rewarmCount{0};         // total rewarm operations (SSD->DRAM)
-    uint64_t rewarmFailCount{0};     // failed rewarm operations
-    uint64_t getHitDramCount{0};     // Get requests served from DRAM
-    uint64_t getHitSsdCount{0};      // Get requests served from SSD (triggered rewarm)
-    uint64_t queryHitKeysCount{0};   // keys hit by Query and BatchQuery
-    uint64_t rewarmBytesCount{0};    // total bytes rewarmed from SSD to DRAM
-    uint64_t rewarmBytesCurrent{0};  // current inflight rewarm bytes
-    uint64_t keyCount{0};            // current number of stored keys
-    uint64_t asyncFlushBlobAdded{0}; // SSD blobs successfully registered via async flush callback
-    uint64_t asyncFlushBlobBytes{0}; // total bytes flushed via async flush
+    uint64_t evictCount{0};              // total eviction operations
+    uint64_t rewarmCount{0};             // total rewarm operations (SSD->DRAM)
+    uint64_t rewarmFailCount{0};         // failed rewarm operations
+    uint64_t getHitDramCount{0};         // Get requests served from DRAM
+    uint64_t getHitSsdCount{0};          // Get requests served from SSD (triggered rewarm)
+    uint64_t queryHitKeysCount{0};       // keys hit by Query and BatchQuery
+    uint64_t rewarmBytesCount{0};        // total bytes rewarmed from SSD to DRAM
+    uint64_t rewarmBytesCurrent{0};      // current inflight rewarm bytes
+    uint64_t keyCount{0};                // current number of stored keys
+    uint64_t asyncFlushBlobAdded{0};     // SSD blobs successfully registered via async flush callback
+    uint64_t asyncFlushBlobBytes{0};     // total bytes flushed via async flush
+    uint64_t localFirstFallbackCount{0}; // times ALLOC_LOCAL_FIRST fell back to ALLOC_RANDOM because the
+                                         // target backendId had no free blob or its ranks went offline
 
     // per-rank internal counters: key = rank ID, value = counter value
     // Only populated when MMC_ENABLE_PER_RANK_METRICS is enabled.
@@ -298,6 +300,10 @@ public:
     void IncrementEvictCounter()
     {
         evictCounter_++;
+    }
+    void IncrementLocalFirstFallbackCounter()
+    {
+        localFirstFallbackCounter_++;
     }
     void IncrementEvictCounter(uint32_t rank)
     {
@@ -505,6 +511,7 @@ private:
     SimplePerRankCounter rewarmBytesCurrentRankedCounter_;
     prometheus::simpleapi::counter_metric_t asyncFlushBlobAddedCounter_;
     prometheus::simpleapi::counter_metric_t asyncFlushBlobBytesCounter_;
+    prometheus::simpleapi::counter_metric_t localFirstFallbackCounter_;
     SimplePerRankCounter asyncFlushBlobAddedRankedCounter_;
     SimplePerRankCounter asyncFlushBlobBytesRankedCounter_;
 };

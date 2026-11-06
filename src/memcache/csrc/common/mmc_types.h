@@ -145,6 +145,14 @@ enum class EvictResult {
     FAIL,      // 淘汰失败
 };
 
+#define ALLOC_FLAGS_GVA_MALLOC_MASK (1 << 8) // 标记 alloc 是由 malloc 接口触发
+enum AllocFlags {
+    ALLOC_FORCE_BY_RANK = 1 << 0, // 按照rank强制分配
+    ALLOC_RANDOM = 1 << 1,
+    ALLOC_ARRANGE = 1 << 2,
+    ALLOC_LOCAL_FIRST = 1 << 3, // 同节点优先分配
+};
+
 struct MmcLocation {
     uint32_t rank_;
     MediaType mediaType_;

@@ -28,6 +28,12 @@ struct AllocOptions {
     uint16_t mediaType_{0};
     std::vector<uint32_t> preferredRank_{};
     uint32_t flags_{0}; // 0 ~ 7 位用来做分配策略；从第8位开始，做其他的flag标记，详见 AllocFlags
+
+    // 以下两个字段仅在 Meta 端本地填充（节点亲和 debug 用），不参与网络序列化：
+    // callerRank_ 为发起分配请求的 rank，targetBackendId_ 为权重选中的目标 backendId。
+    uint32_t callerRank_{UINT32_MAX};
+    std::string targetBackendId_;
+
     AllocOptions() = default;
     AllocOptions(const uint64_t blobSize, const uint32_t numBlobs, const uint16_t mediaType,
                  const std::vector<uint32_t> &preferredRank, const uint32_t flags)
@@ -89,12 +95,13 @@ struct PingMsg : public MsgBase {
 
 struct AllocRequest : MsgBase {
     uint64_t operateId_;
+    uint32_t rankId_; // caller rank，本地优先策略据此识别调用者所在节点
     std::string key_;
     AllocOptions options_;
 
-    AllocRequest() : MsgBase{0, ML_ALLOC_REQ, 0}, operateId_{0} {}
-    AllocRequest(const std::string &key, const AllocOptions &prot, uint64_t operateId)
-        : MsgBase{0, ML_ALLOC_REQ, 0}, operateId_(operateId), key_(key), options_(prot) {};
+    AllocRequest() : MsgBase{0, ML_ALLOC_REQ, 0}, operateId_{0}, rankId_{0} {}
+    AllocRequest(const std::string &key, const AllocOptions &prot, uint64_t operateId, const uint32_t rankId)
+        : MsgBase{0, ML_ALLOC_REQ, 0}, operateId_(operateId), rankId_(rankId), key_(key), options_(prot) {};
 
     Result Serialize(NetMsgPacker &packer) const override
     {
@@ -102,6 +109,7 @@ struct AllocRequest : MsgBase {
         packer.Serialize(msgId);
         packer.Serialize(destRankId);
         packer.Serialize(key_);
+        packer.Serialize(rankId_);
         options_.Serialize(packer);
         packer.Serialize(operateId_);
         return MMC_OK;
@@ -113,6 +121,7 @@ struct AllocRequest : MsgBase {
         packer.Deserialize(msgId);
         packer.Deserialize(destRankId);
         packer.Deserialize(key_);
+        packer.Deserialize(rankId_);
         options_.Deserialize(packer);
         packer.Deserialize(operateId_);
         return MMC_OK;
@@ -234,15 +243,16 @@ struct BatchAllocRequest : MsgBase {
     std::vector<std::string> keys_;
     std::vector<AllocOptions> options_;
     uint32_t flags_;
+    uint32_t rankId_; // caller rank，本地优先策略据此识别调用者所在节点
     uint64_t operateId_;
     uint64_t leaseTtlMs_{0};
 
-    BatchAllocRequest() : MsgBase{0, ML_BATCH_ALLOC_REQ, 0}, flags_{0}, operateId_(0), leaseTtlMs_(0) {}
+    BatchAllocRequest() : MsgBase{0, ML_BATCH_ALLOC_REQ, 0}, flags_{0}, rankId_{0}, operateId_(0), leaseTtlMs_(0) {}
 
     BatchAllocRequest(const std::vector<std::string> &keys, const std::vector<AllocOptions> &options, uint32_t flags,
-                      uint64_t operateId, uint64_t leaseTtlMs = 0)
-        : MsgBase{0, ML_BATCH_ALLOC_REQ, 0}, keys_(keys), options_(options), flags_(flags), operateId_(operateId),
-          leaseTtlMs_(leaseTtlMs)
+                      uint64_t operateId, const uint32_t rankId, uint64_t leaseTtlMs = 0)
+        : MsgBase{0, ML_BATCH_ALLOC_REQ, 0}, keys_(keys), options_(options), flags_(flags), rankId_(rankId),
+          operateId_(operateId), leaseTtlMs_(leaseTtlMs)
     {}
 
     Result Serialize(NetMsgPacker &packer) const override
@@ -258,6 +268,7 @@ struct BatchAllocRequest : MsgBase {
             option.Serialize(packer);
         }
         packer.Serialize(flags_);
+        packer.Serialize(rankId_);
         packer.Serialize(operateId_);
         packer.Serialize(leaseTtlMs_);
         return MMC_OK;
@@ -275,6 +286,7 @@ struct BatchAllocRequest : MsgBase {
             option.Deserialize(packer);
         }
         packer.Deserialize(flags_);
+        packer.Deserialize(rankId_);
         packer.Deserialize(operateId_);
         packer.Deserialize(leaseTtlMs_);
         return MMC_OK;
@@ -614,6 +626,7 @@ struct BatchUpdateResponse : MsgBase {
 struct BmRegisterRequest : MsgBase {
     uint32_t rank_{UINT32_MAX};
     std::string backendId_{};
+    std::string role_{}; // "writer"(P,写者) / "memory"(D,仅提供内存)，节点亲和分配用
     std::vector<uint16_t> mediaType_{};
     std::vector<uint64_t> addr_{};
     std::vector<uint64_t> capacity_{};
@@ -629,6 +642,7 @@ struct BmRegisterRequest : MsgBase {
         packer.Serialize(destRankId);
         packer.Serialize(rank_);
         packer.Serialize(backendId_);
+        packer.Serialize(role_);
         packer.Serialize(mediaType_);
         packer.Serialize(addr_);
         packer.Serialize(capacity_);
@@ -644,6 +658,7 @@ struct BmRegisterRequest : MsgBase {
         MMC_RETURN_ERROR(packer.Deserialize(destRankId), "deserialize destRankId failed");
         MMC_RETURN_ERROR(packer.Deserialize(rank_), "deserialize rank failed");
         MMC_RETURN_ERROR(packer.Deserialize(backendId_), "deserialize backendId failed");
+        MMC_RETURN_ERROR(packer.Deserialize(role_), "deserialize role failed");
         MMC_RETURN_ERROR(packer.Deserialize(mediaType_), "deserialize mediaType failed");
         MMC_RETURN_ERROR(packer.Deserialize(addr_), "deserialize addr failed");
         MMC_RETURN_ERROR(packer.Deserialize(capacity_), "deserialize capacity failed");

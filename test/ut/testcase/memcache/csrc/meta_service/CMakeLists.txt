@@ -148,3 +148,14 @@ ADD_UNIT_TEST(test_meta_service_unit
         LINK_LIBRARIES ${TEST_DEPEND_LIBS}
         BUILD_FLAGS -fpermissive --coverage
 )
+
+# ALLOC_LOCAL_FIRST strategy unit test — LocalFirstAssign + GetBackendIdForRank/GetRanksForBackendId
+file(GLOB_RECURSE local_first_strategy_src
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_local_first_strategy.cpp
+)
+ADD_UNIT_TEST(test_local_first_strategy
+        FILES ${local_first_strategy_src} ${TEST_SRC_PATHS}/ut_main.cpp
+        INCLUDE_PATHS ${TEST_INCLUDE_PATHS}
+        LINK_LIBRARIES ${TEST_DEPEND_LIBS}
+        BUILD_FLAGS -fpermissive --coverage
+)

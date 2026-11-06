@@ -54,6 +54,8 @@ constexpr int32_t LOG_OUTPUT_TARGET_FILE = 1;
 constexpr int32_t LOG_OUTPUT_TARGET_BOTH = 2;
 const std::string LOCAL_SERVER_PROTOCAL_ENUM_STR =
     "host_rdma||host_urma||host_tcp||device_rdma||device_urma||device_sdma||host_shm";
+const std::string LOCAL_SERVER_ROLE_ENUM_STR = "writer||memory";
+const std::string ALLOC_STRATEGY_ENUM_STR = "random||arrange||local_first";
 
 // 定义单位与字节的转换关系
 enum class MemUnit { B, KB, MB, GB, TB, UNKNOWN };
@@ -120,6 +122,12 @@ public:
     void AddPathConf(const std::pair<std::string, std::string> &pair, const ValidatorPtr &validator = nullptr,
                      uint32_t flag = CONF_MUST);
     std::vector<std::string> ValidateConf();
+
+    // 该 key 是否被显式设置过（配置文件或 python setup 都会写进 mAllItems；默认值不会）
+    bool IsConfigured(const std::string &key) const
+    {
+        return mAllItems.find(key) != mAllItems.end();
+    }
     void GetAccTlsConfig(mmc_tls_config &tlsConfig);
     void GetHcomTlsConfig(mmc_tls_config &tlsConfig);
     void GetConfigStoreTlsConfig(mmc_tls_config &tlsConfig);
@@ -240,6 +248,7 @@ public:
         AddBoolConf(OCK_MMC_PREFETCH_ENABLED, VStrEnum::Create(OCK_MMC_PREFETCH_ENABLED.first, BOOL_ENUM_STR), 0);
         AddBoolConf(OCK_MMC_META_SERVICE_ENABLE_MAX_VALUE_MODE,
                     VStrEnum::Create(OCK_MMC_META_SERVICE_ENABLE_MAX_VALUE_MODE.first, BOOL_ENUM_STR), 0);
+        AddStrConf(OCK_MMC_ALLOC_STRATEGY, VStrEnum::Create(OCK_MMC_ALLOC_STRATEGY.first, ALLOC_STRATEGY_ENUM_STR), 0);
         AddIntConf(
             OCK_MMC_ASYNC_FLUSH_INTERVAL_MS,
             VIntRange::Create(OCK_MMC_ASYNC_FLUSH_INTERVAL_MS.first, MIN_FLUSH_INTERVAL_MS, MAX_FLUSH_INTERVAL_MS), 0);
@@ -348,6 +357,17 @@ public:
         config.defragEvictThreshold = static_cast<uint16_t>(GetInt(ConfConstant::OKC_MMC_DEFRAG_EVICT_THRESHOLD));
         config.prefetchEnabled = GetBool(ConfConstant::OCK_MMC_PREFETCH_ENABLED);
         config.enableMaxValueMode = GetBool(ConfConstant::OCK_MMC_META_SERVICE_ENABLE_MAX_VALUE_MODE);
+        // 全局分配策略由 MetaService 统一管理：仅 arrange/local_first 会强制覆盖请求侧策略；
+        // 其余(未配置/random)记为 0 表示不强制，尊重请求侧策略(默认 flags=0 走 arrange 随机分散)。
+        std::string allocStrategyStr = GetString(ConfConstant::OCK_MMC_ALLOC_STRATEGY);
+        StringToUpper(allocStrategyStr);
+        if (allocStrategyStr == "LOCAL_FIRST") {
+            config.allocStrategy = ALLOC_LOCAL_FIRST;
+        } else if (allocStrategyStr == "ARRANGE") {
+            config.allocStrategy = ALLOC_ARRANGE;
+        } else {
+            config.allocStrategy = 0; // 未配置(random/默认)：不强制
+        }
         config.asyncFlushIntervalMs = static_cast<uint32_t>(GetInt(ConfConstant::OCK_MMC_ASYNC_FLUSH_INTERVAL_MS));
         config.asyncFlushBatchLimit = static_cast<uint32_t>(GetInt(ConfConstant::OCK_MMC_ASYNC_FLUSH_BATCH_LIMIT));
         config.pendingWaitTimeoutMs = static_cast<uint64_t>(GetInt(ConfConstant::OCK_MMC_PENDING_WAIT_TIMEOUT_MS));
@@ -441,6 +461,8 @@ public:
         // HCOM TLS config
         AddStrConf(OKC_MMC_LOCAL_SERVICE_BM_HCOM_URL, VNoCheck::Create(), 0);
         AddStrConf(OKC_MMC_LOCAL_SERVICE_BACKEND_ID, VNoCheck::Create(), 0);
+        AddStrConf(OCK_MMC_LOCAL_SERVICE_ROLE,
+                   VStrEnum::Create(OCK_MMC_LOCAL_SERVICE_ROLE.first, LOCAL_SERVER_ROLE_ENUM_STR), 0);
         AddBoolConf(OCK_MMC_HCOM_TLS_ENABLE, VStrEnum::Create(OCK_MMC_HCOM_TLS_ENABLE.first, BOOL_ENUM_STR), 0);
         AddStrConf(OCK_MMC_HCOM_TLS_CA_PATH, VStrLength::Create(OCK_MMC_HCOM_TLS_CA_PATH.first, TLS_PATH_MAX_LEN), 0);
         AddStrConf(OCK_MMC_HCOM_TLS_CRL_PATH, VStrLength::Create(OCK_MMC_HCOM_TLS_CRL_PATH.first, TLS_PATH_MAX_LEN), 0);
@@ -492,7 +514,14 @@ public:
         SafeCopy(GetString(ConfConstant::OKC_MMC_LOCAL_SERVICE_BM_IP_PORT_DOMAIN), config.bmIpPortDomain,
                  DISCOVERY_URL_SIZE);
         SafeCopy(GetString(ConfConstant::OKC_MMC_LOCAL_SERVICE_BM_HCOM_URL), config.bmHcomUrl, DISCOVERY_URL_SIZE);
+        // backend_id 取值顺序与 role 完全一致：配置文件显式配了就用配置 > 否则环境变量 > 否则默认空
         SafeCopy(GetString(ConfConstant::OKC_MMC_LOCAL_SERVICE_BACKEND_ID), config.backendId, DISCOVERY_URL_SIZE);
+        if (!IsConfigured(ConfConstant::OKC_MMC_LOCAL_SERVICE_BACKEND_ID.first)) {
+            const std::string envBackendId = SafeGetEnv("MMC_LOCAL_SERVICE_BACKEND_ID");
+            if (!envBackendId.empty()) {
+                SafeCopy(envBackendId, config.backendId, DISCOVERY_URL_SIZE);
+            }
+        }
         config.createId = 0;
         SafeCopy(GetString(ConfConstant::OKC_MMC_LOCAL_SERVICE_PROTOCOL), config.dataOpType, PROTOCOL_SIZE);
         SafeCopy(GetString(ConfConstant::OKC_MMC_LOCAL_SERVICE_TAG), config.tag, MMC_TAG_SIZE);
@@ -503,6 +532,14 @@ public:
         config.localHBMSize = GetUInt64(ConfConstant::OKC_MMC_LOCAL_SERVICE_HBM_SIZE.first, 0);
         config.localMaxHBMSize = GetUInt64(ConfConstant::OKC_MMC_LOCAL_SERVICE_MAX_HBM_SIZE.first, config.localHBMSize);
         config.storageEnabled = GetBool(ConfConstant::OCK_MMC_LOCAL_SERVICE_STORAGE_ENABLED);
+        // role 取值顺序与 backend_id 完全一致：配置文件显式配了就用配置 > 否则环境变量 > 否则内置默认 writer
+        SafeCopy(GetString(ConfConstant::OCK_MMC_LOCAL_SERVICE_ROLE), config.role, PROTOCOL_SIZE);
+        if (!IsConfigured(ConfConstant::OCK_MMC_LOCAL_SERVICE_ROLE.first)) {
+            const std::string envNodeRole = SafeGetEnv("MMC_LOCAL_SERVICE_ROLE");
+            if (!envNodeRole.empty()) {
+                SafeCopy(envNodeRole, config.role, PROTOCOL_SIZE);
+            }
+        }
         if (GetBool(ConfConstant::OCK_MMC_LOCAL_SERVICE_DRAM_BEST_EFFORT)) {
             config.flags |= SMEM_BM_FLAG_DRAM_BEST_EFFORT;
         }

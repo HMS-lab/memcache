@@ -83,6 +83,12 @@ void DefineMmcStructModule(py::module_ &m)
              Backend identity for kv_event, e.g. pod IP.
          )pbdoc")
             .def_property(
+                "role", [](const local_config &cfg) { return std::string(cfg.role); },
+                [](local_config &cfg, const std::string &value) { SafeCopy(value, cfg.role, sizeof(cfg.role)); },
+                R"pbdoc(
+             Node role for node-affinity allocation: "writer" (P, writer, default) / "memory" (D, memory-only).
+         )pbdoc")
+            .def_property(
                 "log_level", [](const local_config &cfg) { return std::string(cfg.log_level); },
                 [](local_config &cfg, const std::string &value) {
                     SafeCopy(value, cfg.log_level, sizeof(cfg.log_level));
@@ -729,7 +735,11 @@ void DefineMmcStructModule(py::module_ &m)
                 },
                 R"pbdoc(
                     Config store TLS decrypter library path.
-                )pbdoc");
+                )pbdoc")
+            .def_readwrite("alloc_strategy", &mmc_meta_service_config_t::allocStrategy, R"pbdoc(
+                 Global alloc strategy: 0=unset(default, request flags=0 走 InnerAlloc default)，2=random,
+                 4=arrange, 8=local_first。由 MetaService 统一管理，per-writer 不再单独配置。
+             )pbdoc");
 
     metaConfigClass
         .def("str", &meta_config_to_string, R"pbdoc(
@@ -749,6 +759,7 @@ PYBIND11_MODULE(_pymmc, m)
     m.attr("MMC_REMOVE_FLAG_LAZY") = MMC_REMOVE_FLAG_LAZY;
     m.attr("MMC_REMOVE_FLAG_KEEP_SSD") = MMC_REMOVE_FLAG_KEEP_SSD;
     ock::mmc::ReplicateConfig defaultConfig;
+
     // Support starting the meta service from python
     py::class_<MmcMetaServiceProcess>(m, "MetaService", R"pbdoc(
          Class for memcache meta service process.
