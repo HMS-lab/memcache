@@ -16,7 +16,12 @@ Every measurement run must invoke the standalone incremental build.
 
 The region starts empty. Each step runs synthetic reads, then attempts one allocation.
 The simulator samples its size from `--block-sizes`.
-`--steps` counts allocation attempts, including failures. Its default is 100000.
+`--steps` sets the minimum number of allocation attempts, including failures. Its default is 100000.
+The simulator then continues until an allocation triggers eviction.
+It records the final histograms before and after that eviction, then stops.
+An eviction triggered on the last requested attempt completes the run.
+All counters include additional attempts and the final eviction.
+The run aborts if no configured request can fit before the final eviction.
 Evictions do not consume steps. Releases are not randomly selected operations.
 
 Calculate occupancy as reserved bytes divided by capacity, expressed as a percentage.
@@ -154,7 +159,23 @@ Free space excludes padding inside active allocations.
 The terminal prints exact byte counts with readable binary sizes in parentheses.
 For example, `94,208 bytes (92.00 KiB)` describes the same size in two forms.
 Tables use spaces to align columns, including the histogram.
-JSON and CSV retain their numeric values without display formatting.
+The final report includes two histograms over time, one for each configured occupancy watermark.
+At each `--sample-every` multiple, a pair of samples becomes due.
+The simulator waits for the next eviction and records free ranges before and after eviction.
+One eviction produces one pair, even if several interval multiples pass before it starts.
+The final eviction always produces a pair, even if no interval sample is due.
+The headings show the configured percentages. Actual occupancy can exceed the upper watermark or fall below the lower watermark.
+Blocks are indivisible. JSON records actual occupancy with each histogram.
+Column titles give the completed allocation attempts. Evictions and reads do not increase this count.
+Headers use decimal suffixes: K = 1,000, M = 1,000,000, B = 1,000,000,000, and T = 1,000,000,000,000.
+For example, `1.5K` means 1,500 attempts. Headers retain enough decimal places to identify each count exactly.
+The first column lists bucket intervals, with an exclusive lower limit and an inclusive upper limit.
+The unit after each interval applies to both limits, for example, `(0.5,1]MiB`.
+Each cell contains a count and total size, for example, `3 (44KiB)` or `2 (3MiB)`.
+Sizes use progressively larger binary units: B, KiB, MiB, GiB, TiB, PiB, and EiB. Zero cells contain `0 (0B)`.
+The table omits decimal places for whole values. JSON stores paired histograms in `histogram_history`, with an `eviction-start` or `eviction-end` phase.
+The explicit Alloc/Free API retains interval sampling without automatic eviction.
+JSON and CSV retain their numeric values without text formatting.
 The CLI pairs each weight with its block size, for example, `4.00 KiB : 33.33%`.
 These percentages describe size selection for allocation attempts.
 Rounded percentages can total slightly more or less than 100%.
@@ -315,6 +336,13 @@ For example, `4KiB:25%` gives that size a sampling probability of 0.25.
 The observed counts can differ because each selection is random.
 These percentages do not describe fragmentation or successful allocation counts.
 
+The final report also shows cumulative requested bytes for each allocation size.
+The columns separate all attempts, successful attempts, and failed attempts.
+For each column, bytes equal the request size multiplied by the corresponding attempt count.
+These totals exclude alignment padding and include allocations that the simulator later released.
+Failed bytes include both capacity failures and fragmentation failures. They do not represent allocated memory.
+The JSON report stores these totals as `requested_bytes`, `successful_bytes`, and `failed_bytes` in each `per_size` entry.
+
 ### Histogram accounting
 
 Histogram intervals do not overlap.
@@ -357,7 +385,8 @@ The directory must contain `Python.h` for the current interpreter.
 ## Sampling and eviction counters
 
 `--sample-every` counts allocation attempts. Its default is 1000.
-Periodic samples follow any eviction that the allocation triggers.
+Each interval schedules a histogram pair at the next eviction.
+Intervals use multiples from the start of the run, not from the previous sample.
 The simulator also records initial, eviction-start, eviction-end, and final samples.
 `allocation_index` counts allocation attempts.
 `operation_index` counts allocation attempts plus individual releases.

@@ -126,6 +126,70 @@ class PythonTests(unittest.TestCase):
             ):
                 self.assertIn(phrase, output.getvalue())
 
+    def test_histogram_history_table(self):
+        history = [
+            {'operation_index': 10, 'histogram': sim.histogram([(0, 4 * KiB), (8 * KiB, 8 * KiB)])[0]},
+            {'operation_index': 20, 'histogram': sim.histogram([(0, 512), (4 * KiB, 4 * KiB)])[0]},
+            {'operation_index': 30, 'histogram': []},
+        ]
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            sim.print_histogram_history(history)
+        lines = output.getvalue().splitlines()[2:]
+        expected_rows = [
+            ['free ranges', '10', '20', '30'],
+            ['-----------', '--------', '----------', '------'],
+            ['(0,4]KiB', '1 (4KiB)', '2 (4.5KiB)', '0 (0B)'],
+            ['(4,8]KiB', '1 (8KiB)', '0 (0B)', '0 (0B)'],
+        ]
+        widths = [11, 8, 10, 6]
+        self.assertEqual(
+            lines,
+            [
+                '  '.join(f'{row[0]:<{widths[0]}}' if i == 0 else f'{cell:>{widths[i]}}' for i, cell in enumerate(row))
+                for row in expected_rows
+            ],
+        )
+        for size, expected in (
+            (1, '1B'),
+            (4096, '4KiB'),
+            (1536, '1.5KiB'),
+            (1 << 20, '1MiB'),
+            (1 << 30, '1GiB'),
+            (1 << 40, '1TiB'),
+            (1 << 64, '16EiB'),
+        ):
+            self.assertEqual(sim.compact_size(size), expected)
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            sim.print_histogram_history(
+                [{'operation_index': 100, 'histogram': sim.histogram([(0, 1 << 20), (1 << 20, 1 << 30)])[0]}]
+            )
+        self.assertIn('(0.5,1]MiB', output.getvalue())
+        self.assertIn('(0.5,1]GiB', output.getvalue())
+        self.assertIn('1 (1MiB)', output.getvalue())
+        self.assertIn('1 (1GiB)', output.getvalue())
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            sim.print_histogram_history([])
+        self.assertIn('No interval samples.', output.getvalue())
+
+    def test_histogram_operation_headers(self):
+        for count, expected in (
+            (0, '0'),
+            (999, '999'),
+            (1000, '1K'),
+            (1500, '1.5K'),
+            (1234, '1.234K'),
+            (1000000, '1M'),
+            (1000001, '1.000001M'),
+            (10**9, '1B'),
+            (10**12, '1T'),
+        ):
+            self.assertEqual(sim.compact_operations(count), expected)
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            sim.print_histogram_history(
+                [{'operation_index': count, 'histogram': []} for count in (1000, 1500, 1000000, 10**9, 10**12)]
+            )
+        self.assertEqual(output.getvalue().splitlines()[2].split(), ['free', 'ranges', '1K', '1.5K', '1M', '1B', '1T'])
+
     def test_progress_percentages_and_redirected_output(self):
         output = io.StringIO()
         progress = sim.Progress(output)
@@ -343,6 +407,84 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(allocator.blob_info(small)['reserved'], 16 * KiB)
         self.assertEqual(allocator.snapshot()['internal_bytes'], 12 * KiB)
 
+    def test_allocation_data_by_size(self):
+        measurement = sim.Measurement(self.native, 64 * KiB, False)
+        sequence = [sim.Alloc(index, 16 * KiB) for index in range(4)]
+        sequence.extend(
+            [sim.Free(0), sim.Free(2), sim.Alloc(4, 24 * KiB), sim.Alloc(5, 40 * KiB), sim.Alloc(6, 4097), sim.Free(6)]
+        )
+        for operation in sequence:
+            measurement.apply(operation)
+        for size, counts in measurement.per_size.items():
+            self.assertEqual(counts['requested_bytes'], size * counts['attempts'])
+            self.assertEqual(counts['successful_bytes'], size * counts['successes'])
+            self.assertEqual(
+                counts['failed_bytes'], size * (counts['capacity_failures'] + counts['fragmentation_failures'])
+            )
+            self.assertEqual(counts['requested_bytes'], counts['successful_bytes'] + counts['failed_bytes'])
+        self.assertEqual(measurement.per_size[16 * KiB]['successful_bytes'], 64 * KiB)
+        self.assertEqual(measurement.per_size[24 * KiB]['failed_bytes'], 24 * KiB)
+        self.assertEqual(measurement.per_size[40 * KiB]['failed_bytes'], 40 * KiB)
+        self.assertEqual(measurement.per_size[4097]['successful_bytes'], 4097)
+        self.assertEqual(measurement.per_size[4097]['failed_bytes'], 0)
+        report = {
+            'configuration': PythonTests().config(),
+            'modes': {
+                '4k-align': {
+                    'final': measurement.sample(len(sequence), 'final', True),
+                    'counters': dict(measurement.counts),
+                    'per_size': measurement.per_size,
+                    'samples': measurement.samples,
+                }
+            },
+        }
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            sim.print_report(report)
+        lines = output.getvalue().split('Allocation data by size', 1)[1].split('Free-range histogram:', 1)[0]
+        self.assertIn('All attempts', lines)
+        self.assertIn('Successful', lines)
+        self.assertIn('Failed', lines)
+        self.assertIn('4.00 KiB', lines)
+        self.assertIn('64.00 KiB', lines)
+        self.assertIn('0 B', lines)
+        self.assertNotIn(' bytes (', lines)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'report.json'
+            sim.write_reports(report, path, None)
+            saved = json.loads(path.read_text())['modes']['4k-align']['per_size']
+        self.assertEqual(saved['4097']['successful_bytes'], 4097)
+        self.assertEqual(saved[str(24 * KiB)]['failed_bytes'], 24 * KiB)
+
+    def test_generated_ids_without_history(self):
+        measurement = sim.Measurement(self.native, 16 * KiB, False, track_request_ids=False)
+        for request_id in range(1000):
+            measurement.apply(sim.Alloc(request_id, 4 * KiB))
+            measurement.apply(sim.Free(request_id))
+        self.assertIsNone(measurement.seen)
+        self.assertEqual(measurement.requests, {})
+        self.assertEqual(measurement.last_request_id, 999)
+        with self.assertRaisesRegex(ValueError, 'double free'):
+            measurement.apply(sim.Free(999))
+        for request_id in (999, 0):
+            with self.assertRaisesRegex(ValueError, 'increase strictly'):
+                measurement.apply(sim.Alloc(request_id, 4 * KiB))
+        measurement.apply(sim.Alloc(1000, 32 * KiB))
+        measurement.apply(sim.Free(1000))
+        with self.assertRaisesRegex(ValueError, 'increase strictly'):
+            measurement.apply(sim.Alloc(1000, 4 * KiB))
+        with patch.object(sim, 'Measurement', wraps=sim.Measurement) as create:
+            self.simulation()
+        self.assertFalse(create.call_args.kwargs['track_request_ids'])
+
+    def test_custom_trace_keeps_id_validation(self):
+        for size in (4 * KiB, 32 * KiB):
+            trace = [sim.Alloc(7, size), sim.Free(7), sim.Alloc(7, 4 * KiB)]
+            with self.assertRaisesRegex(RuntimeError, 'Operation 3: Duplicate allocation request ID'):
+                sim.run_workload(trace, 16 * KiB)
+        trace = [sim.Alloc(7, 4 * KiB), sim.Alloc(0, 4 * KiB)]
+        result = sim.run_workload(trace, 16 * KiB)['4k-align']
+        self.assertEqual(result['counters']['successes'], 2)
+
     def test_runner_and_abort(self):
         sequence = [sim.Alloc(0, 8192), sim.Alloc(1, 4096), sim.Free(0)]
         report = sim.run_workload(iter(sequence), 64 * KiB)
@@ -368,6 +510,51 @@ class NativeTests(unittest.TestCase):
         config.update(overrides)
         return sim.run_simulation(config, progress=progress)[config['mode']]
 
+    def test_histogram_history_sampling(self):
+        result = self.simulation(sample_every=1)
+        history = result['histogram_history']
+        self.assertEqual([sample['operation_index'] for sample in history], [4, 4])
+        self.assertEqual([sample['phase'] for sample in history], ['eviction-start', 'eviction-end'])
+        self.assertEqual(history[-1]['histogram'], result['final']['histogram'])
+        for sample in history:
+            state = next(
+                state
+                for state in result['samples']
+                if state['phase'] == sample['phase'] and state['allocation_index'] == sample['operation_index']
+            )
+            self.assertEqual(sum(bucket['bytes'] for bucket in sample['histogram']), state['free'])
+            self.assertEqual(sum(bucket['count'] for bucket in sample['histogram']), state['free_range_count'])
+            self.assertEqual(sample['occupancy_percent'], state['occupancy_percent'])
+        for interval in (3, 5):
+            self.assertEqual(
+                [sample['operation_index'] for sample in self.simulation(sample_every=interval)['histogram_history']],
+                [4, 4],
+            )
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            sim.print_report(
+                {
+                    'configuration': PythonTests().config(min_water_level=50, max_water_level=100),
+                    'modes': {'4k-align': result},
+                }
+            )
+        self.assertIn('Free-range histogram over time (at 100% occupancy):', output.getvalue())
+        self.assertIn('Free-range histogram over time (at 50% occupancy):', output.getvalue())
+        extended = self.simulation(steps=7, sample_every=5)
+        self.assertEqual(extended['counters']['attempts'], 8)
+        self.assertEqual([sample['operation_index'] for sample in extended['histogram_history']], [6, 6, 8, 8])
+        sparse = self.simulation(steps=7, sample_every=100)
+        self.assertEqual([sample['operation_index'] for sample in sparse['histogram_history']], [8, 8])
+        with self.assertRaisesRegex(RuntimeError, 'upper water level is unreachable'):
+            self.simulation(sizes=[32 * KiB], sample_every=2)
+        explicit = sim.run_workload([sim.Alloc(0, 4 * KiB), sim.Free(0)], 16 * KiB, sample_every=1)['4k-align']
+        self.assertEqual([sample['operation_index'] for sample in explicit['histogram_history']], [1, 2])
+        self.assertEqual(explicit['histogram_history'][-1]['histogram'], explicit['final']['histogram'])
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'report.json'
+            sim.write_reports({'modes': {'4k-align': result}}, path, None)
+            saved = json.loads(path.read_text())['modes']['4k-align']['histogram_history']
+        self.assertEqual(saved, history)
+
     def test_progress_after_eviction_and_failures(self):
         events = []
         original = sim.Measurement.apply
@@ -382,13 +569,13 @@ class NativeTests(unittest.TestCase):
         self.assertTrue(all(isinstance(event, sim.Free) for event in events[-3:-1]))
         self.assertEqual(events[-1], (4, 4))
         updates = []
-        result = self.simulation(
-            steps=3,
-            sizes=[32 * KiB],
-            progress=lambda completed, total: updates.append((completed, total)),
-        )
-        self.assertEqual(result['counters']['capacity_failures'], 3)
-        self.assertEqual(updates, [(index, 3) for index in range(4)])
+        with self.assertRaisesRegex(RuntimeError, 'upper water level is unreachable'):
+            self.simulation(
+                steps=3,
+                sizes=[32 * KiB],
+                progress=lambda completed, total: updates.append((completed, total)),
+            )
+        self.assertEqual(updates, [(index, 3) for index in range(3)])
 
     def record_simulation(self, **overrides):
         events = []
@@ -436,7 +623,8 @@ class NativeTests(unittest.TestCase):
                     self.assertEqual(result['final']['live_hot_blocks'], 2 if hot else 0)
                     self.assertEqual(result['final']['live_cold_blocks'], 0 if hot else 2)
         result = self.simulation(steps=5, min_water_level=0, eviction_policy='lru')
-        self.assertEqual(result['counters']['reads'], 12)
+        self.assertEqual(result['counters']['attempts'], 8)
+        self.assertEqual(result['counters']['reads'], 24)
         self.assertEqual(result['counters']['skipped_reads'], 8)
 
     def test_access_streams_and_random_eviction_compatibility(self):
@@ -496,31 +684,38 @@ class NativeTests(unittest.TestCase):
             sim.Alloc(0, 12 * KiB),
             sim.Alloc(1, 8 * KiB),
             sim.Alloc(2, 8 * KiB),
+            sim.Alloc(3, 4 * KiB),
         ]
         with patch.object(sim, 'operations', return_value=iter(sequence)):
             result = self.simulation(steps=3)
+        self.assertEqual(
+            [state['allocation_index'] for state in result['samples'] if state['phase'] == 'eviction-start'], [4]
+        )
         self.assertEqual(result['counters']['capacity_failures'], 2)
-        self.assertEqual(result['counters']['evictions'], 0)
-        self.assertEqual(result['counters']['attempts'], 3)
+        self.assertGreater(result['counters']['evictions'], 0)
+        self.assertEqual(result['counters']['attempts'], 4)
         self.assertEqual(result['counters']['skipped_releases'], 0)
-        self.assertEqual(result['counters']['reads'], 8)
-        self.assertEqual(result['counters']['hot_assignments'] + result['counters']['cold_assignments'], 1)
+        self.assertEqual(result['counters']['reads'], 12)
+        self.assertEqual(result['counters']['hot_assignments'] + result['counters']['cold_assignments'], 2)
 
     def test_eviction_reproducibility_and_padding(self):
         options = {'sizes': [4 * KiB, 8 * KiB], 'weights': [0.5, 0.5], 'steps': 100}
         self.assertEqual(self.simulation(**options), self.simulation(**options))
-        a = self.simulation(**options)
-        b = self.simulation(**options, min_water_level=0, mode='max-value-align')
-        self.assertEqual(a['counters']['attempts'], b['counters']['attempts'])
-        self.assertEqual(
-            {k: v['attempts'] for k, v in a['per_size'].items()},
-            {k: v['attempts'] for k, v in b['per_size'].items()},
-        )
-        sequence = [sim.Alloc(0, 8 * KiB), sim.Alloc(1, 1)]
+        a, events_a = self.record_simulation(**options)
+        b, events_b = self.record_simulation(**options, min_water_level=0, mode='max-value-align')
+        self.assertGreaterEqual(a['counters']['attempts'], options['steps'])
+        self.assertGreaterEqual(b['counters']['attempts'], options['steps'])
+        alloc_a = [op for op in events_a if isinstance(op, sim.Alloc)]
+        alloc_b = [op for op in events_b if isinstance(op, sim.Alloc)]
+        prefix = min(len(alloc_a), len(alloc_b))
+        self.assertEqual(alloc_a[:prefix], alloc_b[:prefix])
+        sequence = [sim.Alloc(0, 8 * KiB), sim.Alloc(1, 1), sim.Alloc(2, 4 * KiB)]
         with patch.object(sim, 'operations', side_effect=lambda _: iter(sequence)):
             normal = self.simulation(steps=2)
             padded = self.simulation(steps=2, mode='max-value-align')
-        self.assertEqual(normal['counters']['evictions'], 0)
+        self.assertEqual(normal['counters']['attempts'], 3)
+        self.assertEqual(padded['counters']['attempts'], 2)
+        self.assertEqual(normal['counters']['eviction_cycles'], 1)
         self.assertEqual(padded['counters']['eviction_cycles'], 1)
 
     def test_simulation_abort_and_reports(self):
