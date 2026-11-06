@@ -86,6 +86,14 @@ Select uniformly from successful live allocations for random eviction.
 Select the least recently used block for LRU eviction. Allocation and reads count as use.
 Do not select failed requests.
 Count steps as allocation attempts. Eviction does not consume steps.
+Treat --steps as a minimum. Stop after the first eviction at or after that count.
+Collect the final histograms before and after that eviction.
+At each --sample-every multiple, schedule a histogram pair at the next eviction.
+Combine pending intervals into one pair. Label columns with the actual allocation count.
+Print separate history tables for the upper and lower occupancy watermarks.
+Retain actual occupancy and the eviction phase in JSON histogram records.
+Abort if no configured request can fit before the final eviction.
+Keep interval sampling in the explicit Alloc/Free API.
 Show CLI progress automatically. Do not add progress options or explanations to user documentation.
 Print 100% only after the final sample succeeds.
 Do not retry failures or trigger eviction because of a failure.
