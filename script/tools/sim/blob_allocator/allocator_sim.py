@@ -19,6 +19,7 @@ import tempfile
 from collections import Counter, OrderedDict
 from dataclasses import dataclass
 from decimal import Decimal
+from itertools import count
 from pathlib import Path
 
 TOOL = Path(__file__).resolve().parent
@@ -96,7 +97,7 @@ class Free:
 
 def operations(config):
     rng = random.Random(config['seed'])
-    for index in range(config['steps']):
+    for index in count() if config['steps'] is None else range(config['steps']):
         yield Alloc(
             index,
             rng.choices(config['sizes'], weights=config['weights'], k=1)[0],
@@ -182,10 +183,11 @@ def percentage(numerator, denominator):
 
 
 class Measurement:
-    def __init__(self, native, capacity, enabled):
+    def __init__(self, native, capacity, enabled, *, track_request_ids=True):
         self.allocator = native.Allocator(capacity, enabled)
         self.requests = {}
-        self.seen = set()
+        self.seen = set() if track_request_ids else None
+        self.last_request_id = -1
         self.counts = Counter(
             {
                 key: 0
@@ -202,9 +204,10 @@ class Measurement:
         self.per_size = {}
         self.requested = self.alignment_waste = self.max_padding = 0
         self.samples = []
+        self.histogram_history = []
         self.reserved = 0
 
-    def sample(self, index, phase='', detailed=False):
+    def sample(self, index, phase='', detailed=False, history_index=None):
         state = self.allocator.snapshot(detailed)
         state['free'] = state['capacity'] - state['reserved']
         state['requested'] = self.requested
@@ -253,6 +256,8 @@ class Measurement:
             }
         )
         self.samples.append(scalar)
+        if history_index is not None:
+            self.histogram_history.append({'operation_index': history_index, 'histogram': state['histogram']})
         return state
 
     def apply(self, operation):
@@ -260,14 +265,19 @@ class Measurement:
         if not isinstance(request_id, int) or request_id < 0:
             raise ValueError('Request IDs must be nonnegative integers.')
         if isinstance(operation, Alloc):
-            if request_id in self.seen:
+            if self.seen is not None and request_id in self.seen:
                 raise ValueError('Duplicate allocation request ID.')
+            if self.seen is None and request_id <= self.last_request_id:
+                raise ValueError('Generated allocation request IDs must increase strictly.')
             if not isinstance(operation.size, int) or not 0 < operation.size <= MAX_SIZE:
                 raise ValueError('Allocation size is invalid or alignment would overflow.')
-            self.seen.add(request_id)
+            if self.seen is not None:
+                self.seen.add(request_id)
+            self.last_request_id = request_id
             size = operation.size
-            counts = self.per_size.setdefault(size, Counter())
+            counts = self.per_size.setdefault(size, Counter(requested_bytes=0, successful_bytes=0, failed_bytes=0))
             counts['attempts'] += 1
+            counts['requested_bytes'] += size
             self.counts['attempts'] += 1
             required = self.allocator.required_size(size)
             handle = self.allocator.alloc(size)
@@ -282,6 +292,7 @@ class Measurement:
                     raise RuntimeError('Allocation failure contradicts free-space metrics.')
                 self.counts[category] += 1
                 counts[category] += 1
+                counts['failed_bytes'] += size
                 self.requests[request_id] = None
             else:
                 info = self.allocator.blob_info(handle)
@@ -295,6 +306,7 @@ class Measurement:
                 self.max_padding += info['reserved'] - aligned
                 self.counts['successes'] += 1
                 counts['successes'] += 1
+                counts['successful_bytes'] += size
         elif isinstance(operation, Free):
             if request_id not in self.requests:
                 raise ValueError('Unknown request or double free.')
@@ -338,7 +350,7 @@ def run_workload(sequence, capacity, mode='4k-align', sample_every=1000):
             for measurement in measurements.values():
                 measurement.apply(operation)
                 if index % sample_every == 0:
-                    measurement.sample(index, phase, True)
+                    measurement.sample(index, phase, True, history_index=index)
             previous_phase = phase
         return {
             mode: {
@@ -346,6 +358,7 @@ def run_workload(sequence, capacity, mode='4k-align', sample_every=1000):
                 'counters': dict(measurement.counts),
                 'per_size': measurement.per_size,
                 'samples': measurement.samples,
+                'histogram_history': measurement.histogram_history,
             }
             for mode, measurement in measurements.items()
         }
@@ -471,16 +484,19 @@ def run_simulation(config, progress=None):
     mode = config['mode']
     if mode not in ('4k-align', 'max-value-align'):
         raise ValueError('Unknown mode. Use 4k-align or max-value-align.')
-    measurement = Measurement(build_native(), capacity, mode == 'max-value-align')
+    measurement = Measurement(build_native(), capacity, mode == 'max-value-align', track_request_ids=False)
     measurement.counts.update({key: 0 for key in SIMULATION_COUNTERS})
     rng = random.Random(config['seed'])
     group_rng = random.Random(f'{config["seed"]}:hot-groups')
     read_rng = random.Random(f'{config["seed"]}:reads')
     live = LiveBlocks()
     index = allocation_index = read_index = 0
+    next_sample = config['sample_every']
 
-    def sample(phase):
-        state = measurement.sample(index, phase, True)
+    def sample(phase, record_histogram=False):
+        state = measurement.sample(index, phase, True, history_index=allocation_index if record_histogram else None)
+        if record_histogram:
+            measurement.histogram_history[-1].update(phase=phase, occupancy_percent=state['occupancy_percent'])
         state['allocation_index'] = allocation_index
         state['eviction_policy'] = policy
         state.update(live.snapshot(measurement.requests))
@@ -502,7 +518,7 @@ def run_simulation(config, progress=None):
     if progress is not None:
         progress(0, config['steps'])
     try:
-        for operation in operations(config):
+        for operation in operations({**config, 'steps': None}):
             allocation_index += 1
             for read_index in range(1, reads + 1):
                 target = live.read_target(read_rng, config['hot_read_percent'])
@@ -520,11 +536,19 @@ def run_simulation(config, progress=None):
             measurement.apply(operation)
             if measurement.requests[operation.request_id] is None:
                 del measurement.requests[operation.request_id]
+                if allocation_index >= config['steps']:
+                    largest = measurement.allocator.snapshot(False)['largest_free']
+                    if not any(
+                        weight > 0 and measurement.allocator.required_size(size) <= largest
+                        for size, weight in zip(config['sizes'], config['weights'], strict=True)
+                    ):
+                        raise RuntimeError('The upper water level is unreachable. No configured request can fit.')
             else:
                 live.add(operation.request_id, hot)
                 measurement.counts['hot_assignments' if hot else 'cold_assignments'] += 1
                 if PERCENT * measurement.reserved >= high * capacity:
-                    sample('eviction-start')
+                    record_histogram = allocation_index >= next_sample or allocation_index >= config['steps']
+                    sample('eviction-start', record_histogram)
                     while PERCENT * measurement.reserved > low * capacity:
                         request_id = live.victim(policy, rng)
                         reserved = measurement.requests[request_id][1]['reserved']
@@ -534,20 +558,25 @@ def run_simulation(config, progress=None):
                         measurement.counts['evictions'] += 1
                         measurement.counts['evicted_reserved_bytes'] += reserved
                     measurement.counts['eviction_cycles'] += 1
-                    sample('eviction-end')
-            if allocation_index % config['sample_every'] == 0:
-                sample('periodic')
+                    sample('eviction-end', record_histogram)
+                    if record_histogram:
+                        next_sample = (allocation_index // config['sample_every'] + 1) * config['sample_every']
+                    if allocation_index >= config['steps']:
+                        break
             if progress is not None and allocation_index < config['steps']:
                 progress(allocation_index, config['steps'])
+        else:
+            raise RuntimeError('The allocation stream ended before the final eviction.')
         final = sample('final')
         if progress is not None:
-            progress(allocation_index, config['steps'])
+            progress(config['steps'], config['steps'])
         return {
             mode: {
                 'final': final,
                 'counters': dict(measurement.counts),
                 'per_size': measurement.per_size,
                 'samples': measurement.samples,
+                'histogram_history': measurement.histogram_history,
             }
         }
     except Exception as error:
@@ -572,7 +601,7 @@ def parser():
         '--steps',
         type=int,
         default=100000,
-        help='Allocation attempts. Default: 100000.',
+        help='Minimum allocation attempts. Finish at the next eviction, including both samples. Default: 100000.',
     )
     result.add_argument(
         '--min-water-level',
@@ -626,7 +655,7 @@ def parser():
         '--sample-every',
         type=int,
         default=1000,
-        help='Sample interval in allocation attempts. Default: 1000.',
+        help='At each interval multiple, sample before and after the next eviction. Default: 1000 allocation attempts.',
     )
     result.add_argument(
         '--json-report-path',
@@ -665,6 +694,49 @@ def print_table(headers, rows):
                 for index, (cell, width) in enumerate(zip(row, widths, strict=True))
             )
         )
+
+
+def compact_size(size):
+    value, unit = human_size(size).split()
+    if '.' in value:
+        value = value.rstrip('0').rstrip('.')
+    return f'{value}{unit}'
+
+
+def compact_operations(count):
+    for exponent, suffix in enumerate(('', 'K', 'M', 'B', 'T')):
+        scale = 1000**exponent
+        if count < scale * 1000 or suffix == 'T':
+            whole, fraction = divmod(count, scale)
+            value = str(whole)
+            if fraction:
+                value += '.' + f'{fraction:0{3 * exponent}d}'.rstrip('0')
+            return f'{value}{suffix}'
+    raise AssertionError('Unreachable operation suffix.')
+
+
+def print_histogram_history(history, occupancy=None):
+    suffix = '' if occupancy is None else f' (at {occupancy}% occupancy)'
+    print(f'\nFree-range histogram over time{suffix}:')
+    if not history:
+        print('No interval samples.')
+        return
+    columns = [{bucket['upper']: bucket for bucket in sample['histogram']} for sample in history]
+    largest = max((upper for column in columns for upper in column), default=0)
+    rows = []
+    upper = ALIGNMENT
+    while upper <= largest:
+        upper_text = compact_size(upper)
+        unit = upper_text.lstrip('0123456789.')
+        upper_value = upper_text.removesuffix(unit)
+        lower_value = 0 if upper == ALIGNMENT else float(upper_value) / 2
+        row = [f'({lower_value:g},{upper_value}]{unit}']
+        for column in columns:
+            bucket = column.get(upper, {'count': 0, 'bytes': 0})
+            row.append(f'{bucket["count"]} ({compact_size(bucket["bytes"])})')
+        rows.append(row)
+        upper *= 2
+    print_table(['free ranges', *(compact_operations(sample['operation_index']) for sample in history)], rows)
 
 
 def print_report(report):
@@ -747,6 +819,17 @@ def print_report(report):
                 for size, counts in sorted(outcome['per_size'].items(), key=lambda item: int(item[0]))
             ],
         )
+        print('\nAllocation data by size (cumulative requested bytes, excludes padding):')
+        print_table(
+            ['Requested size', 'All attempts', 'Successful', 'Failed'],
+            [
+                [
+                    human_size(int(size)),
+                    *(human_size(counts[key]) for key in ('requested_bytes', 'successful_bytes', 'failed_bytes')),
+                ]
+                for size, counts in sorted(outcome['per_size'].items(), key=lambda item: int(item[0]))
+            ],
+        )
         print('\nFree-range histogram:')
         print_table(
             [
@@ -763,6 +846,14 @@ def print_report(report):
                 for bucket in state['histogram']
             ],
         )
+        history = outcome.get('histogram_history', [])
+        if 'eviction_policy' in state:
+            for phase, level in (('eviction-start', 'max_water_level'), ('eviction-end', 'min_water_level')):
+                print_histogram_history(
+                    [sample for sample in history if sample['phase'] == phase], report['configuration'][level]
+                )
+        else:
+            print_histogram_history(history)
 
 
 def write_reports(report, json_path, csv_path):
