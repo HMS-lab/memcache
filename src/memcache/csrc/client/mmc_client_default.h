@@ -106,6 +106,10 @@ public:
     Result BatchMalloc(const std::vector<std::string> &keys, const std::vector<size_t> &sizes,
                        const mmc_put_options &options, uint64_t leaseTtlMs, std::vector<uintptr_t> &gvas);
 
+    Result BatchMallocWithParents(const std::vector<std::string> &keys, const std::vector<std::string> &parentKeys,
+                                  const std::vector<size_t> &sizes, const mmc_put_options &options,
+                                  uint64_t leaseTtlMs, std::vector<uintptr_t> &gvas);
+
     Result BatchCopy(std::vector<void *> &gvas, std::vector<void *> &buffers, std::vector<size_t> &sizes,
                      const int32_t direct, uint32_t flag);
 

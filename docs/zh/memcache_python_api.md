@@ -942,6 +942,18 @@ Apply for global memory for multiple keys in batches and return the starting GVA
 - When allocation fails or the parameters are invalid, the corresponding element is `0`.
 - The caller must filter out both sentinel values before converting to a NumPy integer array, copying data, or sending write-completion notifications.
 
+#### batch_alloc_with_parents
+
+```python
+gvas = store.batch_alloc_with_parents(keys, parent_keys, sizes, media=1, leaseTtlMs=0)
+```
+
+Allocates GVA blobs and records the logical parent of each key. `parent_keys` must be the same length as `keys`.
+Use `""` for a root node. A non-empty parent key must already be readable. Nodes with children are protected from
+deletion and eviction; physical replicas in HBM/DRAM/SSD are unaffected by this logical relation. The parent must be
+created in an earlier request. Parent relations are runtime MetaService metadata and are not restored after a
+MetaService restart.
+
 #### batch_copy
 
 ```python

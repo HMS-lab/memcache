@@ -375,7 +375,16 @@ public:
      * @return GVA start addresses; 0 for allocation failures, UINT64_MAX for readable SSD-only hits
      */
     virtual std::vector<uintptr_t> BatchMalloc(const std::vector<std::string> &keys, const std::vector<size_t> &sizes,
-                                               uint16_t media, uint64_t leaseTtlMs = 0) = 0;
+                                                uint16_t media, uint64_t leaseTtlMs = 0) = 0;
+
+    /**
+     * @brief Allocate GVA blobs and associate each key with an optional parent key.
+     * @param parentKeys Parent key for each key; an empty parent key denotes a root node.
+     */
+    virtual std::vector<uintptr_t> BatchMallocWithParents(const std::vector<std::string> &keys,
+                                                           const std::vector<std::string> &parentKeys,
+                                                           const std::vector<size_t> &sizes, uint16_t media,
+                                                           uint64_t leaseTtlMs = 0) = 0;
 
     /**
      * @brief Copy data between GVA addresses and local buffers

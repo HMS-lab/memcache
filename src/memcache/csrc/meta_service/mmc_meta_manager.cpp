@@ -1126,6 +1126,9 @@ bool MmcMetaManager::ForceReleaseKey(const std::string &key, MediaType media, co
 {
     // 与 EvictCallBackFunction 同构但同步执行：双写已保证数据在目标层有副本，
     // 直接同步删除源层 blob 无需 move-down；有活跃租约时跳过（LRU 不动）。
+    if (HasChildren(key)) {
+        return false;
+    }
     MmcMemObjMetaPtr objMeta;
     if (metaContainer_->Get(key, objMeta) != MMC_OK || objMeta == nullptr) {
         return false;
@@ -1174,10 +1177,12 @@ bool MmcMetaManager::ForceReleaseKey(const std::string &key, MediaType media, co
     }
     // 重新判空（锁序：容器锁 → objMeta 锁，与 EvictDefragTargets 一致）
     if (shouldErase) {
-        metaContainer_->EraseIfEmpty(key, [](const MmcMemObjMetaPtr &meta) {
+        if (metaContainer_->EraseIfEmpty(key, [](const MmcMemObjMetaPtr &meta) {
             std::unique_lock<std::mutex> guard(meta->Mutex());
             return meta->NumBlobs() == 0;
-        });
+        }) == MMC_OK) {
+            RemoveParentRelation(key);
+        }
     } else if (!hasSameMediaBlob) {
         metaContainer_->InsertLru(key, MEDIA_NONE);
     }
@@ -1510,6 +1515,87 @@ Result MmcMetaManager::Alloc(const std::string &key, const AllocOptions &allocOp
     return ret;
 }
 
+Result MmcMetaManager::AllocWithParent(const std::string &key, const std::string &parentKey,
+                                       const AllocOptions &allocOpt, uint64_t operateId, uint64_t leaseTtlMs,
+                                       MmcMemMetaDesc &objMeta)
+{
+    if (parentKey.empty()) {
+        return Alloc(key, allocOpt, operateId, leaseTtlMs, objMeta);
+    }
+    if (key == parentKey) {
+        return MMC_INVALID_PARAM;
+    }
+
+    MmcMemObjMetaPtr existing;
+    if (metaContainer_->Get(key, existing) == MMC_OK && existing != nullptr) {
+        return MMC_DUPLICATED_OBJECT;
+    }
+
+    Result ret = Alloc(key, allocOpt, operateId, leaseTtlMs, objMeta);
+    if (ret != MMC_OK) {
+        return ret;
+    }
+    ret = RegisterParent(key, parentKey);
+    if (ret == MMC_OK) {
+        return MMC_OK;
+    }
+
+    // A child without a valid parent must not remain visible in the cache.
+    MMC_LOG_WARN("Parent registration failed, rolling back child key=" << key << ", parent=" << parentKey);
+    Remove(key);
+    return ret;
+}
+
+Result MmcMetaManager::RegisterParent(const std::string &key, const std::string &parentKey)
+{
+    MmcMemObjMetaPtr parent;
+    if (metaContainer_->Get(parentKey, parent) != MMC_OK || parent == nullptr) {
+        return MMC_PARENT_NOT_FOUND;
+    }
+    std::unique_lock<std::mutex> parentGuard(parent->Mutex());
+    const auto parentBlobs = parent->GetBlobs();
+    const bool parentReadable = std::any_of(parentBlobs.begin(), parentBlobs.end(), [](const MmcMemBlobPtr &blob) {
+        return blob != nullptr && blob->State() == READABLE;
+    });
+    parentGuard.unlock();
+    if (!parentReadable) {
+        return MMC_PARENT_NOT_FOUND;
+    }
+
+    std::lock_guard<std::mutex> guard(parentGraphMutex_);
+    const auto [iter, inserted] = parentByChild_.emplace(key, parentKey);
+    if (!inserted) {
+        return iter->second == parentKey ? MMC_OK : MMC_DUPLICATED_OBJECT;
+    }
+    ++childrenCountByParent_[parentKey];
+    return MMC_OK;
+}
+
+void MmcMetaManager::RemoveParentRelation(const std::string &key)
+{
+    std::lock_guard<std::mutex> guard(parentGraphMutex_);
+    const auto relation = parentByChild_.find(key);
+    if (relation == parentByChild_.end()) {
+        return;
+    }
+    const auto count = childrenCountByParent_.find(relation->second);
+    if (count != childrenCountByParent_.end()) {
+        if (count->second <= 1U) {
+            childrenCountByParent_.erase(count);
+        } else {
+            --count->second;
+        }
+    }
+    parentByChild_.erase(relation);
+}
+
+bool MmcMetaManager::HasChildren(const std::string &key) const
+{
+    std::lock_guard<std::mutex> guard(parentGraphMutex_);
+    const auto count = childrenCountByParent_.find(key);
+    return count != childrenCountByParent_.end() && count->second != 0;
+}
+
 Result MmcMetaManager::UpdateState(const std::string &key, const MmcLocation &loc, const BlobActionResult &actRet,
                                    uint64_t operateId)
 {
@@ -1662,6 +1748,10 @@ Result MmcMetaManager::BlobDeleteRpc(const std::string &key, const MmcMemBlobDes
 
 Result MmcMetaManager::RemoveSsdBlob(const std::string &key, uint32_t rank)
 {
+    if (HasChildren(key)) {
+        MMC_LOG_DEBUG("RemoveSsdBlob skip non-leaf key=" << key);
+        return MMC_PARENT_HAS_CHILDREN;
+    }
     MmcMemObjMetaPtr objMeta;
     if (metaContainer_->Get(key, objMeta) != MMC_OK || objMeta == nullptr) {
         MMC_LOG_DEBUG("RemoveSsdBlob: key=" << key << " not found");
@@ -1683,7 +1773,9 @@ Result MmcMetaManager::RemoveSsdBlob(const std::string &key, uint32_t rank)
     MMC_LOG_DEBUG("RemoveSsdBlob: key=" << key << ", rank=" << rank);
     if (objMeta->NumBlobs() == 0) {
         guard.unlock();
-        metaContainer_->Erase(key);
+        if (metaContainer_->Erase(key) == MMC_OK) {
+            RemoveParentRelation(key);
+        }
         MMC_LOG_DEBUG("RemoveSsdBlob: key=" << key << " fully removed (no remaining blobs)");
     }
     return MMC_OK;
@@ -1764,12 +1856,17 @@ Result MmcMetaManager::AddSsdBlob(const std::string &key, const MmcMemBlobDesc &
 
 Result MmcMetaManager::Remove(const std::string &key)
 {
+    if (HasChildren(key)) {
+        MMC_LOG_DEBUG("Remove skip non-leaf key=" << key);
+        return MMC_PARENT_HAS_CHILDREN;
+    }
     MmcMemObjMetaPtr objMeta;
     auto ret = metaContainer_->Erase(key, objMeta);
     if (ret != MMC_OK || objMeta == nullptr) {
         MMC_LOG_DEBUG("Erase returned null objMeta for key: " << key);
         return ret;
     }
+    RemoveParentRelation(key);
     std::unique_lock<std::mutex> guard(objMeta->Mutex());
     PushRemoveList(key, objMeta, nullptr, true);
     return MMC_OK;
@@ -1787,6 +1884,12 @@ Result MmcMetaManager::RemoveAll()
     };
 
     MMC_RETURN_ERROR(metaContainer_->EraseAll(removeFunc), "RemoveAll: Fail to erase all from container!");
+
+    {
+        std::lock_guard<std::mutex> guard(parentGraphMutex_);
+        parentByChild_.clear();
+        childrenCountByParent_.clear();
+    }
 
     MMC_LOG_INFO("Removed all keys");
     return MMC_OK;
@@ -2543,10 +2646,14 @@ bool HasRemainingBlobsAfterEvict(const MmcMemObjMetaPtr &objMeta, const MmcBlobF
 } // namespace
 
 EvictResult MmcMetaManager::EvictRemoveSrc(const std::string &key, const MmcMemObjMetaPtr &objMeta,
-                                           const MmcBlobFilterPtr &srcFilter, MediaType dstMedium)
+                                            const MmcBlobFilterPtr &srcFilter, MediaType dstMedium)
 {
     PushRemoveList(key, objMeta, srcFilter, false);
-    return HasRemainingBlobsAfterEvict(objMeta, srcFilter, dstMedium) ? EvictResult::MOVE_DOWN : EvictResult::REMOVE;
+    if (HasRemainingBlobsAfterEvict(objMeta, srcFilter, dstMedium)) {
+        return EvictResult::MOVE_DOWN;
+    }
+    RemoveParentRelation(key);
+    return EvictResult::REMOVE;
 }
 
 EvictResult MmcMetaManager::EvictRemoveSrc(const std::string &key, const MmcMemObjMetaPtr &objMeta,
@@ -2589,6 +2696,10 @@ EvictResult MmcMetaManager::EvictCallBackFunction(const std::string &key, const 
 {
     if (objMeta == nullptr) {
         MMC_LOG_ERROR("objMeta is null");
+        return EvictResult::FAIL;
+    }
+    if (HasChildren(key)) {
+        MMC_LOG_DEBUG("Evict skip non-leaf key=" << key);
         return EvictResult::FAIL;
     }
 

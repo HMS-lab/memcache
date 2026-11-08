@@ -1394,6 +1394,58 @@ Result MmcClientDefault::BatchMalloc(const std::vector<std::string> &keys, const
     return MMC_OK;
 }
 
+Result MmcClientDefault::BatchMallocWithParents(const std::vector<std::string> &keys,
+                                                const std::vector<std::string> &parentKeys,
+                                                const std::vector<size_t> &sizes, const mmc_put_options &options,
+                                                uint64_t leaseTtlMs, std::vector<uintptr_t> &gvas)
+{
+    gvas.assign(keys.size(), 0);
+    MMC_VALIDATE_RETURN(bmProxy_ != nullptr, "BmProxy is null", MMC_CLIENT_NOT_INIT);
+    MMC_VALIDATE_RETURN(metaNetClient_ != nullptr, "MetaNetClient is null", MMC_CLIENT_NOT_INIT);
+    if (keys.empty() || keys.size() != parentKeys.size() || keys.size() != sizes.size()) {
+        MMC_LOG_ERROR("batch malloc with parents input mismatch: keys=" << keys.size()
+                                                                          << ", parents=" << parentKeys.size()
+                                                                          << ", sizes=" << sizes.size());
+        return MMC_INVALID_PARAM;
+    }
+
+    const uint32_t flags = ALLOC_RANDOM | ALLOC_FLAGS_GVA_MALLOC_MASK;
+    const uint64_t operateId = GenerateOperateId(rankId_);
+    std::vector<AllocOptions> allocOptions;
+    allocOptions.reserve(sizes.size());
+    for (const auto &size : sizes) {
+        AllocOptions allocOpt{};
+        MMC_VALIDATE_RETURN(PrepareAllocOpt(size, options, flags, allocOpt) == MMC_OK, "option param error", MMC_ERROR);
+        allocOptions.emplace_back(std::move(allocOpt));
+    }
+    BatchAllocWithParentsRequest request(keys, parentKeys, allocOptions, flags, operateId, leaseTtlMs);
+    BatchAllocResponse allocResponse{};
+    auto allocRpcRet = metaNetClient_->SyncCall(request, allocResponse, rpcRetryTimeOut_);
+    MMC_RETURN_ERROR(allocRpcRet, "batch malloc with parents alloc failed");
+    if (keys.size() != allocResponse.blobs_.size() || keys.size() != allocResponse.numBlobs_.size() ||
+        keys.size() != allocResponse.results_.size()) {
+        MMC_LOG_ERROR("batch malloc with parents response size mismatch");
+        return MMC_ERROR;
+    }
+
+    Result result = MMC_OK;
+    for (size_t i = 0; i < keys.size(); ++i) {
+        if (allocResponse.results_[i] != MMC_OK) {
+            result = allocResponse.results_[i];
+            continue;
+        }
+        if (allocResponse.numBlobs_[i] == 0 || allocResponse.blobs_[i].size() != allocResponse.numBlobs_[i]) {
+            result = MMC_ERROR;
+            continue;
+        }
+        const Result trackRet = RegisterBatchAllocBlobs(keys[i], allocResponse.blobs_[i], operateId, gvas[i]);
+        if (trackRet != MMC_OK && result == MMC_OK) {
+            result = trackRet;
+        }
+    }
+    return result;
+}
+
 Result MmcClientDefault::RegisterBatchAllocBlobs(const std::string &key, const std::vector<MmcMemBlobDesc> &blobs,
                                                  uint64_t operateId, uintptr_t &gva)
 {

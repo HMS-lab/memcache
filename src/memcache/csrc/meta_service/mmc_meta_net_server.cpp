@@ -83,7 +83,10 @@ Result ock::mmc::MetaNetServer::Start(NetEngineOptions &options)
     server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::ML_BATCH_UPDATE_LEASE_REQ,
                                       std::bind(&MetaNetServer::HandleBatchUpdateLease, this, std::placeholders::_1));
     server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::ML_BATCH_ALLOC_REQ,
-                                      std::bind(&MetaNetServer::HandleBatchAlloc, this, std::placeholders::_1));
+                                       std::bind(&MetaNetServer::HandleBatchAlloc, this, std::placeholders::_1));
+    server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::ML_BATCH_ALLOC_WITH_PARENTS_REQ,
+                                       std::bind(&MetaNetServer::HandleBatchAllocWithParents, this,
+                                                 std::placeholders::_1));
     server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::LM_PING_REQ, nullptr);
     server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::LM_META_REPLICATE_REQ, nullptr);
     server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::LM_BLOB_COPY_REQ, nullptr);
@@ -241,6 +244,24 @@ Result MetaNetServer::HandleBatchAlloc(const NetContextPtr &context)
     TP_TRACE_END(TP_MMC_META_BATCH_PUT, batchResult);
     if (batchResult != MMC_OK) {
         MMC_LOG_ERROR("BatchAlloc failed. Keys count: " << req.keys_.size() << ", Error: " << batchResult);
+    }
+    return context->Reply(req.msgId, resp);
+}
+
+Result MetaNetServer::HandleBatchAllocWithParents(const NetContextPtr &context)
+{
+    BatchAllocWithParentsRequest req;
+    BatchAllocResponse resp;
+    Result getResult = context->GetRequest<BatchAllocWithParentsRequest>(req);
+    if (getResult != MMC_OK) {
+        MMC_LOG_ERROR("Failed to get BatchAllocWithParentsRequest: " << getResult);
+        return getResult;
+    }
+
+    auto &metaMgrProxy = metaService_->GetMetaMgrProxy();
+    Result batchResult = metaMgrProxy->BatchAllocWithParents(req, resp);
+    if (batchResult != MMC_OK) {
+        MMC_LOG_ERROR("BatchAllocWithParents failed, keys=" << req.keys_.size() << ", ret=" << batchResult);
     }
     return context->Reply(req.msgId, resp);
 }

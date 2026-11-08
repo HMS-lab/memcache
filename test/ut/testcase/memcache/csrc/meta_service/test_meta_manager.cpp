@@ -474,6 +474,51 @@ TEST_F(TestMmcMetaManager, AllocAndFree)
     metaMng->Stop();
 }
 
+TEST_F(TestMmcMetaManager, ParentRelationProtectsNonLeafAndTracksLeafCount)
+{
+    constexpr uint64_t defaultTtl = 2000;
+    constexpr uint32_t operateId = 1;
+    MmcLocation loc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo locInfo{0, 1000000};
+    auto metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 60U);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    ASSERT_EQ(metaMng->Mount(loc, locInfo, blobMap), MMC_OK);
+
+    const AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+    MmcMemMetaDesc rootMeta;
+    ASSERT_EQ(metaMng->Alloc("root", allocReq, operateId, 0, rootMeta), MMC_OK);
+    ASSERT_EQ(metaMng->UpdateState("root", loc, MMC_WRITE_OK, operateId), MMC_OK);
+
+    MmcMemMetaDesc childMeta;
+    ASSERT_EQ(metaMng->AllocWithParent("child", "root", allocReq, operateId, 0, childMeta), MMC_OK);
+    EXPECT_EQ(metaMng->Remove("root"), MMC_PARENT_HAS_CHILDREN);
+    MmcMemObjMetaPtr root;
+    ASSERT_EQ(MetaContainer(metaMng)->Get("root", root), MMC_OK);
+    EXPECT_EQ(EvictObject(metaMng, "root", root, MEDIA_DRAM), EvictResult::FAIL);
+
+    ASSERT_EQ(metaMng->Remove("child"), MMC_OK);
+    EXPECT_EQ(metaMng->Remove("root"), MMC_OK);
+    metaMng->Stop();
+}
+
+TEST_F(TestMmcMetaManager, AllocWithParentRequiresReadableParent)
+{
+    constexpr uint64_t defaultTtl = 2000;
+    constexpr uint32_t operateId = 1;
+    MmcLocation loc{0, MEDIA_DRAM};
+    MmcLocalMemlInitInfo locInfo{0, 1000000};
+    auto metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, 70U, 60U);
+    ASSERT_EQ(metaMng->Start(), MMC_OK);
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    ASSERT_EQ(metaMng->Mount(loc, locInfo, blobMap), MMC_OK);
+
+    const AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
+    MmcMemMetaDesc childMeta;
+    EXPECT_EQ(metaMng->AllocWithParent("child", "missing", allocReq, operateId, 0, childMeta), MMC_PARENT_NOT_FOUND);
+    metaMng->Stop();
+}
+
 TEST_F(TestMmcMetaManager, AllocUsesPerRequestLeaseTtl)
 {
     MmcLocation loc{0, MEDIA_DRAM};

@@ -281,6 +281,72 @@ struct BatchAllocRequest : MsgBase {
     }
 };
 
+/**
+ * Batch allocation request carrying the logical parent of every key. It uses a
+ * distinct opcode rather than extending BatchAllocRequest so mixed-version
+ * deployments continue to decode the existing request format correctly.
+ */
+struct BatchAllocWithParentsRequest : MsgBase {
+    std::vector<std::string> keys_;
+    std::vector<std::string> parentKeys_;
+    std::vector<AllocOptions> options_;
+    uint32_t flags_;
+    uint64_t operateId_;
+    uint64_t leaseTtlMs_{0};
+
+    BatchAllocWithParentsRequest()
+        : MsgBase{0, ML_BATCH_ALLOC_WITH_PARENTS_REQ, 0}, flags_{0}, operateId_(0), leaseTtlMs_(0)
+    {}
+
+    BatchAllocWithParentsRequest(const std::vector<std::string> &keys, const std::vector<std::string> &parentKeys,
+                                 const std::vector<AllocOptions> &options, uint32_t flags, uint64_t operateId,
+                                 uint64_t leaseTtlMs = 0)
+        : MsgBase{0, ML_BATCH_ALLOC_WITH_PARENTS_REQ, 0}, keys_(keys), parentKeys_(parentKeys), options_(options),
+          flags_(flags), operateId_(operateId), leaseTtlMs_(leaseTtlMs)
+    {}
+
+    Result Serialize(NetMsgPacker &packer) const override
+    {
+        packer.Serialize(msgVer);
+        packer.Serialize(msgId);
+        packer.Serialize(destRankId);
+        packer.Serialize(keys_);
+        packer.Serialize(parentKeys_);
+        MMC_ASSERT_LOG_AND_RETURN(keys_.size() == parentKeys_.size() && keys_.size() == options_.size(),
+                                  "keys=" << keys_.size() << ", parents=" << parentKeys_.size()
+                                          << ", options=" << options_.size(),
+                                  MMC_ERROR);
+        for (const auto &option : options_) {
+            option.Serialize(packer);
+        }
+        packer.Serialize(flags_);
+        packer.Serialize(operateId_);
+        packer.Serialize(leaseTtlMs_);
+        return MMC_OK;
+    }
+
+    Result Deserialize(NetMsgUnpacker &packer) override
+    {
+        packer.Deserialize(msgVer);
+        packer.Deserialize(msgId);
+        packer.Deserialize(destRankId);
+        packer.Deserialize(keys_);
+        packer.Deserialize(parentKeys_);
+        if (keys_.size() != parentKeys_.size()) {
+            return MMC_INVALID_PARAM;
+        }
+        options_.clear();
+        options_.assign(keys_.size(), AllocOptions());
+        for (auto &option : options_) {
+            option.Deserialize(packer);
+        }
+        packer.Deserialize(flags_);
+        packer.Deserialize(operateId_);
+        packer.Deserialize(leaseTtlMs_);
+        return MMC_OK;
+    }
+};
+
 struct BatchAllocResponse : MsgBase {
     std::vector<std::vector<MmcMemBlobDesc>> blobs_;
     std::vector<uint8_t> numBlobs_;

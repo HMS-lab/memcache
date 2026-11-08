@@ -134,6 +134,62 @@ Result MmcMetaMgrProxy::BatchAlloc(const BatchAllocRequest &req, BatchAllocRespo
     return MMC_OK;
 }
 
+Result MmcMetaMgrProxy::BatchAllocWithParents(const BatchAllocWithParentsRequest &req, BatchAllocResponse &resp)
+{
+    MmcMetaMetricManager &metricManager = MmcMetaMetricManager::GetInstance();
+    metricManager.IncrementRequestCounter(RestMetricType::BATCH_ALLOC, UINT32_MAX);
+    resp.results_.resize(req.keys_.size());
+    resp.blobs_.resize(req.keys_.size());
+    if (req.keys_.size() != req.parentKeys_.size() || req.keys_.size() != req.options_.size()) {
+        metricManager.IncrementFailureCounter(RestMetricType::BATCH_ALLOC);
+        MMC_LOG_ERROR("BatchAllocWithParents input size mismatch, keys=" << req.keys_.size()
+                                                                           << ", parents=" << req.parentKeys_.size()
+                                                                           << ", options=" << req.options_.size());
+        return MMC_INVALID_PARAM;
+    }
+
+    std::array<uint64_t, MEDIA_NONE + 1> wantSize{};
+    for (const auto &option : req.options_) {
+        const int media = static_cast<int>(option.mediaType_);
+        if (media >= 0 && media <= MEDIA_NONE) {
+            wantSize[media] += option.blobSize_ * option.numBlobs_;
+        }
+    }
+    for (int media = 0; media <= MEDIA_NONE; ++media) {
+        if (wantSize[media] > 0) {
+            metaMangerPtr_->CheckAndEvict(static_cast<MediaType>(media), wantSize[media]);
+        }
+    }
+
+    for (size_t i = 0; i < req.keys_.size(); ++i) {
+        const uint32_t rank = req.options_[i].preferredRank_.empty() ? UINT32_MAX : req.options_[i].preferredRank_[0];
+        MmcMemMetaDesc objMeta{};
+        metricManager.IncrementRequestCounter(RestMetricType::ALLOC, rank);
+        const Result ret = metaMangerPtr_->AllocWithParent(req.keys_[i], req.parentKeys_[i], req.options_[i],
+                                                            req.operateId_, req.leaseTtlMs_, objMeta);
+        IncrementResultCounter(metricManager, RestMetricType::ALLOC, ret, rank);
+        if (ret != MMC_OK) {
+            if (ret != MMC_DUPLICATED_OBJECT) {
+                MMC_LOG_ERROR("Allocation with parent failed for key=" << req.keys_[i] << ", ret=" << ret);
+            }
+            resp.numBlobs_.push_back(0);
+            resp.prots_.push_back(0);
+            resp.priorities_.push_back(0);
+            resp.leases_.push_back(0);
+            resp.blobs_[i] = {};
+        } else {
+            resp.numBlobs_.push_back(objMeta.numBlobs_);
+            resp.prots_.push_back(objMeta.prot_);
+            resp.priorities_.push_back(objMeta.priority_);
+            resp.leases_.push_back(objMeta.blobs_.empty() ? 0 : objMeta.blobs_[0].leaseTimeoutTtlMs_);
+            resp.blobs_[i] = objMeta.blobs_;
+        }
+        resp.results_[i] = ret;
+    }
+    IncrementBatchResultCounter(metricManager, RestMetricType::BATCH_ALLOC, resp.results_);
+    return MMC_OK;
+}
+
 Result MmcMetaMgrProxy::UpdateState(const UpdateRequest &req, Response &resp)
 {
     MmcMetaMetricManager &metricManager = MmcMetaMetricManager::GetInstance();

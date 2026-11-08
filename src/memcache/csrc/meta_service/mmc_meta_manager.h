@@ -223,6 +223,11 @@ public:
         rewarmThreadPool_->Destroy();
         removeThreadPool_->Destroy();
         MmcMemBlob::ssdPreFreeHandler_ = nullptr;
+        {
+            std::lock_guard<std::mutex> parentGraphGuard(parentGraphMutex_);
+            parentByChild_.clear();
+            childrenCountByParent_.clear();
+        }
         started_ = false;
         MMC_LOG_TRACE("Stop MmcMetaManager");
     }
@@ -241,6 +246,15 @@ public:
      */
     Result Alloc(const std::string &key, const AllocOptions &allocOpt, uint64_t operateId, uint64_t leaseTtlMs,
                  MmcMemMetaDesc &objMeta);
+
+    /**
+     * @brief Allocate a key and register its optional logical parent.
+     *
+     * A parent must already be readable. The relation is maintained separately
+     * from physical blob metadata so replicas and tier migration share it.
+     */
+    Result AllocWithParent(const std::string &key, const std::string &parentKey, const AllocOptions &allocOpt,
+                           uint64_t operateId, uint64_t leaseTtlMs, MmcMemMetaDesc &objMeta);
 
     /**
      * @brief Batch get with Meta classification and rewarm grouped by execution rank
@@ -569,6 +583,10 @@ private:
     Result RemoveBlobs(uint32_t rank, MediaType mediaType);
     Result RemoveBlobsForDeadRank(uint32_t rank, MediaType mediaType);
 
+    Result RegisterParent(const std::string &key, const std::string &parentKey);
+    void RemoveParentRelation(const std::string &key);
+    bool HasChildren(const std::string &key) const;
+
     bool CheckActiveLease(const std::string &key, const MmcMemObjMetaPtr &meta, const MmcBlobFilterPtr &filter);
 
     void PushRemoveList(const std::string &key, const MmcMemObjMetaPtr &meta, const MmcBlobFilterPtr &filter,
@@ -827,6 +845,11 @@ private:
 
     MmcRef<MmcMetaContainer<std::string, MmcMemObjMetaPtr>> metaContainer_;
     MmcGlobalAllocatorPtr globalAllocator_;
+    // Logical KV-cache hierarchy. These maps deliberately use keys rather than
+    // MmcMemObjMeta/MmcMemBlob pointers: physical replicas can move or be recreated.
+    mutable std::mutex parentGraphMutex_;
+    std::unordered_map<std::string, std::string> parentByChild_;
+    std::unordered_map<std::string, uint32_t> childrenCountByParent_;
     // std::unordered_set<std::string> evictMap_;
     // ReadWriteLock evictMapLock_;
 

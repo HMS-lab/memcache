@@ -214,6 +214,7 @@ static void TraceSendRecord(int16_t opCode, uint64_t diff)
             TP_TRACE_RECORD(TP_ACC_SEND_QUERY_BAT, diff, 0);
             break;
         case ML_BATCH_ALLOC_REQ:
+        case ML_BATCH_ALLOC_WITH_PARENTS_REQ:
             TP_TRACE_RECORD(TP_ACC_SEND_ALLOC_BAT, diff, 0);
             break;
         case ML_BATCH_UPDATE_REQ:
@@ -261,6 +262,7 @@ static void TraceSendWaitRecord(int16_t opCode, uint64_t diff)
             TP_TRACE_RECORD(TP_ACC_SEND_WAIT_QUERY_BAT, diff, 0);
             break;
         case ML_BATCH_ALLOC_REQ:
+        case ML_BATCH_ALLOC_WITH_PARENTS_REQ:
             TP_TRACE_RECORD(TP_ACC_SEND_WAIT_ALLOC_BAT, diff, 0);
             break;
         default:
