@@ -223,7 +223,7 @@ MMC_API int32_t mmcc_batch_remove_lease(const char **keys, uint32_t keys_count)
 }
 
 MMC_API int32_t mmcc_batch_malloc(const char **keys, uint32_t keys_count, const size_t *sizes, mmc_put_options options,
-                                  uint64_t lease_ttl_ms, uint64_t *gvas)
+                                   uint64_t lease_ttl_ms, uint64_t *gvas)
 {
     MMC_VALIDATE_RETURN(MmcClientDefault::GetInstance() != nullptr, "client is not initialize", MMC_CLIENT_NOT_INIT);
     MMC_VALIDATE_RETURN(keys != nullptr, "invalid param, keys is null", MMC_INVALID_PARAM);
@@ -250,6 +250,50 @@ MMC_API int32_t mmcc_batch_malloc(const char **keys, uint32_t keys_count, const 
         MmcClientDefault::GetInstance()->BatchMalloc(keysVector, sizesVector, options, lease_ttl_ms, gvaVector);
     if (gvaVector.size() != keys_count) {
         MMC_LOG_ERROR("invalid batch malloc gva size (" << gvaVector.size() << "), should be " << keys_count);
+        return ret == MMC_OK ? MMC_ERROR : ret;
+    }
+    for (size_t i = 0; i < gvaVector.size(); ++i) {
+        gvas[i] = static_cast<uint64_t>(gvaVector[i]);
+    }
+    return ret;
+}
+
+MMC_API int32_t mmcc_batch_malloc_with_parents(const char **keys, const char **parent_keys, uint32_t keys_count,
+                                                const size_t *sizes, mmc_put_options options, uint64_t lease_ttl_ms,
+                                                uint64_t *gvas)
+{
+    MMC_VALIDATE_RETURN(MmcClientDefault::GetInstance() != nullptr, "client is not initialize", MMC_CLIENT_NOT_INIT);
+    MMC_VALIDATE_RETURN(keys != nullptr, "invalid param, keys is null", MMC_INVALID_PARAM);
+    MMC_VALIDATE_RETURN(parent_keys != nullptr, "invalid param, parent_keys is null", MMC_INVALID_PARAM);
+    MMC_VALIDATE_RETURN(keys_count != 0, "invalid param, keys_count: " << keys_count, MMC_INVALID_PARAM);
+    MMC_VALIDATE_RETURN(sizes != nullptr, "invalid param, sizes is null", MMC_INVALID_PARAM);
+    MMC_VALIDATE_RETURN(gvas != nullptr, "invalid param, gvas is null", MMC_INVALID_PARAM);
+
+    std::vector<std::string> keysVector;
+    std::vector<std::string> parentKeysVector;
+    std::vector<size_t> sizesVector;
+    keysVector.reserve(keys_count);
+    parentKeysVector.reserve(keys_count);
+    sizesVector.reserve(keys_count);
+    for (size_t i = 0; i < keys_count; ++i) {
+        gvas[i] = 0;
+        MMC_RETURN_ERROR(ValidateBatchKey(keys[i], i), "invalid key for batch malloc with parents");
+        MMC_VALIDATE_RETURN(parent_keys[i] != nullptr, "invalid parent key on idx [" << i << "]", MMC_INVALID_PARAM);
+        MMC_VALIDATE_RETURN(strlen(parent_keys[i]) <= MAX_KEY_LEN,
+                            "parent key length exceeds limit on idx [" << i << "]", MMC_INVALID_PARAM);
+        MMC_VALIDATE_RETURN(strcmp(keys[i], parent_keys[i]) != 0, "key cannot be its own parent on idx [" << i << "]",
+                            MMC_INVALID_PARAM);
+        keysVector.emplace_back(keys[i]);
+        parentKeysVector.emplace_back(parent_keys[i]);
+        sizesVector.emplace_back(sizes[i]);
+    }
+
+    std::vector<uintptr_t> gvaVector;
+    Result ret = MmcClientDefault::GetInstance()->BatchMallocWithParents(keysVector, parentKeysVector, sizesVector,
+                                                                          options, lease_ttl_ms, gvaVector);
+    if (gvaVector.size() != keys_count) {
+        MMC_LOG_ERROR("invalid batch malloc with parents gva size (" << gvaVector.size() << "), should be "
+                                                                        << keys_count);
         return ret == MMC_OK ? MMC_ERROR : ret;
     }
     for (size_t i = 0; i < gvaVector.size(); ++i) {

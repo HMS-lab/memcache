@@ -61,6 +61,7 @@ enum LOCAL_META_OPCODE_REQ : int16_t {
     ML_BATCH_PROMOTE_REQ = 28,       /* promote keys in LRU without blob access */
     LM_BATCH_STORAGE_STAT_REQ = 29,  /* query UBSIO file status and size by keys in batch */
     ML_GET_EXTERNAL_CONFIG_REQ = 30, /* query external config managed by MetaService */
+    ML_BATCH_ALLOC_WITH_PARENTS_REQ = 31, /* allocate batch of objects and record parent keys */
 };
 
 enum LOCAL_META_OPCODE_RESP : int16_t {

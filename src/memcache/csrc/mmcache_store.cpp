@@ -1052,7 +1052,7 @@ int MmcacheStore::BatchRemoveLease(const std::vector<std::string> &keys)
 }
 
 std::vector<uintptr_t> MmcacheStore::BatchMalloc(const std::vector<std::string> &keys, const std::vector<size_t> &sizes,
-                                                 uint16_t media, uint64_t leaseTtlMs)
+                                                  uint16_t media, uint64_t leaseTtlMs)
 {
     std::vector<uintptr_t> gvas(keys.size(), 0);
     if (keys.size() != sizes.size()) {
@@ -1082,6 +1082,48 @@ std::vector<uintptr_t> MmcacheStore::BatchMalloc(const std::vector<std::string> 
     TP_TRACE_END(TP_MMC_PY_BATCH_ALLOC, ret);
     if (ret != MMC_OK) {
         MMC_LOG_ERROR("Batch malloc failed, ret:" << ret << ".");
+        return gvas;
+    }
+    for (size_t i = 0; i < gvaValues.size(); ++i) {
+        gvas[i] = static_cast<uintptr_t>(gvaValues[i]);
+    }
+    return gvas;
+}
+
+std::vector<uintptr_t> MmcacheStore::BatchMallocWithParents(const std::vector<std::string> &keys,
+                                                             const std::vector<std::string> &parentKeys,
+                                                             const std::vector<size_t> &sizes, uint16_t media,
+                                                             uint64_t leaseTtlMs)
+{
+    std::vector<uintptr_t> gvas(keys.size(), 0);
+    if (keys.empty() || keys.size() != parentKeys.size() || keys.size() != sizes.size()) {
+        MMC_LOG_ERROR("BatchMallocWithParents input mismatch: keys=" << keys.size() << ", parents="
+                                                                        << parentKeys.size() << ", sizes="
+                                                                        << sizes.size());
+        return gvas;
+    }
+
+    mmc_put_options options{};
+    options.mediaType = media;
+    options.policy = NATIVE_AFFINITY;
+    options.replicaNum = 1;
+    std::fill(std::begin(options.preferredLocalServiceIDs), std::end(options.preferredLocalServiceIDs), -1);
+    std::vector<const char *> keyArray(keys.size());
+    std::vector<const char *> parentKeyArray(parentKeys.size());
+    for (size_t i = 0; i < keys.size(); ++i) {
+        if (keys[i].empty() || keys[i].length() > MAX_KEY_LEN || parentKeys[i].length() > MAX_KEY_LEN ||
+            keys[i] == parentKeys[i]) {
+            MMC_LOG_ERROR("Invalid key or parent key at index " << i);
+            return gvas;
+        }
+        keyArray[i] = keys[i].c_str();
+        parentKeyArray[i] = parentKeys[i].c_str();
+    }
+    std::vector<uint64_t> gvaValues(keys.size(), 0);
+    Result ret = mmcc_batch_malloc_with_parents(keyArray.data(), parentKeyArray.data(), keys.size(), sizes.data(),
+                                                options, leaseTtlMs, gvaValues.data());
+    if (ret != MMC_OK) {
+        MMC_LOG_ERROR("BatchMallocWithParents failed, ret=" << ret);
         return gvas;
     }
     for (size_t i = 0; i < gvaValues.size(); ++i) {

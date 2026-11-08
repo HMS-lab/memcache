@@ -953,6 +953,15 @@ PYBIND11_MODULE(_pymmc, m)
             },
             py::arg("keys"), py::arg("sizes"), py::arg("media") = 1, py::arg("leaseTtlMs") = 0) // MEDIA_DRAM
         .def(
+            "batch_alloc_with_parents",
+            [](MmcacheStore &self, const std::vector<std::string> &keys, const std::vector<std::string> &parentKeys,
+               const std::vector<size_t> &sizes, uint16_t media, uint64_t leaseTtlMs) {
+                py::gil_scoped_release release;
+                return self.BatchMallocWithParents(keys, parentKeys, sizes, media, leaseTtlMs);
+            },
+            py::arg("keys"), py::arg("parent_keys"), py::arg("sizes"), py::arg("media") = 1,
+            py::arg("leaseTtlMs") = 0) // MEDIA_DRAM
+        .def(
             "batch_copy",
             [](MmcacheStore &self, const std::vector<uintptr_t> &gva_ptrs, const std::vector<uintptr_t> &buffer_ptrs,
                std::vector<size_t> &sizes, const int32_t &direct, const uint32_t &flag) {

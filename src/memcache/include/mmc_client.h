@@ -134,7 +134,27 @@ int32_t mmcc_batch_remove_lease(const char **keys, uint32_t keys_count);
  * @return 0 if successfully
  */
 int32_t mmcc_batch_malloc(const char **keys, uint32_t keys_count, const size_t *sizes, mmc_put_options options,
-                          uint64_t lease_ttl_ms, uint64_t *gvas);
+                           uint64_t lease_ttl_ms, uint64_t *gvas);
+
+/**
+ * @brief Allocate GVA blobs and attach each new key to an optional parent key.
+ *
+ * An empty parent key denotes a root node. A non-empty parent key must identify
+ * an existing readable object. Parent-child relations are logical KV-cache
+ * metadata; they do not affect the physical blob layout.
+ *
+ * @param keys             [in] keys of data, the length of each key is less than 256
+ * @param parent_keys      [in] parent key for each key; empty string denotes a root node
+ * @param keys_count       [in] count of keys and parent_keys
+ * @param sizes            [in] size of each GVA blob
+ * @param options          [in] options for allocation
+ * @param lease_ttl_ms     [in] write lease time in milliseconds, 0 uses the MetaService default
+ * @param gvas             [out] GVA for each allocated key
+ * @return 0 if successful
+ */
+int32_t mmcc_batch_malloc_with_parents(const char **keys, const char **parent_keys, uint32_t keys_count,
+                                        const size_t *sizes, mmc_put_options options, uint64_t lease_ttl_ms,
+                                        uint64_t *gvas);
 
 /**
  * @brief Copy data between GVA addresses and local buffers

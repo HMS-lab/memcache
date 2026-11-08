@@ -91,6 +91,8 @@ public:
 
     Result BatchAlloc(const BatchAllocRequest &req, BatchAllocResponse &resp);
 
+    Result BatchAllocWithParents(const BatchAllocWithParentsRequest &req, BatchAllocResponse &resp);
+
     Result UpdateState(const UpdateRequest &req, Response &resp);
 
     Result BatchUpdateState(const BatchUpdateRequest &req, BatchUpdateResponse &resp);

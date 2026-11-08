@@ -409,6 +409,34 @@ int32_t mmcc_batch_malloc(const char **keys, uint32_t keys_count, const size_t *
 - `0`：成功
 - 其他：失败
 
+#### mmcc_batch_malloc_with_parents
+
+```c
+int32_t mmcc_batch_malloc_with_parents(const char **keys, const char **parent_keys,
+                                       uint32_t keys_count, const size_t *sizes,
+                                       mmc_put_options options, uint64_t lease_ttl_ms,
+                                       uint64_t *gvas);
+```
+
+**功能**
+
+批量申请 GVA blob，并为每个 key 记录可选的逻辑父 key。空字符串表示根节点；非空父 key 必须是已处于
+`READABLE` 状态的对象。父子关系不会影响 blob 的物理地址或副本布局。
+
+父节点持有子节点时不能被删除或作为 eviction 候选；删除子节点后父节点的子计数会自动减少。
+父节点必须在本调用之前已经存在且可读，不能在同一批请求中同时创建父节点和子节点。该关系目前是
+MetaService 运行时元数据，MetaService 重启后的恢复尚未持久化该关系。
+
+**参数**
+
+- `parent_keys`：与 `keys` 等长的父 key 数组；根节点使用空字符串。
+- 其余参数与 `mmcc_batch_malloc` 相同。
+
+**返回值**
+
+- `0`：成功。
+- `MMC_PARENT_NOT_FOUND`：父 key 不存在或尚未可读。
+
 #### mmcc_batch_copy
 
 ```c

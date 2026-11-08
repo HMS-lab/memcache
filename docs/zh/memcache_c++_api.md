@@ -516,6 +516,20 @@ Apply for global memory for multiple keys in batches and return the starting GVA
 - When allocation fails or the parameters are invalid, the corresponding element is `0`.
 - The caller must filter out both sentinel values and perform copies and write-completion notifications only for valid GVAs.
 
+#### BatchMallocWithParents
+
+```c++
+virtual std::vector<uintptr_t> BatchMallocWithParents(const std::vector<std::string> &keys,
+    const std::vector<std::string> &parentKeys, const std::vector<size_t> &sizes,
+    uint16_t media, uint64_t leaseTtlMs = 0) = 0;
+```
+
+Allocates GVA blobs and records one logical parent for every key. `parentKeys` must have the same length as `keys`;
+an empty parent key creates a root node. A non-empty parent must already be readable. The hierarchy is logical and is
+independent of physical blob replicas. A node with children is protected from deletion and eviction. The parent must
+be created in an earlier request; parent relations are currently runtime MetaService metadata and are not restored
+after a MetaService restart.
+
 #### BatchCopy
 
 ```c++
