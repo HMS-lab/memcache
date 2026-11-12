@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "meta-manager-sim"
+version = "0.1.0"
+description = "Standalone workloads for the real MemCache MetaManager"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["cmake>=3.18", "pybind11>=3", "nlohmann_json>=3.12", "tabulate>=0.9,<1"]
+
+[project.optional-dependencies]
+dev = ["mypy", "types-tabulate", "pytest", "black", "isort", "pycodestyle", "clang-format==18.1.8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+meta_manager_sim = ["cpp_build/*.cpp", "cpp_build/*.h", "cpp_build/*.pyi", "cpp_build/CMakeLists.txt", "cpp_build/standalone/prometheus/*.h"]
+
+[tool.black]
+force-exclude = "\\.backup/|build/|\\.venv/"
+line-length = 79
+skip-magic-trailing-comma = true
+target-version = ["py310"]
+
+[tool.isort]
+profile = "black"
+line_length = 79
+skip_gitignore = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "--import-mode=importlib"
+markers = ["native: requires the standalone C++ build"]
