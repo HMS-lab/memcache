@@ -27,13 +27,13 @@ constexpr size_t SECOND_RETRY_INDEX = 2U;
 constexpr size_t THIRD_RETRY_INDEX = 3U;
 } // namespace
 
-// 仅 GVA 注册不存在/已卸载（-2017）可触发防呆重试。
+// Only a missing/unmounted GVA registration (-2017) triggers defensive retry.
 TEST(BatchPutRetryTest, IsHybmCopyRetryable_AcceptsGvaNotFound)
 {
     EXPECT_TRUE(IsHybmCopyRetryable(SMEM_BM_GVA_NOT_FOUND));
 }
 
-// 各 MMC 错误码均不可重试。
+// MMC error codes are never retryable.
 TEST(BatchPutRetryTest, IsHybmCopyRetryable_RejectsMmcErrors)
 {
     EXPECT_FALSE(IsHybmCopyRetryable(MMC_OK));
@@ -72,7 +72,7 @@ TEST(BatchPutRetryTest, CollectPutRetryKeys_EmptyResult_ReturnsEmpty)
     EXPECT_TRUE(CollectPutRetryKeys(batchResult).empty());
 }
 
-// 仅在本轮 RPC 均成功且仍存在可重试 key 时才继续防呆重试。
+// Continue defensive retry only if all RPCs in the round succeeded and retryable keys remain.
 TEST(BatchPutRetryTest, ShouldContinuePutRetry_ContinuesWhenRoundOkAndKeysRetryable)
 {
     EXPECT_TRUE(ShouldContinuePutRetry(MMC_OK, {FIRST_RETRY_INDEX}));

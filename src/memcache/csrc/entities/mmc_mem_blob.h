@@ -75,7 +75,7 @@ struct MmcBlobFilter : public MmcReferable {
     uint32_t rank_{UINT32_MAX};
     MediaType mediaType_{MEDIA_NONE};
     BlobState state_{NONE};
-    bool excludeMedia_{false}; /* true 时 mediaType_ 表示"排除该介质"而非"匹配该介质" */
+    bool excludeMedia_{false}; /* If true, mediaType_ means "exclude this medium" rather than "match this medium". */
     MmcBlobFilter(const uint32_t &rank, const MediaType &mediaType, const BlobState &state, bool excludeMedia = false)
         : rank_(rank), mediaType_(mediaType), state_(state), excludeMedia_(excludeMedia) {};
 };

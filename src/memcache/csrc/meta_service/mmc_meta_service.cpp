@@ -33,9 +33,9 @@
 namespace ock {
 namespace mmc {
 
-// 节点亲和分配：背选目标 backendId 的加权随机源；thread_local 避免跨线程竞争
+// Node affinity: weighted RNG for selecting target backendId; thread_local avoids cross-thread contention.
 thread_local std::mt19937 gTargetBackendRng(std::random_device{}());
-// 节点亲和分配：目标 backendId 内部打乱 ranks 的随机源；thread_local 保证线程内可重入
+// Node affinity: RNG for shuffling ranks within a target backendId; thread_local ensures reentrancy within a thread.
 thread_local std::mt19937 gExpandRanksRng(std::random_device{}());
 
 namespace {
@@ -311,9 +311,10 @@ Result MmcMetaService::BmRegister(uint32_t rank, std::vector<uint16_t> mediaType
 
     {
         std::unique_lock<std::shared_mutex> backendLock(rankBackendIdMapLock_);
-        // 同一个 rank 重新注册时可能带来新的 backendId（换 IP、改配置、重连），
-        // 必须先把旧反向映射摘掉，否则该 rank 会同时挂在两个 backendId 上，
-        // 分布表会重复计权、写流量持续偏到旧 backendId；backendId 变为空时同样要摘。
+        // Reregistering a rank may supply a new backendId (IP/configuration change or reconnection).
+        // Remove the old reverse mapping first, or the rank would belong to two backendIds,
+        // duplicating distribution weights and biasing writes toward the old backendId. Remove it even if the new
+        // backendId is empty.
         auto oldIt = rankBackendIdMap_.find(rank);
         const std::string oldBackendId = (oldIt == rankBackendIdMap_.end()) ? std::string() : oldIt->second;
         const bool hasOldMapping = (oldIt != rankBackendIdMap_.end());
@@ -335,8 +336,10 @@ Result MmcMetaService::BmRegister(uint32_t rank, std::vector<uint16_t> mediaType
             rankBackendIdMap_[rank] = backendId;
             backendIdRankMap_[backendId].insert(rank);
             if (!role.empty()) {
-                // 同一 backendId 的 role 必须一致；后到者不再覆盖，冲突时告警，
-                // 避免默认 writer 的 client 静默把整台 memory 节点翻成 writer。
+                // Roles must agree for the same backendId. Later registrations do not override the role; warn on
+                // conflict
+                // to prevent a client with default writer role from silently converting an entire memory node into a
+                // writer.
                 auto ins = backendIdRoleMap_.emplace(backendId, role);
                 if (!ins.second && ins.first->second != role) {
                     MMC_LOG_WARN("ALLOC_LOCAL_FIRST: backendId[" << backendId << "] role conflict: keep ["
@@ -655,19 +658,21 @@ std::string MmcMetaService::GetBackendRole(const std::string &backendId)
 
 std::string MmcMetaService::SelectTargetBackendForRank(uint32_t callerRank)
 {
-    // caller rank 所在 backendId
+    // backendId containing the caller rank.
     const std::string callerBackendId = GetBackendIdForRank(callerRank);
     if (callerBackendId.empty()) {
         MMC_LOG_DEBUG("ALLOC_LOCAL_FIRST: caller rank " << callerRank << " has no backendId");
         return std::string();
     }
-    // 只有写者（P）才做目标选择；memory（D）不承载本地写入语义，返回空走随机回退
+    // Only writers (P) select targets. Memory nodes (D) have no local-write semantics; return empty for random
+    // fallback.
     if (GetBackendRole(callerBackendId) != "writer") {
         MMC_LOG_DEBUG("ALLOC_LOCAL_FIRST: caller backendId " << callerBackendId << " is not writer");
         return std::string();
     }
-    // 在分布表中找到该写者的分布，按权重选一个目标 backendId。
-    // 读共享锁保护 writeDistributionTable_（BmRegister/BmUnregister 持写锁重建，可能触发 vector 重新分配）
+    // Find the writer's distribution and select a target backendId by weight.
+    // Shared read lock protects writeDistributionTable_; BmRegister/BmUnregister rebuild under write lock and may
+    // reallocate the vector.
     std::shared_lock<std::shared_mutex> backendLock(rankBackendIdMapLock_);
     for (const auto &dist : writeDistributionTable_) {
         if (dist.writerBackendId_ == callerBackendId) {
@@ -684,10 +689,11 @@ void MmcMetaService::ExpandLocalFirstRanks(AllocOptions &options, uint32_t calle
         return;
     }
     TP_TRACE_BEGIN(TP_MMC_META_LOCAL_FIRST_EXPAND_RANK);
-    // 按写者分布表：权重选出目标 backendId（含本地高权重/均匀分流到 memory），
-    // 目标 backendId 的全部 ranks 随机打乱作为 preferredRank_ 候选集。
+    // Use the writer distribution to select a weighted target backendId (high local weight / balanced spreading to
+    // memory).
+    // Shuffle all ranks in the target backendId as preferredRank_ candidates.
     const std::string targetBackendId = SelectTargetBackendForRank(callerRank);
-    // 填充本地 debug 字段（fallback 日志用），不参与网络序列化
+    // Populate local debug fields for fallback logs; these are not serialized over the network.
     options.callerRank_ = callerRank;
     options.targetBackendId_ = targetBackendId;
     if (targetBackendId.empty()) {
@@ -708,7 +714,7 @@ void MmcMetaService::ExpandLocalFirstRanks(AllocOptions &options, uint32_t calle
 
 void MmcMetaService::RebuildWriteDistributionTable()
 {
-    // 调用方需持有 rankBackendIdMapLock_（写锁）
+    // Caller must hold rankBackendIdMapLock_ for writing.
     TP_TRACE_BEGIN(TP_MMC_META_BUILD_DIST_TABLE);
     std::vector<std::string> writeBackendIds;
     std::vector<std::string> memoryBackendIds;

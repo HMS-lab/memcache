@@ -272,10 +272,11 @@ uint32_t MmcClientDefault::RankId(const affinity_policy &policy)
     }
 }
 
-// -2017（MemFabric 透传：GVA 注册不存在/已卸载）时可重试。
+// Retry is allowed for -2017 (propagated by MemFabric: GVA registration missing or unmounted).
 bool IsHybmCopyRetryable(Result ret);
 std::vector<size_t> CollectPutRetryKeys(const std::vector<int> &batchResult);
-// 仅本轮 RPC 均成功（拷贝错误不进 DoBatchPut 返回值）且仍有可重试 key 时返回 true。
+// Return true only if all RPCs in this round succeeded and retryable keys remain (copy errors are not in DoBatchPut's
+// return value).
 bool ShouldContinuePutRetry(Result roundRet, const std::vector<size_t> &retryIndices);
 using MmcClientDefaultPtr = MmcRef<MmcClientDefault>;
 } // namespace mmc

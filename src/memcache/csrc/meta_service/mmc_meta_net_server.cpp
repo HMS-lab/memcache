@@ -212,15 +212,18 @@ Result MetaNetServer::HandleAlloc(const NetContextPtr &context)
     context->GetRequest<AllocRequest>(req);
     MMC_LOG_DEBUG("HandleAlloc: caller rankId=" << req.rankId_ << ", key=" << req.key_
                                                 << ", flags=" << req.options_.flags_);
-    // 全局分配策略由 MetaService 统一管理：per-writer 不再携带策略，请求默认 flags=0 走 InnerAlloc 的
-    // default:ArrangeLocality（无 preferred rank 时退化为随机分散）。meta 显式配置 arrrange/local_first
-    // 时统一覆盖请求侧(低字节)策略，高位 GVA 掩码保留。
+    // MetaService manages the global allocation strategy; writers no longer carry individual strategies. Default
+    // request flags=0 uses
+    // InnerAlloc default:ArrangeLocality (random spreading without a preferred rank). Explicit meta arrange/local_first
+    // settings
+    // override the request strategy in the low byte while preserving the high GVA mask bits.
     const uint32_t metaStrategy = metaService_->Options().allocStrategy;
     if (metaStrategy == ALLOC_ARRANGE || metaStrategy == ALLOC_LOCAL_FIRST) {
         req.options_.flags_ = (req.options_.flags_ & ~0xFF) | metaStrategy;
     }
-    // ALLOC_LOCAL_FIRST: preferredRank_扩展为权重选中backendId包含的所有ranks，
-    // alloc时LocalFirstAssign会先逐个尝试这些ranks，全部失败则回退到全局随机(ALLOC_RANDOM)
+    // ALLOC_LOCAL_FIRST: expand preferredRank_ to all ranks in the weighted target backendId.
+    // LocalFirstAssign tries these ranks in turn, then falls back to global random allocation (ALLOC_RANDOM) if all
+    // fail.
     if ((req.options_.flags_ & 0xFF) == ALLOC_LOCAL_FIRST) {
         metaService_->ExpandLocalFirstRanks(req.options_, req.rankId_);
     }
@@ -254,10 +257,12 @@ Result MetaNetServer::HandleBatchAlloc(const NetContextPtr &context)
     MMC_LOG_DEBUG("HandleBatchAlloc start. caller rankId=" << req.rankId_ << ", Keys count: " << req.keys_.size()
                                                            << ", OperateId: " << req.operateId_ << ", Flags: "
                                                            << req.flags_ << ", leaseTtlMs: " << req.leaseTtlMs_);
-    // ALLOC_LOCAL_FIRST: 扩展preferredRank_为目标backendId所有rank（expand+shuffle 在函数内打点）
+    // ALLOC_LOCAL_FIRST: expand preferredRank_ to all target-backend ranks (expand+shuffle are traced inside the
+    // function).
     const uint32_t metaStrategy = metaService_->Options().allocStrategy;
     for (size_t i = 0; i < req.options_.size(); ++i) {
-        // 全局分配策略由 MetaService 统一管理：覆盖请求侧(低字节)策略，保留高位 GVA 掩码。
+        // MetaService manages global allocation: override the low-byte request strategy and preserve the high GVA mask
+        // bits.
         if (metaStrategy == ALLOC_ARRANGE || metaStrategy == ALLOC_LOCAL_FIRST) {
             req.options_[i].flags_ = (req.options_[i].flags_ & ~0xFF) | metaStrategy;
         }

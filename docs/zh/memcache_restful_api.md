@@ -962,13 +962,13 @@ Delete the specified business KV Cache key and its associated data.
 ### curl
 
 ```bash
-# 默认删除：同时删除元数据与所有层级的 blob
+# Default deletion: remove metadata and blobs from all tiers.
 curl -X DELETE "http://127.0.0.1:8000/key?key=demo_key"
 
-# 懒删除：key 只做 Demote，等待自然淘汰
+# Lazy deletion: only Demote the key and wait for natural eviction.
 curl -X DELETE "http://127.0.0.1:8000/key?key=demo_key&flags=1"
 
-# 保留 SSD 副本：仅释放内存层 blob，key 降级为 SSD-only
+# Retain the SSD replica: release memory-tier blobs and demote the key to SSD-only.
 curl -X DELETE "http://127.0.0.1:8000/key?key=demo_key&flags=2"
 ```
 
@@ -976,8 +976,8 @@ curl -X DELETE "http://127.0.0.1:8000/key?key=demo_key&flags=2"
 
 | Parameter name | Type | Required | Description |
 |---|---|---|---|
-| `key` | String | 是 | 要删除的业务 KV Cache key |
-| `flags` | UInt32 | 否 | 删除标志位，缺省为 `0`；`1` 为懒删除（`MMC_REMOVE_FLAG_LAZY`），`2` 为保留 SSD 副本（`MMC_REMOVE_FLAG_KEEP_SSD`），未知位返回错误；两者同时置位时表示「内存层懒删除 + SSD 副本保留」：内存层按懒删除优先淘汰，淘汰时只释放内存层，SSD 数据与元数据始终保留；key 仅有 SSD 副本时不执行删除并返回成功；key 仅有内存副本时等同于普通懒删除；分片 LRU（`lruType=sharded_lru`）下懒删除 key 仍优先淘汰，但只在同一分片内按首次懒删除顺序淘汰，跨分片及按候选列表处理的路径不保证严格 FIFO |
+| `key` | String | Yes | Business KV Cache key to delete |
+| `flags` | UInt32 | No | Deletion flags; default `0`. `1` requests lazy deletion (`MMC_REMOVE_FLAG_LAZY`); `2` retains the SSD replica (`MMC_REMOVE_FLAG_KEEP_SSD`). Unknown bits return an error. With both set, memory receives priority lazy eviction and only memory is released; SSD data and metadata are retained. SSD-only keys return success without deletion; memory-only keys behave like ordinary lazy deletion. With sharded LRU (`lruType=sharded_lru`), lazy keys still precede normal keys, but first-marked order applies only within each shard; neither cross-shard nor candidate-list processing guarantees strict FIFO. |
 
 ### Successful Examples
 
@@ -1726,12 +1726,12 @@ curl -X POST "http://127.0.0.1:8000/memory/evict" \
   -H "Content-Type: application/json" \
   -d '{"chunk_hashes": ["a1b2c3d4..."]}'
 
-# 全局懒删除（不指定 locations，flags=1）
+# Global lazy deletion (locations omitted, flags=1)
 curl -X POST "http://127.0.0.1:8000/memory/evict" \
   -H "Content-Type: application/json" \
   -d '{"chunk_hashes": ["a1b2c3d4..."], "flags": 1}'
 
-# 向下移动一层（指定 locations）
+# Move down one tier (locations specified)
 curl -X POST "http://127.0.0.1:8000/memory/evict" \
   -H "Content-Type: application/json" \
   -d '{"chunk_hashes": ["a1b2c3d4..."], "locations": ["LocalCPUBackend"]}'
@@ -1743,9 +1743,9 @@ The request body is in JSON format:
 
 | Parameter name | Type | Required | Description |
 |---|---|---|---|
-| `chunk_hashes` | Array[String] | 是 | 要驱逐的 chunk hash 列表 |
-| `locations` | Array[String] | 否 | 目标位置列表；不指定或为 `null` 时执行全局删除 |
-| `flags` | UInt32 | 否 | 仅在未指定 `locations`（全局删除）时生效的删除标志位，缺省为 `0`；`1` 为懒删除，`2` 为保留 SSD 副本，未知位返回错误；两者同时置位时表示「内存层懒删除 + SSD 副本保留」：内存层按懒删除优先淘汰，淘汰时只释放内存层，SSD 副本不会被删除；与 `locations` 同时出现且取值非 `0` 时返回错误（显式传 `0` 等价于不传）；分片 LRU 下懒删除 key 仅在同一分片内按首次懒删除顺序淘汰，跨分片不保证严格 FIFO |
+| `chunk_hashes` | Array[String] | Yes | List of chunk hashes to evict |
+| `locations` | Array[String] | No | Target locations; omitted or `null` requests global deletion |
+| `flags` | UInt32 | No | Deletion flags used only when `locations` is omitted (global deletion); default `0`. `1` requests lazy deletion; `2` retains the SSD replica. Unknown bits return an error. With both set, memory receives priority lazy eviction; eviction releases only memory and retains the SSD replica. A nonzero value with `locations` returns an error (explicit `0` is equivalent to omission). With sharded LRU, first-marked order applies only within each shard; strict FIFO is not guaranteed across shards. |
 
 ### Successful Examples
 
@@ -1763,9 +1763,9 @@ The request body is in JSON format:
 
 | Field | Meaning | Source |
 |---|---|---|
-| `status` | 操作状态；成功时固定为 `success` | 接口成功返回约定 |
-| `num_evicted` | 本次实际驱逐（释放或降级）的 chunk 数量；`KEEP_SSD` 释放内存层计入此项，懒删除不计入。按实际执行结果统计：SSD-only key 上设置懒删除会退化为立即全量删除，同样计入此项；已处于 SSD-only 的 key 再次执行 `KEEP_SSD`（含与 `LAZY` 同时置位）不产生实际释放，两个计数均不增加 | 接口成功返回约定 |
-| `num_marked` | 本次仅被标记为懒删除的 chunk 数量；这些 key 仍可访问，待内存压力自然淘汰。按实际执行结果统计，只有内存层 key 的懒删除才计入此项 | 接口成功返回约定 |
+| `status` | Operation status; always `success` on success | Successful response contract |
+| `num_evicted` | Number of chunks actually evicted (released or demoted). Includes memory released by `KEEP_SSD`, but excludes keys merely marked for lazy deletion. Counts actual results: lazy deletion of an SSD-only key becomes immediate full deletion and is included here. Repeating `KEEP_SSD` (including with `LAZY`) on an SSD-only key releases nothing and increments neither counter. | Successful response contract |
+| `num_marked` | Number of chunks only marked for lazy deletion. These keys remain accessible until natural eviction under memory pressure. Counts actual results: only lazy deletion of memory-tier keys increments this counter. | Successful response contract |
 
 ### Error example
 

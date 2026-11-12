@@ -123,7 +123,7 @@ public:
                      uint32_t flag = CONF_MUST);
     std::vector<std::string> ValidateConf();
 
-    // 该 key 是否被显式设置过（配置文件或 python setup 都会写进 mAllItems；默认值不会）
+    // Whether this key was explicitly set (configuration files and Python setup write mAllItems; defaults do not).
     bool IsConfigured(const std::string &key) const
     {
         return mAllItems.find(key) != mAllItems.end();
@@ -357,8 +357,9 @@ public:
         config.defragEvictThreshold = static_cast<uint16_t>(GetInt(ConfConstant::OKC_MMC_DEFRAG_EVICT_THRESHOLD));
         config.prefetchEnabled = GetBool(ConfConstant::OCK_MMC_PREFETCH_ENABLED);
         config.enableMaxValueMode = GetBool(ConfConstant::OCK_MMC_META_SERVICE_ENABLE_MAX_VALUE_MODE);
-        // 全局分配策略由 MetaService 统一管理：仅 arrange/local_first 会强制覆盖请求侧策略；
-        // 其余(未配置/random)记为 0 表示不强制，尊重请求侧策略(默认 flags=0 走 arrange 随机分散)。
+        // MetaService manages the global allocation strategy: only arrange/local_first override the request strategy.
+        // Otherwise (unset/random), 0 means no override; honor the request strategy (default flags=0 uses arrange with
+        // random spreading).
         std::string allocStrategyStr = GetString(ConfConstant::OCK_MMC_ALLOC_STRATEGY);
         StringToUpper(allocStrategyStr);
         if (allocStrategyStr == "LOCAL_FIRST") {
@@ -366,7 +367,7 @@ public:
         } else if (allocStrategyStr == "ARRANGE") {
             config.allocStrategy = ALLOC_ARRANGE;
         } else {
-            config.allocStrategy = 0; // 未配置(random/默认)：不强制
+            config.allocStrategy = 0; // Unset (random/default): no override.
         }
         config.asyncFlushIntervalMs = static_cast<uint32_t>(GetInt(ConfConstant::OCK_MMC_ASYNC_FLUSH_INTERVAL_MS));
         config.asyncFlushBatchLimit = static_cast<uint32_t>(GetInt(ConfConstant::OCK_MMC_ASYNC_FLUSH_BATCH_LIMIT));
@@ -514,7 +515,7 @@ public:
         SafeCopy(GetString(ConfConstant::OKC_MMC_LOCAL_SERVICE_BM_IP_PORT_DOMAIN), config.bmIpPortDomain,
                  DISCOVERY_URL_SIZE);
         SafeCopy(GetString(ConfConstant::OKC_MMC_LOCAL_SERVICE_BM_HCOM_URL), config.bmHcomUrl, DISCOVERY_URL_SIZE);
-        // backend_id 取值顺序与 role 完全一致：配置文件显式配了就用配置 > 否则环境变量 > 否则默认空
+        // backend_id has the same precedence as role: explicit configuration > environment variable > empty default.
         SafeCopy(GetString(ConfConstant::OKC_MMC_LOCAL_SERVICE_BACKEND_ID), config.backendId, DISCOVERY_URL_SIZE);
         if (!IsConfigured(ConfConstant::OKC_MMC_LOCAL_SERVICE_BACKEND_ID.first)) {
             const std::string envBackendId = SafeGetEnv("MMC_LOCAL_SERVICE_BACKEND_ID");
@@ -532,7 +533,8 @@ public:
         config.localHBMSize = GetUInt64(ConfConstant::OKC_MMC_LOCAL_SERVICE_HBM_SIZE.first, 0);
         config.localMaxHBMSize = GetUInt64(ConfConstant::OKC_MMC_LOCAL_SERVICE_MAX_HBM_SIZE.first, config.localHBMSize);
         config.storageEnabled = GetBool(ConfConstant::OCK_MMC_LOCAL_SERVICE_STORAGE_ENABLED);
-        // role 取值顺序与 backend_id 完全一致：配置文件显式配了就用配置 > 否则环境变量 > 否则内置默认 writer
+        // role has the same precedence as backend_id: explicit configuration > environment variable > built-in writer
+        // default.
         SafeCopy(GetString(ConfConstant::OCK_MMC_LOCAL_SERVICE_ROLE), config.role, PROTOCOL_SIZE);
         if (!IsConfigured(ConfConstant::OCK_MMC_LOCAL_SERVICE_ROLE.first)) {
             const std::string envNodeRole = SafeGetEnv("MMC_LOCAL_SERVICE_ROLE");

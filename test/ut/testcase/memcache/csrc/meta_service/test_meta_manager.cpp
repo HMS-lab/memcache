@@ -65,7 +65,7 @@ protected:
     {
         return mgr->EvictCallBackFunction(key, object, media);
     }
-    // 驱动一次 DRAM 层自然淘汰：watermark 取 high=100/low=0、当前阈值 100，至少淘汰 1 个 key
+    // Trigger one natural DRAM eviction: high=100/low=0 watermark, current threshold 100; evict at least 1 key.
     static void EvictLeastRecentlyUsedDramOnce(MmcRef<MmcMetaManager> &mgr)
     {
         constexpr uint16_t kWatermarkHigh = 100;
@@ -1456,7 +1456,7 @@ TEST_F(TestMmcMetaManager, KeepSsdRemove_FreesMemoryOnlyKeepsSsdMeta)
     ASSERT_EQ(metaMng->UpdateState(key, dramLoc, MMC_WRITE_OK, 1), MMC_OK);
     ASSERT_EQ(metaMng->AddSsdBlob(key, MmcMemBlobDesc{0, 0, SIZE_32K, MEDIA_SSD, READABLE, 0}), MMC_OK);
 
-    // spy 覆写 SsdPreFree 处理器（Stop 会置空，无需手动恢复）
+    // Spy overrides SsdPreFree handler (Stop clears it, so no manual restoration is needed).
     std::atomic<uint32_t> spyCount{0};
     MmcMemBlob::ssdPreFreeHandler_ = [&spyCount](const std::string &key, const MmcMemBlobDesc &desc) {
         (void)key;
@@ -1476,11 +1476,11 @@ TEST_F(TestMmcMetaManager, KeepSsdRemove_FreesMemoryOnlyKeepsSsdMeta)
     ASSERT_EQ(metaMng->Remove(key, MMC_REMOVE_FLAG_KEEP_SSD), MMC_OK);
     usleep(100000U);
 
-    // 内存层释放，SSD 未触发预释放
+    // Memory released without triggering SSD pre-free.
     EXPECT_EQ(getDramUsed(), 0u) << "DRAM should be freed after KEEP_SSD Remove";
     EXPECT_EQ(spyCount.load(), 0u) << "SsdPreFree must not be triggered with KEEP_SSD flag";
 
-    // key 与 SSD blob 元数据仍在容器中：再次普通删除成功并触发一次 SsdPreFree
+    // Key and SSD blob metadata remain in the container; ordinary deletion succeeds and triggers one SsdPreFree.
     ASSERT_EQ(metaMng->Remove(key), MMC_OK);
     usleep(100000U);
     EXPECT_EQ(spyCount.load(), 1u) << "follow-up full Remove should free SSD blob via SsdPreFree";
@@ -1488,7 +1488,7 @@ TEST_F(TestMmcMetaManager, KeepSsdRemove_FreesMemoryOnlyKeepsSsdMeta)
     metaMng->Stop();
 }
 
-// 对照组：默认 Remove — key with DRAM + SSD blobs
+// Control: default Remove for a key with DRAM + SSD blobs.
 // Verify: full remove frees all tiers and triggers SsdPreFree once
 TEST_F(TestMmcMetaManager, RemoveDefault_DramSsdKey_TriggersSsdPreFree)
 {
@@ -1600,7 +1600,7 @@ TEST_F(TestMmcMetaManager, LazyRemove_DramKey_MarksLazyWithoutErasing)
     ASSERT_EQ(metaMng->Remove(key, MMC_REMOVE_FLAG_LAZY), MMC_OK);
     usleep(100000U);
 
-    // 懒删除只标记不释放：key 仍在容器中，DRAM 占用不变
+    // Lazy deletion only marks: key remains in container and DRAM usage is unchanged.
     EXPECT_GT(getDramUsed(), 0u) << "lazy remove must not free memory immediately";
     EXPECT_EQ(metaMng->Remove(key), MMC_OK) << "lazy key must still be present for follow-up full remove";
     usleep(100000U);
@@ -1632,7 +1632,7 @@ TEST_F(TestMmcMetaManager, LazyRemove_SsdOnlyKey_DegradesToFullRemove)
     ASSERT_EQ(metaMng->UpdateState(key, dramLoc, MMC_WRITE_OK, 1), MMC_OK);
     ASSERT_EQ(metaMng->AddSsdBlob(key, MmcMemBlobDesc{0, 0, SIZE_32K, MEDIA_SSD, READABLE, 0}), MMC_OK);
 
-    // 先用 KEEP_SSD 停泊为 SSD-only：无内存层 LRU，自然淘汰无法触及
+    // First park as SSD-only with KEEP_SSD: outside memory LRU, unreachable by natural eviction.
     ASSERT_EQ(metaMng->Remove(key, MMC_REMOVE_FLAG_KEEP_SSD), MMC_OK);
     usleep(100000U);
 
@@ -1652,8 +1652,9 @@ TEST_F(TestMmcMetaManager, LazyRemove_SsdOnlyKey_DegradesToFullRemove)
     metaMng->Stop();
 }
 
-// LAZY|KEEP_SSD 同时置位 — 内存层懒删除、SSD 副本保留：
-// 先只标记懒删除（内存仍可访问），淘汰时仅释放内存层，SSD 数据与元数据始终保留
+// LAZY|KEEP_SSD combined: lazy-delete memory and retain the SSD replica.
+// Initially only mark lazy (memory stays accessible); eviction releases only memory and always retains SSD data and
+// metadata.
 TEST_F(TestMmcMetaManager, RemoveBothFlags_DramSsdKey_MarksLazyAndKeepsSsd)
 {
     MmcLocation dramLoc{0, MEDIA_DRAM};
@@ -1693,7 +1694,7 @@ TEST_F(TestMmcMetaManager, RemoveBothFlags_DramSsdKey_MarksLazyAndKeepsSsd)
     ASSERT_EQ(metaMng->Remove(key, MMC_REMOVE_FLAG_LAZY | MMC_REMOVE_FLAG_KEEP_SSD, &outcome), MMC_OK);
     usleep(100000U);
 
-    // 懒删除：只标记为优先淘汰，内存层不会立即释放，SSD 副本也不删除
+    // Lazy deletion marks priority eviction only; memory is not freed immediately, and the SSD replica is not deleted.
     EXPECT_EQ(outcome, MmcMetaManager::RemoveOutcome::kMarkedLazy);
     EXPECT_GT(getDramUsed(), 0u) << "lazy remove must not free DRAM immediately";
     EXPECT_EQ(spyCount.load(), 0u) << "SsdPreFree must not be triggered by the remove request";
@@ -1701,7 +1702,8 @@ TEST_F(TestMmcMetaManager, RemoveBothFlags_DramSsdKey_MarksLazyAndKeepsSsd)
     ASSERT_EQ(TestMmcMetaManager::MetaContainer(metaMng)->Get(key, markedMeta), MMC_OK);
     EXPECT_TRUE(markedMeta->KeepSsdOnEvict()) << "combined flags must mark keep-ssd-on-evict";
 
-    // 手动驱动一次淘汰：只释放内存层，SSD 副本保留（不搬运新副本、不删除原副本）
+    // Manually trigger one eviction: release only memory, retain SSD (neither move a new replica nor delete the
+    // existing one).
     TestMmcMetaManager::EvictLeastRecentlyUsedDramOnce(metaMng);
     usleep(100000U);
 
@@ -1710,7 +1712,7 @@ TEST_F(TestMmcMetaManager, RemoveBothFlags_DramSsdKey_MarksLazyAndKeepsSsd)
     MmcMemObjMetaPtr evictedMeta;
     ASSERT_EQ(TestMmcMetaManager::MetaContainer(metaMng)->Get(key, evictedMeta), MMC_OK);
     EXPECT_FALSE(evictedMeta->KeepSsdOnEvict()) << "keep-ssd intent is fulfilled once memory is evicted";
-    // key 仍以 SSD-only 形式存在：后续普通删除成功并触发一次 SSD 释放
+    // Key remains SSD-only; subsequent ordinary deletion succeeds and triggers one SSD release.
     ASSERT_EQ(metaMng->Remove(key), MMC_OK);
     usleep(100000U);
     EXPECT_EQ(spyCount.load(), 1u) << "follow-up full Remove should free SSD blob";
@@ -1718,7 +1720,7 @@ TEST_F(TestMmcMetaManager, RemoveBothFlags_DramSsdKey_MarksLazyAndKeepsSsd)
     metaMng->Stop();
 }
 
-// LAZY|KEEP_SSD 且仅有内存副本：无 SSD 可保留，等同于普通懒删除，淘汰后整 key 删除
+// LAZY|KEEP_SSD with memory-only replicas: no SSD to retain; ordinary lazy deletion removes the entire key on eviction.
 TEST_F(TestMmcMetaManager, RemoveBothFlags_DramOnlyKey_MarksLazyOnly)
 {
     MmcLocation dramLoc{0, MEDIA_DRAM};
@@ -1754,13 +1756,13 @@ TEST_F(TestMmcMetaManager, RemoveBothFlags_DramOnlyKey_MarksLazyOnly)
     TestMmcMetaManager::EvictLeastRecentlyUsedDramOnce(metaMng);
     usleep(100000U);
 
-    // 无 SSD 副本可保留：淘汰即完整删除
+    // No SSD replica to retain: eviction fully deletes the key.
     EXPECT_EQ(metaMng->Remove(key), MMC_UNMATCHED_KEY);
 
     metaMng->Stop();
 }
 
-// LAZY|KEEP_SSD 同时置位 — key 已是 SSD-only：无内存层可释放，接口成功但不产生实际删除
+// LAZY|KEEP_SSD on an SSD-only key: no memory to free; return success without actual deletion.
 TEST_F(TestMmcMetaManager, RemoveBothFlags_SsdOnlyKey_IsNoopButReturnsOk)
 {
     MmcLocation dramLoc{0, MEDIA_DRAM};
@@ -1793,10 +1795,10 @@ TEST_F(TestMmcMetaManager, RemoveBothFlags_SsdOnlyKey_IsNoopButReturnsOk)
     ASSERT_EQ(metaMng->Remove(key, MMC_REMOVE_FLAG_LAZY | MMC_REMOVE_FLAG_KEEP_SSD, &outcome), MMC_OK);
     usleep(100000U);
 
-    // 无内存层可释放、SSD 副本保留：既不标记懒删除，也不产生实际释放
+    // No memory to release; retain SSD. Neither mark lazy nor release anything.
     EXPECT_EQ(outcome, MmcMetaManager::RemoveOutcome::kNoop);
     EXPECT_EQ(spyCount.load(), 0u) << "SSD blob must never be freed when KEEP_SSD is set";
-    // 数据仍在：普通删除仍能成功
+    // Data remains: ordinary deletion still succeeds.
     ASSERT_EQ(metaMng->Remove(key), MMC_OK);
     usleep(100000U);
     EXPECT_EQ(spyCount.load(), 1u);
@@ -1804,7 +1806,7 @@ TEST_F(TestMmcMetaManager, RemoveBothFlags_SsdOnlyKey_IsNoopButReturnsOk)
     metaMng->Stop();
 }
 
-// 懒删除实际结果：内存层 key → 仅标记；SSD-only key → 退化为立即全量删除
+// Actual lazy-deletion outcomes: memory key -> mark only; SSD-only key -> immediate full deletion.
 TEST_F(TestMmcMetaManager, RemoveOutcome_LazyReportsActualResult)
 {
     MmcLocation dramLoc{0, MEDIA_DRAM};
@@ -1817,7 +1819,7 @@ TEST_F(TestMmcMetaManager, RemoveOutcome_LazyReportsActualResult)
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
     metaMng->Mount(dramLoc, dramInfo, blobMap, false);
 
-    // 1) 内存层 key：懒删除只标记
+    // 1) Memory key: lazy deletion marks only.
     std::string dramKey = "outcome_dram_key";
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
     MmcMemMetaDesc objMeta;
@@ -1828,7 +1830,7 @@ TEST_F(TestMmcMetaManager, RemoveOutcome_LazyReportsActualResult)
     ASSERT_EQ(metaMng->Remove(dramKey, MMC_REMOVE_FLAG_LAZY, &outcome), MMC_OK);
     EXPECT_EQ(outcome, MmcMetaManager::RemoveOutcome::kMarkedLazy);
 
-    // 2) SSD-only key：懒删除退化为立即全量删除，必须按 kRemoved 统计
+    // 2) SSD-only key: lazy deletion becomes full deletion; count as kRemoved.
     std::string ssdOnlyKey = "outcome_ssd_only_key";
     ASSERT_EQ(metaMng->Alloc(ssdOnlyKey, allocReq, 1, 0, objMeta), MMC_OK);
     ASSERT_EQ(metaMng->UpdateState(ssdOnlyKey, dramLoc, MMC_WRITE_OK, 1), MMC_OK);

@@ -20,56 +20,61 @@
 namespace ock {
 namespace mmc {
 
-// 单个写入目标的权重条目：
-// 权重以"份额"计，每个 backendId 总份额 = writeBackendIds.size()（见 BuildBackendDistribution 注释）。
-// 例如 writeId1 -> {backendId1: 100%, backendId2: 33%} 展开为份额 {backendId1: 3, backendId2: 1}（写者数=3）。
+// Weight entry for one write target.
+// Weights are shares; each backendId has writeBackendIds.size() total shares (see BuildBackendDistribution).
+// For example, writeId1 -> {backendId1: 100%, backendId2: 33%} becomes {backendId1: 3, backendId2: 1} for 3 writers.
 struct BackendTarget {
     std::string backendId_;
     uint32_t weight_ = 0;
 };
 
-// 一个写者 backendId 的完整写入分布（targets_ 权重之和 = 配额 = 总份额/写者数，恒为整数）
+// Complete write distribution for one writer backendId (sum of targets_ weights = quota = total shares / writers;
+// integral).
 struct BackendDistribution {
     std::string writerBackendId_;
     std::vector<BackendTarget> targets_;
 };
 
 /**
- * 构建「写者 backendId → 加权目标 backendId 列表」的映射表（贪心账本算法）。
+ * Build the mapping from writer backendId to weighted target backendIds using a greedy ledger.
  *
- * 输入：
- *   allBackendIds     全部 backendId（写者 ∪ memory），按注册/排序顺序传入，即为贪心兜底的账本顺序。
- *                     目标 backendId 只可能来自这里；memory 节点若未并入，永远不会被选中。
- *   writeBackendIds   写者 backendId（P 侧，n 个）。
- *   memoryBackendIds  memory backendId（D 侧，m 个，仅提供空间）。当前实现只把它当作角色描述，
- *                     不参与配比（容量/rank 数也不参与），权重按 backendId 个数均分。
+ * Inputs:
+ *   allBackendIds     All backendIds (writers union memory), in registration/sorted order; defines the fallback ledger
+ * order.
+ *                                       Targets can only come from this list; memory nodes omitted here are never
+ * selected.
+ *   writeBackendIds   Writer backendIds (P side, n writers).
+ *   memoryBackendIds  Memory backendIds (D side, m nodes providing space only). Currently describes roles only;
+ *                                       neither it nor capacity/rank counts affect ratios. Weights are divided equally
+ * by backendId count.
  *
- * 份额模型（n = 写者数，m = memory 节点数，n + m = backendId 总数 = allBackendIds.size()）：
- *   每个 backendId 的总份额 = n 份（= 写者数）；
- *   总份额 = n * (n + m)；
- *   每个写者的配额 = 总份额 / n = (n + m) 份 = backendId 总数 → 恒为整数。
+ * Share model (n = writers, m = memory nodes, n + m = backendId count = allBackendIds.size()):
+ *   Each backendId has n total shares (= writer count).
+ *   Total shares = n * (n + m).
+ *   Writer quota = total shares / n = (n + m) shares = backendId count; always integral.
  *
- * 第一步（均匀贪心）：按 allBackendIds 顺序维护各 backendId 的剩余份额账本，
- *   写者依次从账本头部连续取满自己的配额 (n+m) 份。效果：不同 backendId 被消耗的份额
- *   总量均匀，"一个 backendId 分太少、另一个分太多"被约束住。
- *   例（n=3,m=1,顺序[A,B,C,D]）：A->{A:3,B:1}，B->{B:2,C:2}，C->{C:1,D:3}。
+ * Step 1 (uniform greedy): maintain a ledger of remaining shares in allBackendIds order.
+ *   Writers sequentially take their full quota (n+m) from the ledger head. This keeps the total
+ *   shares consumed from different backendIds balanced, preventing underuse or overuse of individual backends.
+ *   Example (n=3,m=1, order [A,B,C,D]): A->{A:3,B:1}, B->{B:2,C:2}, C->{C:1,D:3}.
  *
- * 第二步（本地亲和，近似）：贪心遍历每个写者，若其权重最大的目标不是本地 backendId，
- *   则与「持有本地 backendId 份额」的其他写者做份额置换，尽量让写者自己的占比最大；
- *   置换保持各 backendId 被消耗总量守恒。
- *   注意：每个写者只做一趟、至多一次置换，且一次只与一个写者交换，因此置换后本地权重仍可能
- *   不是该写者的最大权重，不同写者的本地亲和率也可能不相等（例如 n=5,m=3 时为 37.5%~62.5%）。
- *   理论上限是 n/(n+m)（= 本地份额 / 配额）。
+ * Step 2 (approximate local affinity): visit writers greedily. If the highest-weight target is not local,
+ *   exchange shares with another writer holding local-backend shares to maximize the local proportion.
+ *   The exchange preserves total consumption for each backendId.
+ *   Each writer gets at most one exchange with one other writer in a single pass. Its local weight may still
+ *   not be its largest weight, and local-affinity ratios may differ (for example, 37.5% to 62.5% for n=5,m=3).
+ *   The theoretical upper bound is n/(n+m) (= local shares / quota).
  */
 std::vector<BackendDistribution> BuildBackendDistribution(const std::vector<std::string> &allBackendIds,
                                                           const std::vector<std::string> &writeBackendIds,
                                                           const std::vector<std::string> &memoryBackendIds);
 
-// 按权重随机选一个目标 backendId；空表返回 nullptr。rng 仅用于打散组间顺序（组内 ranks 另行 shuffle）。
+// Select a target backendId by weight; return nullptr for an empty table. rng shuffles groups only (ranks shuffle
+// separately).
 const BackendTarget *PickTargetByWeight(const BackendDistribution &dist, std::mt19937 &rng);
 
-// 将写者分布表格式化为可读字符串并打印 INFO 日志，便于核对本地亲和与权重分布。
-// 每行形如 "writer[writerA] -> {backendX:3, backendY:1}"；空表不打印。
+// Format writer distributions as readable strings and log at INFO to inspect local affinity and weight distribution.
+// Each line looks like "writer[writerA] -> {backendX:3, backendY:1}"; empty tables produce no output.
 void LogBackendDistributionTable(const std::vector<BackendDistribution> &table);
 
 } // namespace mmc

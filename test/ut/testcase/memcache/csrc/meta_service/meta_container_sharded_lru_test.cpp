@@ -196,7 +196,8 @@ TEST_F(TestMmcMetaContainerShardedLRU, MultiLevelEliminationSelectsGlobalOldestK
     }
 }
 
-// 同名 key 重建后，旧对象的 LRU 更新不能作用到新对象上（分片层委托 + 身份校验）
+// Recreating the same key must prevent old-object LRU updates from affecting the new object (shard delegation +
+// identity check).
 TEST_F(TestMmcMetaContainerShardedLRU, LruUpdateIfMatchSkipsReplacedObject)
 {
     constexpr int valueFirst = 100;
@@ -209,13 +210,13 @@ TEST_F(TestMmcMetaContainerShardedLRU, LruUpdateIfMatchSkipsReplacedObject)
     EXPECT_EQ(container->DemoteIfMatch("key1", valueFirst), MMC_UNMATCHED_KEY);
     EXPECT_EQ(container->GetMediaType("key1"), MEDIA_DRAM);
 
-    // 身份匹配时行为与 InsertLru / Demote 一致
+    // Matching identity behaves like InsertLru / Demote.
     EXPECT_EQ(container->DemoteIfMatch("key1", valueSecond), MMC_OK);
     EXPECT_EQ(container->InsertLruIfMatch("key1", valueSecond, MEDIA_SSD), MMC_OK);
     EXPECT_EQ(container->GetMediaType("key1"), MEDIA_NONE);
 }
 
-// 身份校验删除在分片容器中的转发：不匹配时不删除并发重建的新对象
+// Forward identity-checked deletion through shards: mismatch must not delete a concurrently recreated object.
 TEST_F(TestMmcMetaContainerShardedLRU, EraseIfMatchSkipsReplacedObject)
 {
     constexpr int valueOld = 100;

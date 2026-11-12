@@ -26,28 +26,35 @@
 
 using namespace ock::mmc;
 
-// BuildBackendDistribution 的用例集合。
+// BuildBackendDistribution test cases.
 //
-// 份额模型（见 mmc_locality_distribution.h）：n = 写者数，m = memory 数，
-// 每个 backendId 的总份额 = n，每个写者的配额 = n + m，因此：
-//   * 每个 backendId 被所有写者消耗的总份额恒为 n，等流量假设下每台机器的写入占比恒为 1/(n+m)；
-//   * 单个写者的本地亲和率理论上限 = n/(n+m)，实际值由「贪心账本 + 一次本地亲和置换」决定，可能低于上限。
+// Share model (see mmc_locality_distribution.h): n = writer count, m = memory count.
+// Each backendId has n total shares; each writer has quota n + m. Therefore:
+// * All writers consume exactly n shares from each backendId; under equal traffic, each machine receives 1/(n+m) of
+// writes.
+// * Theoretical local affinity per writer is at most n/(n+m); the greedy ledger plus one local exchange may achieve
+// less.
 //
-// 用例覆盖：
-//   1. 真实拓扑：2P+4D（6 机）、4P+4D（8 机，即 2P 每 P 2 机 + 1D 4 机）、5P+3D（8 机）、
-//      5P+1D、2P+3D、1P+3D（5P 同机 + 3D）；
-//   2. 结构不变量：配额守恒、单 backendId 总量守恒、无零权重、无重复目标、确定性（1..12 拓扑矩阵）；
-//   3. 边界/异常输入：无写者、无 memory、空 allBackendIds、写者数 > 节点数、写者 backendId 未注册、
-//      backendId 重复、writeBackendIds 重复、allBackendIds 顺序敏感、memoryBackendIds 参数不参与选路；
-//   4. 选择器 PickTargetByWeight 的权重比例、同种子确定性、不可用表返回 nullptr；
-//   5. 分布表日志内容（防止 MMC_LOG_INFO 宏内部 oss 变量遮蔽导致日志错乱的问题回归）；
-//   6. fanout 维度（每个写者会落到几个 backendId）：已知拓扑的 fanout、理论下界、2P 的增长规律、
-//      贪心溢出到其他 P 节点、抽样落点集合。当前算法=「贪心账本 + 一次本地亲和置换」，第二步会为了
-//      本地份额把 fanout 抬高（如 5P+3D 的 writer4 到 4 个目标）；若改成「本地 n 份填满 + 溢出只到 D」，
-//      fanout 相关期望值和跨 P 期望值都需要同步更新。
+// Coverage:
+// 1. Real topologies: 2P+4D (6 machines), 4P+4D (8 machines: 2 P groups of 2 machines + 1 D group of 4), 5P+3D (8
+// machines),
+// 5P+1D, 2P+3D, 1P+3D (5 P processes on one machine + 3 D machines).
+// 2. Structural invariants: quota conservation, per-backend total conservation, no zero weights/duplicate targets,
+// determinism (1..12 topology matrix).
+// 3. Edge/invalid inputs: no writers, no memory, empty allBackendIds, more writers than nodes, unregistered writer
+// backendId,
+// duplicate backendIds/writeBackendIds, sensitivity to allBackendIds order, memoryBackendIds not used for routing.
+// 4. PickTargetByWeight: weight ratios, determinism with the same seed, nullptr for unusable tables.
+// 5. Distribution log contents (regression for oss shadowing inside MMC_LOG_INFO corrupting output).
+// 6. Fanout (target backendIds per writer): known topologies, theoretical lower bound, growth with 2P,
+// greedy overflow to other P nodes, and sampled target sets. Current algorithm = greedy ledger + one local-affinity
+// exchange.
+// The exchange can increase fanout for local shares (for example, writer4 reaches 4 targets in 5P+3D). If changed to
+// filling n local shares
+// then overflowing only to D, update both fanout and cross-P expectations.
 namespace {
 
-// 权重以「份额」计，权重值等于份额个数。
+// Weights are shares; each weight equals the number of shares.
 constexpr uint32_t kOneShare = 1;
 constexpr uint32_t kTwoShares = 2;
 constexpr uint32_t kThreeShares = 3;
@@ -67,7 +74,7 @@ constexpr size_t kFourMemoryNodes = 4;
 constexpr size_t kElevenMemoryNodes = 11;
 constexpr size_t kEightWriters = 8;
 
-// 单个写者分布表中的目标个数（不含 0，故意与份额常量区分语义）
+// Target count in one writer distribution (nonzero; intentionally distinct in meaning from share constants).
 constexpr size_t kOneTarget = 1;
 constexpr size_t kTwoTargets = 2;
 constexpr size_t kThreeTargets = 3;
@@ -75,13 +82,13 @@ constexpr size_t kFourTargets = 4;
 constexpr size_t kFiveTargets = 5;
 constexpr size_t kOneEntry = 1;
 
-// 拓扑矩阵规模
+// Topology matrix size.
 constexpr size_t kMinWriterCount = 1;
 constexpr size_t kMaxWriterCount = 12;
 constexpr size_t kMinMemoryCount = 0;
 constexpr size_t kMaxMemoryCount = 12;
 
-// PickTargetByWeight 抽样检查参数
+// PickTargetByWeight sampling parameters.
 constexpr uint32_t kPickSampleCount = 200000;
 constexpr uint32_t kPickSeed = 42;
 constexpr uint32_t kDeterminismPickCount = 1000;
@@ -114,7 +121,7 @@ std::vector<std::string> Tail(const std::vector<std::string> &ids, size_t start)
     return std::vector<std::string>(ids.begin() + static_cast<std::ptrdiff_t>(start), ids.end());
 }
 
-// 按 meta_service 的装配方式（写者在前、memory 在后、各自有序）构造拓扑。
+// Construct topology as meta_service does: sorted writers first, then sorted memory nodes.
 Topology MakeTopology(size_t writerCount, size_t memoryCount)
 {
     Topology topology;
@@ -171,13 +178,13 @@ bool ContainsId(const std::vector<std::string> &ids, const std::string &backendI
     return std::find(ids.begin(), ids.end(), backendId) != ids.end();
 }
 
-// fanout：该写者会落到的 backendId 个数。目标列表内无重复条目，故等于 targets_ 长度。
+// Fanout: backendIds reached by a writer. No duplicate targets, so this equals targets_ length.
 size_t Fanout(const BackendDistribution &dist)
 {
     return dist.targets_.size();
 }
 
-// 跨写者权重：落到「其他写者 backendId」上的份额和（不是所有跨节点流量，只是 P→P 部分）。
+// Cross-writer weight: shares targeting other writers' backendIds (only P->P traffic, not all cross-node traffic).
 uint32_t CrossWriterWeight(const BackendDistribution &dist, const std::vector<std::string> &writerIds)
 {
     uint32_t total = 0;
@@ -189,7 +196,7 @@ uint32_t CrossWriterWeight(const BackendDistribution &dist, const std::vector<st
     return total;
 }
 
-// 目标列表的顺序不参与语义（表只关心每个 backendId 拿到多少份），比较前统一按条目排序。
+// Target order has no semantic meaning (only shares per backendId matter); sort entries before comparing.
 std::string NormalizeRow(const std::string &row)
 {
     std::vector<std::string> parts;
@@ -219,12 +226,12 @@ void ExpectTableRows(const std::vector<BackendDistribution> &table, const std::v
     }
 }
 
-// 结构不变量：
-//   * 表项数 = 写者数，且顺序与 writeBackendIds 一致；
-//   * 每个写者权重和 = 配额 n+m；
-//   * 无零权重、同一写者内无重复目标、目标必在 allBackendIds 内；
-//   * 每个 backendId 被消耗总量 = n；
-//   * 写者自己的 backendId 一定拿到正份额，且不超过单 backendId 总份额 n。
+// Structural invariants:
+// * Entry count equals writer count, in writeBackendIds order.
+// * Each writer's weights sum to quota n+m.
+// * No zero weights or duplicate targets per writer; every target belongs to allBackendIds.
+// * Total consumption per backendId equals n.
+// * Each writer's own backendId receives positive shares, at most the per-backend total n.
 void ExpectTableInvariants(const Topology &topology, const std::vector<BackendDistribution> &table)
 {
     const uint32_t writerCount = static_cast<uint32_t>(topology.writerIds.size());
@@ -263,7 +270,8 @@ public:
     void SetUp() override
     {
         originalLevel_ = MmcOutLogger::Instance().GetLogLevel();
-        // 构建分布表会打印 INFO 日志；矩阵用例会给 1..12 的每个拓扑建表，UT 中降到 WARN 以免刷屏。
+        // Table construction logs at INFO; the matrix builds every 1..12 topology, so use WARN in UT to avoid flooding
+        // logs.
         MmcOutLogger::Instance().SetLogLevel(WARN_LEVEL);
     }
 
@@ -276,8 +284,9 @@ protected:
     LogLevel originalLevel_ = INFO_LEVEL;
 };
 
-// 2P + 4D（6 台机，backendId 1-6）：每台机器恰好收 2 份，但写者只有 2/6 = 33.3% 落在本地，
-// 其余 4 份平摊到 2 个 D；每个 D 只服务一个写者。
+// 2P + 4D (6 machines, backendIds 1-6): each machine receives exactly 2 shares; writers have only 2/6 = 33.3% local
+// affinity.
+// The other 4 shares are split equally over 2 D nodes; each D serves only one writer.
 TEST_F(MmcLocalityDistributionTest, TwoWritersFourMemoryNodesStayEvenlyLoaded)
 {
     const auto topology = MakeTopology(kTwoWriters, kFourMemoryNodes);
@@ -290,16 +299,17 @@ TEST_F(MmcLocalityDistributionTest, TwoWritersFourMemoryNodesStayEvenlyLoaded)
     for (const auto &backendId : topology.allIds) {
         EXPECT_EQ(load.at(backendId), static_cast<uint32_t>(kTwoWriters));
     }
-    // 本地亲和率上限 n/(n+m) = 2/6，实现正好命中上限。
+    // Local-affinity upper bound n/(n+m) = 2/6; the implementation reaches it exactly.
     for (const auto &dist : table) {
         EXPECT_EQ(TargetWeight(dist, dist.writerBackendId_), kTwoShares);
         EXPECT_EQ(dist.targets_.size(), kThreeTargets);
     }
 }
 
-// 8 个 backendId（1-8），4 个写者 + 4 个 memory（2P 每个 P 2 机、1D 4 机）：
-// 每个写者恰好 50% 本地 + 50% 落到唯一一个 D，且 4 个 D 各被一个写者独占。
-// 注意：n == m 时每个写者的目标恒为 2 个 —— 一旦这个 D 故障，该写者当次有 50% 选路落空（等待重建分布表）。
+// 8 backendIds (1-8), 4 writers + 4 memory nodes (2 P groups of 2 machines, 1 D group of 4):
+// Each writer is exactly 50% local + 50% on a single D; each of the 4 D nodes exclusively serves one writer.
+// When n == m, each writer always has 2 targets. If its D fails, 50% of routing attempts miss until the table is
+// rebuilt.
 TEST_F(MmcLocalityDistributionTest, FourWritersFourMemoryNodesPinOneMemoryNodeEach)
 {
     const auto topology = MakeTopology(kFourWriters, kFourMemoryNodes);
@@ -323,7 +333,7 @@ TEST_F(MmcLocalityDistributionTest, FourWritersFourMemoryNodesPinOneMemoryNodeEa
     }
 }
 
-// 2P + 3D：D3 被两个写者分摊（各 1 份），写者各有 3 个目标。
+// 2P + 3D: D3 is shared by both writers (1 share each); each writer has 3 targets.
 TEST_F(MmcLocalityDistributionTest, TwoWritersThreeMemoryNodesShareTheMiddleMemoryNode)
 {
     const auto topology = MakeTopology(kTwoWriters, kThreeMemoryNodes);
@@ -331,15 +341,15 @@ TEST_F(MmcLocalityDistributionTest, TwoWritersThreeMemoryNodesShareTheMiddleMemo
 
     ExpectTableRows(table, {"1:2, 3:2, 4:1", "2:2, 4:1, 5:2"});
     ExpectTableInvariants(topology, table);
-    // 写者 1 独占 memory 3，写者 2 才用到 5，memory 4 被两者各分 1 份。
+    // Writer 1 exclusively uses memory 3; only writer 2 uses 5; memory 4 provides 1 share to each.
     EXPECT_EQ(TargetWeight(table[0], "3"), kTwoShares);
     EXPECT_EQ(TargetWeight(table[0], "4"), kOneShare);
     EXPECT_EQ(TargetWeight(table[1], "4"), kOneShare);
     EXPECT_EQ(TargetWeight(table[1], "5"), kTwoShares);
 }
 
-// 5P + 3D（8 个 backendId，1-5 为写者、6-8 为 memory）：远端份额优先落到 memory，
-// 因此写者维度也均衡：本地亲和率统一为 5/8，远端目标只落在 memory、不再跨到别的写者。
+// 5P + 3D (8 backendIds, writers 1-5, memory 6-8): remote shares prefer memory,
+// so writers are also balanced: all have 5/8 local affinity, and remote targets are memory only, never other writers.
 TEST_F(MmcLocalityDistributionTest, FiveWritersThreeMemoryNodesLocalAffinityIsEven)
 {
     const auto topology = MakeTopology(kFiveWriters, kThreeMemoryNodes);
@@ -350,7 +360,7 @@ TEST_F(MmcLocalityDistributionTest, FiveWritersThreeMemoryNodesLocalAffinityIsEv
 
     for (size_t i = 0; i < table.size(); ++i) {
         SCOPED_TRACE("writer=" + table[i].writerBackendId_);
-        // 每个写者本地份额都等于 writerCount，远端只落在 memory。
+        // Each writer has writerCount local shares; remote shares target memory only.
         EXPECT_EQ(TargetWeight(table[i], table[i].writerBackendId_), kFiveShares);
         for (const auto &target : table[i].targets_) {
             if (target.backendId_ != table[i].writerBackendId_) {
@@ -362,8 +372,8 @@ TEST_F(MmcLocalityDistributionTest, FiveWritersThreeMemoryNodesLocalAffinityIsEv
     }
 }
 
-// 5P + 1D（6 个 backendId）：每个写者先吃满本地 5 份，剩下 1 份都落到唯一的 D，
-// 本地亲和率统一为 5/6，不再随时间/扫描顺序波动。
+// 5P + 1D (6 backendIds): each writer fills 5 local shares, then puts the remaining share on the sole D node.
+// Local affinity is uniformly 5/6, no longer varying with time/scan order.
 TEST_F(MmcLocalityDistributionTest, FiveWritersOneMemoryNodeLocalAffinityIsEven)
 {
     const auto topology = MakeTopology(kFiveWriters, kOneMemoryNode);
@@ -377,14 +387,14 @@ TEST_F(MmcLocalityDistributionTest, FiveWritersOneMemoryNodeLocalAffinityIsEven)
         EXPECT_EQ(TargetWeight(table[i], table[i].writerBackendId_), kFiveShares);
         EXPECT_EQ(TargetWeight(table[i], "6"), kOneShare);
     }
-    // D6 被 5 个写者各分 1 份，合计恰好 5 份。
+    // Each of the 5 writers takes 1 share from D6, totaling exactly 5.
     EXPECT_EQ(TargetWeight(table[0], "6") + TargetWeight(table[1], "6") + TargetWeight(table[2], "6") +
                   TargetWeight(table[3], "6") + TargetWeight(table[4], "6"),
               kFiveShares);
 }
 
-// 1 个写者 + 3 个 memory（例如 5P 同机 + 3 台 D 机）：配额 4 = 本地 1 + 每个 D 1，
-// 写者无法体现本地亲和（只有 1/4），但四个节点严格均分。
+// 1 writer + 3 memory nodes (for example, 5 P processes on one machine + 3 D machines): quota 4 = 1 local + 1 per D.
+// Local affinity is only 1/4, but the four nodes split traffic equally.
 TEST_F(MmcLocalityDistributionTest, SingleWriterSpreadsOverLocalAndMemory)
 {
     const auto topology = MakeTopology(kOneWriter, kThreeMemoryNodes);
@@ -395,7 +405,7 @@ TEST_F(MmcLocalityDistributionTest, SingleWriterSpreadsOverLocalAndMemory)
     EXPECT_EQ(TargetWeight(table[0], "1"), kOneShare);
 }
 
-// 没有写者时返回空表（不能返回每个写者一条空分布，也不能越界）。
+// No writers: return an empty table, without per-writer empty distributions or out-of-bounds access.
 TEST_F(MmcLocalityDistributionTest, NoWriterProducesEmptyTable)
 {
     const auto topology = MakeTopology(0, kThreeMemoryNodes);
@@ -406,7 +416,7 @@ TEST_F(MmcLocalityDistributionTest, NoWriterProducesEmptyTable)
     EXPECT_EQ(PickTargetByWeight(empty, rng), nullptr);
 }
 
-// 没有 memory 节点时每个写者只写本地（100% 本地）。
+// No memory nodes: each writer writes only locally (100% local).
 TEST_F(MmcLocalityDistributionTest, NoMemoryNodeKeepsWritesLocal)
 {
     const auto topology = MakeTopology(kTwoWriters, 0);
@@ -420,8 +430,8 @@ TEST_F(MmcLocalityDistributionTest, NoMemoryNodeKeepsWritesLocal)
     }
 }
 
-// allBackendIds 为空（拓扑信息缺失）：每个写者拿到空目标表，不崩、不做 0 取模；
-// 调用方 SelectTargetBackendForRank 会因 nullptr 回退到 ALLOC_ARRANGE。
+// Empty allBackendIds (missing topology): each writer receives an empty target list; no crash or modulo by zero.
+// SelectTargetBackendForRank receives nullptr and falls back to ALLOC_ARRANGE.
 TEST_F(MmcLocalityDistributionTest, EmptyAllBackendIdsProducesEmptyTargets)
 {
     const std::vector<std::string> writerIds = {"1", "2"};
@@ -437,7 +447,7 @@ TEST_F(MmcLocalityDistributionTest, EmptyAllBackendIdsProducesEmptyTargets)
     EXPECT_EQ(PickTargetByWeight(table[0], rng), nullptr);
 }
 
-// 写者 backendId 不在 allBackendIds 中：cursor 回退到 0，仍能分完配额，只是没有本地亲和。
+// Writer backendId absent from allBackendIds: cursor falls back to 0; quota is still filled without local affinity.
 TEST_F(MmcLocalityDistributionTest, UnregisteredWriterBackendIdStartsFromFirstEntry)
 {
     const std::vector<std::string> allIds = {"9", "10"};
@@ -453,8 +463,8 @@ TEST_F(MmcLocalityDistributionTest, UnregisteredWriterBackendIdStartsFromFirstEn
     }
 }
 
-// 生产陷阱：BmRegister 的 backendId 默认是空串。未显式传 backendId 的节点会全部聚成一个 ""
-// backendId，在分布表里仍只算「一台机器」的权重；GetRanksForBackendId("") 会返回所有未命名 rank。
+// Production pitfall: BmRegister defaults backendId to empty. Nodes without explicit backendId all merge into one ""
+// backendId, weighted as one machine; GetRanksForBackendId("") returns all unnamed ranks.
 TEST_F(MmcLocalityDistributionTest, EmptyBackendIdIsTreatedAsSingleNode)
 {
     const std::vector<std::string> allIds = {"", "1", "2"};
@@ -467,7 +477,7 @@ TEST_F(MmcLocalityDistributionTest, EmptyBackendIdIsTreatedAsSingleNode)
     EXPECT_EQ(TargetWeight(table[0], "2"), kOneShare);
     EXPECT_EQ(TotalWeight(table[0]), kThreeShares);
 
-    // 若空串写者独占全部节点（无 memory 角色），则每个节点 100% 本地。
+    // If the empty-string writer owns all nodes (no memory role), every node is 100% local.
     const auto localOnly = BuildBackendDistribution(allIds, allIds, {});
     ASSERT_EQ(localOnly.size(), allIds.size());
     for (size_t i = 0; i < localOnly.size(); ++i) {
@@ -477,8 +487,8 @@ TEST_F(MmcLocalityDistributionTest, EmptyBackendIdIsTreatedAsSingleNode)
     }
 }
 
-// memoryBackendIds 只用于描述角色，不参与选路：目标只能来自 allBackendIds。
-// 只把它传进 memoryBackendIds、不并入 allBackendIds，D 机器永远不会被选中。
+// memoryBackendIds describes roles only; targets must come from allBackendIds.
+// A D machine listed only in memoryBackendIds, without inclusion in allBackendIds, is never selected.
 TEST_F(MmcLocalityDistributionTest, MemoryBackendIdListIsIgnoredForTargets)
 {
     const std::vector<std::string> writerIds = {"1", "2"};
@@ -492,15 +502,15 @@ TEST_F(MmcLocalityDistributionTest, MemoryBackendIdListIsIgnoredForTargets)
         EXPECT_EQ(TargetWeight(withMemoryList[i], "4"), 0U);
     }
 
-    // 只有把 memory 并入 allBackendIds，才会产生远端目标。
+    // Remote targets appear only when memory nodes are included in allBackendIds.
     const auto withMemoryInAll = BuildBackendDistribution({"1", "2", "3", "4"}, writerIds, {"3", "4"});
     ExpectTableRows(withMemoryInAll, {"1:2, 3:2", "4:2, 2:2"});
 }
 
-// 异常输入：writeBackendIds 重复（同一 backendId 注册了多个 rank 时可能人为传入）。
-// 第二个同名写者会从第一个写者手里换走本地份额，导致第一个写者最终 0 本地份额 ——
-// 说明第二步只做单趟置换、且不保证每个写者都保留本地份额。
-// 生产路径上 backendIdRoleMap_ 以 backendId 为 key，天然去重，不会出现该输入。
+// Invalid input: duplicate writeBackendIds (possible if manually supplied when one backendId registers multiple ranks).
+// The second same-name writer exchanges away the first writer's local shares, leaving the first with zero local shares.
+// This shows step 2 performs only one exchange pass and does not guarantee local shares for every writer.
+// Production backendIdRoleMap_ is keyed by backendId and naturally deduplicates, preventing this input.
 TEST_F(MmcLocalityDistributionTest, DuplicateWriterBackendIdCanLoseLocalShare)
 {
     const auto table = BuildBackendDistribution({"1", "2", "3"}, {"1", "1"}, {"2", "3"});
@@ -508,16 +518,17 @@ TEST_F(MmcLocalityDistributionTest, DuplicateWriterBackendIdCanLoseLocalShare)
     ExpectTableRows(table, {"2:1, 3:2", "2:1, 1:2"});
     EXPECT_EQ(TargetWeight(table[0], "1"), 0U);
     EXPECT_EQ(TargetWeight(table[1], "1"), kTwoShares);
-    // 总量仍守恒：backendId 1 共 2 份 = 写者数。
+    // Totals remain conserved: backendId 1 has 2 shares = writer count.
     const auto load = PerBackendLoad(table);
     EXPECT_EQ(load.at("1"), static_cast<uint32_t>(kTwoWriters));
     EXPECT_EQ(load.at("2"), static_cast<uint32_t>(kTwoWriters));
     EXPECT_EQ(load.at("3"), static_cast<uint32_t>(kTwoWriters));
 }
 
-// 异常输入：allBackendIds 里同一 backendId 出现两次（写者与 memory 角色重叠时的误用）。
-// 账本按条目而非按 id 计数，该 backendId 被消耗的份额会翻倍（2n 而不是 n），
-// 但每个写者的配额仍守恒。用例锁定该行为，调用方必须保证 allBackendIds 内 id 唯一。
+// Invalid input: duplicate backendId in allBackendIds (misuse when writer/memory roles overlap).
+// The ledger counts entries rather than IDs, doubling consumption for this backendId (2n instead of n),
+// while preserving each writer's quota. This test locks in that behavior; callers must ensure unique IDs in
+// allBackendIds.
 TEST_F(MmcLocalityDistributionTest, DuplicatedBackendIdIsCountedTwice)
 {
     const auto table = BuildBackendDistribution({"1", "1", "2"}, {"1"}, {"2"});
@@ -528,8 +539,9 @@ TEST_F(MmcLocalityDistributionTest, DuplicatedBackendIdIsCountedTwice)
     EXPECT_EQ(load.at("2"), kOneShare);
 }
 
-// 写者数大于节点数（注册顺序与拓扑发现顺序不一致时的中间态）：所有写者都指向唯一节点，
-// 配额被迫收缩为 1，不再满足「每写者 n+m 份」的假设，但不会死循环。
+// More writers than nodes (intermediate state from differing registration/topology discovery order): all writers target
+// the sole node.
+// Quota shrinks to 1, violating the n+m shares-per-writer assumption, but avoiding an infinite loop.
 TEST_F(MmcLocalityDistributionTest, MoreWritersThanBackendsCollapseToOneTarget)
 {
     const std::vector<std::string> writerIds = {"1", "2", "3"};
@@ -540,8 +552,8 @@ TEST_F(MmcLocalityDistributionTest, MoreWritersThanBackendsCollapseToOneTarget)
     EXPECT_EQ(load.at("1"), static_cast<uint32_t>(kThreeWriters));
 }
 
-// allBackendIds 的顺序即贪心账本的扫描顺序，调用方（meta_service）按字符串排序后
-// 「写者在前、memory 在后」传入；顺序变化会改变每个写者分到哪些 D，虽然总量守恒。
+// allBackendIds defines the greedy ledger scan order. The caller (meta_service) sorts strings and supplies
+// writers before memory; reordering changes which D nodes each writer receives, although totals remain conserved.
 TEST_F(MmcLocalityDistributionTest, TableIgnoresAllBackendIdsOrder)
 {
     const std::vector<std::string> writerIds = {"1", "2"};
@@ -553,7 +565,7 @@ TEST_F(MmcLocalityDistributionTest, TableIgnoresAllBackendIdsOrder)
     const auto shuffledTable = BuildBackendDistribution({"5", "1", "3", "2", "4"}, writerIds, memoryIds);
     ExpectTableRows(shuffledTable, {"1:2, 3:2, 4:1", "2:2, 4:1, 5:2"});
 
-    // 新算法按「自己 → memory 列表」扫描，allIds 的排列不再影响结果。
+    // The new algorithm scans self -> memory list, so allIds ordering no longer changes the result.
     EXPECT_EQ(FormatDistribution(sortedTable[0]), FormatDistribution(shuffledTable[0]));
     const auto sortedLoad = PerBackendLoad(sortedTable);
     const auto shuffledLoad = PerBackendLoad(shuffledTable);
@@ -563,7 +575,7 @@ TEST_F(MmcLocalityDistributionTest, TableIgnoresAllBackendIdsOrder)
     }
 }
 
-// 1..12 写者 × 0..12 memory 的拓扑矩阵：验证结构不变量与结果确定性。
+// Topology matrix: 1..12 writers x 0..12 memory nodes; verify structural invariants and determinism.
 TEST_F(MmcLocalityDistributionTest, TopologyMatrixSatisfiesInvariants)
 {
     for (size_t writerCount = kMinWriterCount; writerCount <= kMaxWriterCount; ++writerCount) {
@@ -579,7 +591,7 @@ TEST_F(MmcLocalityDistributionTest, TopologyMatrixSatisfiesInvariants)
                 EXPECT_EQ(FormatDistribution(repeated[i]), FormatDistribution(table[i]));
             }
 
-            // n == m 时每个写者恰好 2 个目标：本地 n 份 + 唯一一个 D 的 n 份。
+            // When n == m, each writer has exactly 2 targets: n local shares + n shares from one D.
             if (memoryCount == writerCount) {
                 for (const auto &dist : table) {
                     EXPECT_EQ(dist.targets_.size(), kTwoTargets);
@@ -589,9 +601,9 @@ TEST_F(MmcLocalityDistributionTest, TopologyMatrixSatisfiesInvariants)
     }
 }
 
-// 已知拓扑的 fanout（每写者目标数）。现网「本地亲和置换」会把部分写者的 fanout 抬高：
-// 5P+3D 的 writer4 到 4 个、writer2/3/5 到 3 个，而纯贪心/理论最优只要 2~3 个。
-// 8P+11D 则到 5 个。这些数字是算法改动时的对照基线。
+// Known-topology fanout (targets per writer). The deployed local-affinity exchange increases fanout for some writers:
+// 5P+3D: writer4 has 4 targets and writer2/3/5 have 3; pure greedy/theoretical optimum requires only 2-3.
+// 8P+11D reaches 5 targets. These figures provide a baseline for algorithm changes.
 TEST_F(MmcLocalityDistributionTest, FanoutIsPinnedForKnownTopologies)
 {
     struct FanoutCase {
@@ -627,8 +639,8 @@ TEST_F(MmcLocalityDistributionTest, FanoutIsPinnedForKnownTopologies)
     }
 }
 
-// fanout 的理论下界：单 backendId 最多承载 n 份份额，写者配额 n+m，
-// 故每个写者至少 ceil((n+m)/n) 个目标，至多 n+m 个（每个目标至少 1 份）。
+// Theoretical fanout lower bound: each backendId holds at most n shares and writer quota is n+m,
+// so each writer needs at least ceil((n+m)/n) targets and at most n+m (at least 1 share per target).
 TEST_F(MmcLocalityDistributionTest, FanoutMeetsTheoreticalLowerBound)
 {
     for (size_t writerCount = kMinWriterCount; writerCount <= kMaxWriterCount; ++writerCount) {
@@ -646,8 +658,8 @@ TEST_F(MmcLocalityDistributionTest, FanoutMeetsTheoreticalLowerBound)
     }
 }
 
-// 2P + m 个 D 时 fanout = 1 + ceil(m/2)：每个 D 只有 2 份份额，
-// 每多 2 台 D 才多一个目标。这条规律可用来预估 2P 场景的收敛程度。
+// For 2P + m D nodes, fanout = 1 + ceil(m/2): each D has only 2 shares,
+// so every 2 additional D machines add one target. This estimates convergence for 2P topologies.
 TEST_F(MmcLocalityDistributionTest, TwoWriterFanoutGrowsOnePerTwoMemoryNodes)
 {
     for (size_t memoryCount = kMinMemoryCount; memoryCount <= kMaxMemoryCount; ++memoryCount) {
@@ -661,11 +673,11 @@ TEST_F(MmcLocalityDistributionTest, TwoWriterFanoutGrowsOnePerTwoMemoryNodes)
     }
 }
 
-// 现网贪心账本会溢出到「相邻」的 backendId，而 allBackendIds 是写者在前、memory 在后，
-// 所以 D 少的时候写者会落到别的 P 节点：5P+3D 中 writer2 有 3/8 写到 P3/P4，writer3/4 各 1/8；
-// 5P+1D（配额 6）中 writer1/2/4 分别有 1/6、2/6、1/6 写到下一个 P。4P+4D 恰好是 0。
-// 若后续改成「溢出只打 memory」，本用例的期望值应全部变成 0，可作为该改动的回归锚点。
-// 远端份额只落在 memory：任何已知拓扑都不应出现「写到别的 writer(P)」的情况。
+// The deployed greedy ledger overflows to adjacent backendIds; allBackendIds lists writers before memory.
+// With few D nodes, writers reach other P nodes: in 5P+3D, writer2 sends 3/8 to P3/P4, and writer3/4 send 1/8 each.
+// In 5P+1D (quota 6), writer1/2/4 send 1/6, 2/6, 1/6 to the next P, respectively. In 4P+4D this is exactly 0.
+// If overflow becomes memory-only, all expectations in this test should become 0, providing a regression anchor.
+// Remote shares target memory only: no known topology should write to another writer (P).
 TEST_F(MmcLocalityDistributionTest, NoCrossWriterSpillForKnownTopologies)
 {
     const std::vector<std::pair<size_t, size_t>> topologies = {{kFiveWriters, kThreeMemoryNodes},
@@ -684,8 +696,8 @@ TEST_F(MmcLocalityDistributionTest, NoCrossWriterSpillForKnownTopologies)
     }
 }
 
-// 抽样验证「收缩」的实际效果：一个写者的分配请求最终只会落到它表里的那几个 backendId，
-// 集合大小等于 fanout（不是纯随机时的 n+m 个）。
+// Sample the actual reduction: each writer's allocations reach only the backendIds in its table;
+// the set size equals fanout, rather than n+m with pure random allocation.
 TEST_F(MmcLocalityDistributionTest, SampledTargetSetMatchesTableFanout)
 {
     const auto topology = MakeTopology(kFiveWriters, kThreeMemoryNodes);
@@ -702,15 +714,16 @@ TEST_F(MmcLocalityDistributionTest, SampledTargetSetMatchesTableFanout)
             hitBackendIds.insert(target->backendId_);
         }
         EXPECT_EQ(hitBackendIds.size(), Fanout(dist));
-        EXPECT_LT(hitBackendIds.size(), topology.allIds.size()); // 收缩后必然少于全量节点数
+        // Reduction must yield fewer targets than the full node set.
+        EXPECT_LT(hitBackendIds.size(), topology.allIds.size());
         for (const auto &target : dist.targets_) {
             EXPECT_EQ(hitBackendIds.count(target.backendId_), kOneEntry);
         }
     }
 }
 
-// 权重抽样：5P+3D 中写者 4 的分布为 {5:1, 6:2, 7:2, 4:3}，抽样比例应与权重比例一致；
-// 注意顺序为「先本地 4，不是 5」——目标列表顺序不是权重顺序。
+// Weighted sampling: writer 4 in 5P+3D has distribution {5:1, 6:2, 7:2, 4:3}; sample ratios must match weights.
+// Order starts with local 4, not 5; target-list order is not weight order.
 TEST_F(MmcLocalityDistributionTest, PickTargetByWeightMatchesWeightRatio)
 {
     const auto topology = MakeTopology(kFiveWriters, kThreeMemoryNodes);
@@ -735,7 +748,7 @@ TEST_F(MmcLocalityDistributionTest, PickTargetByWeightMatchesWeightRatio)
     }
 }
 
-// 同一 rng 种子必须产生完全相同的目标序列（分布式节点之间依赖该确定性）。
+// The same RNG seed must yield exactly the same target sequence; distributed nodes depend on this determinism.
 TEST_F(MmcLocalityDistributionTest, PickTargetByWeightIsDeterministicForSameSeed)
 {
     const auto topology = MakeTopology(kFiveWriters, kThreeMemoryNodes);
@@ -753,7 +766,7 @@ TEST_F(MmcLocalityDistributionTest, PickTargetByWeightIsDeterministicForSameSeed
     }
 }
 
-// 空表 / 总权重为 0 时返回 nullptr，调用方回退到 ALLOC_ARRANGE。
+// Empty table / zero total weight returns nullptr; caller falls back to ALLOC_ARRANGE.
 TEST_F(MmcLocalityDistributionTest, PickTargetByWeightReturnsNullForUnusableDistribution)
 {
     std::mt19937 rng(kPickSeed);
@@ -774,8 +787,8 @@ TEST_F(MmcLocalityDistributionTest, PickTargetByWeightReturnsNullForUnusableDist
     EXPECT_EQ(target->backendId_, "2");
 }
 
-// 日志内容回归：MMC_LOG_INFO 宏内部声明了 oss，若这里也用 oss 会被遮蔽，
-// 日志会变成「半成品消息 + 自己的消息」的错乱输出（历史缺陷）。
+// Log regression: MMC_LOG_INFO declares oss internally, shadowing any local oss;
+// this historically produced corrupted output combining an unfinished message with itself.
 TEST_F(MmcLocalityDistributionTest, LogBackendDistributionTablePrintsTargets)
 {
     ASSERT_EQ(MmcOutLogger::Instance().SetLogLevel(INFO_LEVEL), 0);

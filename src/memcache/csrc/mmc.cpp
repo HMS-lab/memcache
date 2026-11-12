@@ -161,8 +161,8 @@ local_config create_default_local_config()
     SafeCopy("tcp://127.0.0.1:5000", cfg.meta_service_url, sizeof(cfg.meta_service_url));
     SafeCopy("tcp://127.0.0.1:6000", cfg.config_store_url, sizeof(cfg.config_store_url));
     SafeCopy("", cfg.backend_id, sizeof(cfg.backend_id));
-    // 默认留空：真正的默认值 writer 由配置层（ock.mmc.local_service.role）提供，
-    // 否则 Python 侧默认 writer 会把配置文件/环境变量里的 memory 静默覆盖掉。
+    // Leave empty by default: the configuration layer (ock.mmc.local_service.role) supplies the actual writer default.
+    // Otherwise a Python writer default would silently override memory from a configuration file/environment variable.
     SafeCopy("", cfg.role, sizeof(cfg.role));
     SafeCopy("info", cfg.log_level, sizeof(cfg.log_level));
     cfg.world_size = 256UL;
@@ -261,7 +261,8 @@ static int32_t LoadAndValidateConfig(const local_config *config)
     if (config->role[0] != '\0' && std::string(config->role) != std::string(g_localServiceConfig.role)) {
         SafeCopy(config->role, g_localServiceConfig.role, PROTOCOL_SIZE);
     }
-    // 配置层已按 config > env > 内置默认(writer) 解析；这里只兜底空值，避免下游拿到空 role。
+    // Configuration already resolves config > env > built-in writer; only handle empty values here to avoid an empty
+    // downstream role.
     if (g_localServiceConfig.role[0] == '\0') {
         SafeCopy("writer", g_localServiceConfig.role, PROTOCOL_SIZE);
     }

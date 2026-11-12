@@ -737,8 +737,8 @@ void DefineMmcStructModule(py::module_ &m)
                     Config store TLS decrypter library path.
                 )pbdoc")
             .def_readwrite("alloc_strategy", &mmc_meta_service_config_t::allocStrategy, R"pbdoc(
-                 Global alloc strategy: 0=unset(default, request flags=0 走 InnerAlloc default)，2=random,
-                 4=arrange, 8=local_first。由 MetaService 统一管理，per-writer 不再单独配置。
+                 Global alloc strategy: 0=unset (default; request flags=0 uses InnerAlloc default), 2=random,
+                 4=arrange, 8=local_first. Managed centrally by MetaService; no separate per-writer configuration.
              )pbdoc");
 
     metaConfigClass

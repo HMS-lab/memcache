@@ -277,10 +277,12 @@ void MmcLocalServiceDefault::Stop()
         ubsIoProxyPtr_ = nullptr;
     }
 
-    // 注销 RPC 依赖链路存活，须在断链前发送（best-effort，失败由断链自动清理兜底）
+    // Unregister RPC needs a live link; send before disconnecting (best effort; disconnect cleanup handles failures).
     UnregisterBm();
-    // 先断链再销毁 MF：链路的重发现/重连/拷贝回调依赖 MF（etcd leader 发现、ReconnectBm、
-    // CopyBlob 均触达 bmProxyPtr_），MF 先销毁会留下链路回调打进死区的窗口
+    // Disconnect before destroying MF: rediscovery, reconnection, and copy callbacks depend on MF (etcd leader
+    // discovery,
+    // ReconnectBm, and CopyBlob all access bmProxyPtr_). Destroying MF first leaves a window for callbacks into
+    // destroyed state.
     if (metaNetClient_ != nullptr) {
         metaNetClient_->Stop();
         metaNetClient_ = nullptr;

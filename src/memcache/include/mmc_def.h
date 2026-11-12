@@ -111,8 +111,8 @@ typedef struct {
     uint32_t ssdMetadataMode; // 0: aggregated; 1: separated
     // 分配时 padding 到全局最大对齐值，全网统一，由 MetaService 统一管理。
     bool enableMaxValueMode;
-    // 全局分配策略由 MetaService 统一管理(AllocFlags): 0/未配置不强制(尊重请求侧策略,
-    // 请求默认 flags=0 走 InnerAlloc default→ArrangeLocality)、ALLOC_ARRANGE/ALLOC_LOCAL_FIRST 强制覆盖。
+    // MetaService manages global allocation (AllocFlags): 0/unset does not override the request strategy
+    // (default flags=0 uses InnerAlloc default -> ArrangeLocality); ALLOC_ARRANGE/ALLOC_LOCAL_FIRST force an override.
     uint32_t allocStrategy;
     // MetaService 网络异步线程池线程数；0 表示使用默认值，有效范围 [4, 256]，重启生效。
     uint32_t netPoolBase;
@@ -126,7 +126,7 @@ typedef struct {
     char bmIpPort[DISCOVERY_URL_SIZE];
     char bmHcomUrl[DISCOVERY_URL_SIZE];
     char backendId[DISCOVERY_URL_SIZE]; // Backend identity for kv_event (pod IP etc.)
-    char role[PROTOCOL_SIZE];           // 本实例角色: "writer"(P,写者) / "memory"(D,仅提供内存)
+    char role[PROTOCOL_SIZE];           // Instance role: "writer" (P, writes) / "memory" (D, provides memory only).
     uint32_t createId;
     char dataOpType[PROTOCOL_SIZE];
     uint64_t localDRAMSize;
@@ -184,9 +184,9 @@ enum affinity_policy : int {
 
 constexpr uint32_t GET_KEY_INFO_FOR_LAYER_WISE = 1;
 constexpr uint32_t GET_DATA_FOR_LAYER_WISE = 1;
-constexpr uint32_t MMC_REMOVE_FLAG_LAZY = 1U << 0; /* 懒删除：标记为优先淘汰，按首次懒删除的 FIFO 顺序自然淘汰 */
-/* 保留SSD副本：仅释放内存层，key降级为SSD-only，不删SSD数据与元数据 */
-/* 与 LAZY 同时置位时：内存层懒删除，淘汰时仅释放内存层，SSD 副本始终保留 */
+constexpr uint32_t MMC_REMOVE_FLAG_LAZY = 1U << 0; /* Lazy deletion: mark for priority natural eviction in first-marked FIFO order. */
+/* Retain SSD replica: release only memory; demote key to SSD-only without deleting SSD data or metadata. */
+/* With LAZY also set: lazy-delete memory; eviction releases only memory and always retains the SSD replica. */
 constexpr uint32_t MMC_REMOVE_FLAG_KEEP_SSD = 1U << 1;
 
 typedef struct {

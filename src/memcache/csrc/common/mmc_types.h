@@ -145,12 +145,12 @@ enum class EvictResult {
     FAIL,      // 淘汰失败
 };
 
-#define ALLOC_FLAGS_GVA_MALLOC_MASK (1 << 8) // 标记 alloc 是由 malloc 接口触发
+#define ALLOC_FLAGS_GVA_MALLOC_MASK (1 << 8) // Mark allocations triggered by the malloc interface.
 enum AllocFlags {
-    ALLOC_FORCE_BY_RANK = 1 << 0, // 按照rank强制分配
+    ALLOC_FORCE_BY_RANK = 1 << 0, // Force allocation by rank.
     ALLOC_RANDOM = 1 << 1,
     ALLOC_ARRANGE = 1 << 2,
-    ALLOC_LOCAL_FIRST = 1 << 3, // 同节点优先分配
+    ALLOC_LOCAL_FIRST = 1 << 3, // Prefer allocation on the same node.
 };
 
 struct MmcLocation {

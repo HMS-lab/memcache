@@ -48,22 +48,23 @@ public:
 
     void Stop();
 
-    // 注册一个内存贡献节点（LocalService/BM）：将其提供的各介质内存池（bm）纳入集群可分配空间，
-    // 并登记 rank -> backendId 关联，供节点亲和分配（local_first）识别写者/内存节点拓扑。
-    // 参数说明：
-    //   rank          该 LocalService 进程的全局 rank id（内存提供者身份）
-    //   mediaType     各内存池介质类型（HBM/DDR/SSD...），与 bm/capacity 一一对应
-    //   bm            各介质内存池起始地址（base mem），长度与 mediaType 一致
-    //   capacity      各介质内存池容量，长度与 mediaType 一致
-    //   blobList      已存在的内存块列表（注册时随附，供元数据恢复）
-    //   storageEnabled 是否启用 SSD 存储池
-    //   backendId     节点的 backendId，通常取节点连接 IP/域名；理想情况下同机器的多个
-    //                 LocalService share 同一 backendId。用途：1) 节点亲和分配按 backendId 维度
-    //                 选择目标；2) kvevent key存入删除事件/广播。
-    //   enableMaxValueMode 是否启用padding模式，用于解决外部碎片问题
-    //   role          节点角色："writer"（写者，如 P，会有数据写入）/ "memory"（纯内存提供者，如 D，
-    //                 只贡献内存不参与写入）。节点亲和分配时，写者的分布表按角色构建，
-    //                 让写者均匀地把数据分流到内存节点上。
+    // Register a memory-contributing node (LocalService/BM): add its per-medium pools (bm) to cluster allocatable
+    // space,
+    // and record rank -> backendId for local_first node-affinity allocation to identify writer/memory topology.
+    // Parameters:
+    // rank          Global rank ID of this LocalService process (memory-provider identity).
+    // mediaType     Pool media types (HBM/DDR/SSD...), corresponding one-to-one with bm/capacity.
+    // bm            Base addresses of the memory pools; same length as mediaType.
+    // capacity      Pool capacities; same length as mediaType.
+    // blobList      Existing blocks supplied at registration for metadata recovery.
+    // storageEnabled Whether to enable the SSD storage pool.
+    // backendId     Node backendId, usually connection IP/domain. Ideally, LocalServices on the same machine
+    // share one backendId. Used for 1) target selection at backendId granularity in node-affinity allocation;
+    //               2) kvevent key storage/deletion events and broadcasts.
+    // enableMaxValueMode Whether to enable padding mode to address external fragmentation.
+    // role          Node role: "writer" (for example, P, writes data) / "memory" (for example, D,
+    //               contributes memory without writing). Node-affinity distribution tables are built by role
+    //               to distribute writers' data evenly to memory nodes.
     Result BmRegister(uint32_t rank, std::vector<uint16_t> mediaType, std::vector<uint64_t> bm,
                       std::vector<uint64_t> capacity, std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList,
                       bool storageEnabled = false, const std::string &backendId = "", const std::string &role = "");
@@ -99,12 +100,15 @@ public:
     std::string GetBackendIdForRank(uint32_t rank);
     std::vector<uint32_t> GetRanksForBackendId(const std::string &backendId);
     std::vector<std::string> GetAllBackendIds();
-    // 节点亲和分配拓扑：backendId 角色("writer"/"memory") 与写者分布表，注册/注销时自动重算。
+    // Node-affinity topology: backendId roles ("writer"/"memory") and writer distributions, rebuilt on
+    // registration/unregistration.
     std::string GetBackendRole(const std::string &backendId);
-    // 节点亲和分配：按 caller rank 查分布表，权重选出一个目标 backendId；无配置/非写者返回空串（调用方回退随机）。
+    // Node affinity: look up caller rank distribution and select a weighted backendId; return empty if
+    // unconfigured/non-writer for random fallback.
     std::string SelectTargetBackendForRank(uint32_t callerRank);
-    // 节点亲和分配（ALLOC_LOCAL_FIRST）：将 options.preferredRank_ 扩展为目标 backendId 的全部 ranks 并随机打乱。
-    // callerRank 由请求的 rankId_ 字段显式携带，不依赖 options.preferredRank_ 内容；非 LOCAL_FIRST 直接返回。
+    // Node affinity (ALLOC_LOCAL_FIRST): expand options.preferredRank_ to all target-backend ranks and shuffle.
+    // callerRank is explicit in request rankId_, independent of options.preferredRank_; return immediately unless
+    // LOCAL_FIRST.
     void ExpandLocalFirstRanks(AllocOptions &options, uint32_t callerRank);
 
 private:
@@ -128,12 +132,14 @@ private:
     mmc_meta_service_config_t options_;
     NetEngineOptions netOptions_;
     std::unordered_map<uint32_t, std::unordered_set<uint16_t>> rankMediaTypeMap_;
-    // 共用读写锁：1. 保护 backendId/rank 映射; 2.backendId 角色表与节点亲和分布表（读多写少，读共享、写独占）
+    // Shared read/write lock protects 1) backendId/rank mappings, 2) role and affinity tables (frequent shared reads,
+    // exclusive writes).
     std::shared_mutex rankBackendIdMapLock_;
     std::unordered_map<uint32_t, std::string> rankBackendIdMap_;
     std::unordered_map<std::string, std::unordered_set<uint32_t>> backendIdRankMap_;
     std::unordered_map<std::string, std::string> backendIdRoleMap_; // backendId -> "writer"/"memory"
-    std::vector<BackendDistribution> writeDistributionTable_; // 节点亲和分配缓存，LocalService注册/注销时重算
+    // Node-affinity cache, rebuilt when LocalServices register/unregister.
+    std::vector<BackendDistribution> writeDistributionTable_;
     std::unordered_map<std::string, std::string> metadata_;
     ock::smem::StorePtr confStore_ = nullptr;
     MmcKvEventRuntime kvEvents_;

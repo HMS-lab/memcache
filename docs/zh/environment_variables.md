@@ -11,7 +11,7 @@
 | `MMC_META_CONFIG_PATH` | 无（必填） | MetaService 配置文件路径，指向 `mmc-meta.conf`。未设置时 MetaService 无法启动。 |
 | `MMC_LOCAL_CONFIG_PATH` | 无（必填） | LocalService 配置文件路径，指向 `mmc-local.conf`。LocalService 初始化时读取。 |
 | `MMC_LOCAL_SERVICE_BACKEND_ID` | 无 | kv_event 后端标识（如 Pod IP）。配置项 `ock.mmc.local_service.backend_id` 为空时回退到此值。 |
-| `MMC_LOCAL_SERVICE_ROLE` | `writer` | 节点角色：`writer`（P 侧，参与写分布）/ `memory`（D 侧，只做内存）。配置项 `ock.mmc.local_service.role` 未显式配置时回退到此值；仅 `alloc_strategy = local_first` 时有意义。 |
+| `MMC_LOCAL_SERVICE_ROLE` | `writer` | Node role: `writer` (P side, participates in write distribution) / `memory` (D side, provides memory only). Used when `ock.mmc.local_service.role` is not explicitly configured; meaningful only with `alloc_strategy = local_first`. |
 | `MMC_ENABLE_PER_RANK_METRICS` | 未设置=关闭 | 开启 per-rank Prometheus 指标，取值 `1`/`true`/`ON`/`on`。仅 MetaService 进程生效。 |
 | `MMC_DEVICE_ID` | 设备总数-1 | Python 示例使用的设备 ID，由 `run_all_examples.sh` 自动选择空闲设备并设置。 |
 
