@@ -1,5 +1,9 @@
 # 常见问题及解决办法
 
+> [!NOTE] 说明
+>
+> MemCache 的内存池与传输能力依赖 MemFabric Hybrid 底座。当日志中出现 `[HYBM]`、`[SMEM]`、`[HCOM]` 等底层模块的报错时，请同时查阅 [MemFabric Hybrid FAQ](https://memfabric-hybrid.readthedocs.io/zh-cn/latest/wiki/FAQ/)，该文档按传输协议汇总了内存分配、设备打开、内存注册与导入等底层问题的定位方法。
+
 ## 1. store对象初始化失败
 
 **问题现象**
