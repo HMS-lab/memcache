@@ -313,7 +313,8 @@ Result MmcClientDefault::Put(const std::string &key, const MmcBufferArray &bufAr
 
     auto ret = DoPut(key, bufArr, options, flags);
 
-    // 防呆重试：DoPut 返回 -2017 隐含 WRITE_FAIL 已成功上报（RPC 失败会返回错误码）。
+    // Defensive retry: DoPut returning -2017 implies WRITE_FAIL was reported successfully (RPC failures return an
+    // error).
     for (int32_t retryRound = 1; retryRound <= MAX_PUT_RETRY_TIMES; ++retryRound) {
         if (!IsHybmCopyRetryable(ret)) {
             break;
@@ -430,11 +431,12 @@ Result MmcClientDefault::BatchPut(const std::vector<std::string> &keys, const st
         return MMC_INVALID_PARAM;
     }
 
-    // batchResult 由 DoBatchPut 统一 assign：alloc RPC 失败早退时保持调用方原值。
+    // DoBatchPut assigns batchResult centrally; an early return on alloc RPC failure preserves the caller's values.
     auto ret = DoBatchPut(keys, bufArrs, options, flags, batchResult);
 
-    // 防呆重试：-2017 表示 GVA 注册不存在/已卸载，失败 key 已随 WRITE_FAIL 上报释放，可重新
-    // 申请空间重写；重试轮清空 preferredLocalServiceIDs 以切换节点；仅本轮 RPC 均成功才重试。
+    // Defensive retry: -2017 means the GVA registration is missing or unmounted. WRITE_FAIL released the failed keys,
+    // so allocation and writing can be retried. Clear preferredLocalServiceIDs to switch nodes; retry only if all RPCs
+    // succeeded.
     for (int32_t retryRound = 1; retryRound <= MAX_PUT_RETRY_TIMES; ++retryRound) {
         const std::vector<size_t> retryIndices = CollectPutRetryKeys(batchResult);
         if (!ShouldContinuePutRetry(ret, retryIndices)) {
@@ -456,7 +458,7 @@ Result MmcClientDefault::BatchPut(const std::vector<std::string> &keys, const st
         mmc_put_options retryOptions = options;
         std::fill(std::begin(retryOptions.preferredLocalServiceIDs), std::end(retryOptions.preferredLocalServiceIDs),
                   -1);
-        // 初值保持 -2017：重试轮 alloc RPC 失败早退时不覆盖原失败结果。
+        // Keep the initial -2017: an early return on alloc RPC failure during retry must preserve the original failure.
         std::vector<int> retryResult(retryKeys.size(), SMEM_BM_GVA_NOT_FOUND);
         const Result retryRet = DoBatchPut(retryKeys, retryBufArrs, retryOptions, flags, retryResult);
         for (size_t j = 0; j < retryIndices.size(); ++j) {

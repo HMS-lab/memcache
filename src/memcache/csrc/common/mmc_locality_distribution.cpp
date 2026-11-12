@@ -21,8 +21,8 @@ namespace ock {
 namespace mmc {
 
 namespace {
-// 在 targets 中找到指定 backendId 的条目；不存在则追加零权重条目，返回其引用。
-// 注意：返回的引用仅在调用者当前不再次 push_back 的情况下有效；需要多次修改同一列表时请改用 AddWeight。
+// Find the backendId in targets; if absent, append a zero-weight entry and return its reference.
+// The reference remains valid only until the next push_back; use AddWeight for repeated modifications of the same list.
 BackendTarget &LocateOrInsertTarget(std::vector<BackendTarget> &targets, const std::string &backendId)
 {
     for (auto &target : targets) {
@@ -34,8 +34,8 @@ BackendTarget &LocateOrInsertTarget(std::vector<BackendTarget> &targets, const s
     return targets.back();
 }
 
-// 对 targets 中指定 backendId 的条目累加 delta（可为负）；条目不存在则按 (backendId, +delta) 插入。
-// 内部幂等、无跨调用引用，供需要多次修改同一列表的场景使用。
+// Add delta (possibly negative) to the backendId weight in targets; insert (backendId, +delta) if absent.
+// Idempotent internally; retains no references across calls. Use for repeated modifications of the same list.
 void AddWeight(std::vector<BackendTarget> &targets, const std::string &backendId, int32_t delta)
 {
     for (auto &target : targets) {
@@ -56,8 +56,8 @@ std::vector<BackendDistribution> BuildBackendDistribution(const std::vector<std:
 {
     const size_t writerCount = writeBackendIds.size();
     const size_t totalCount = allBackendIds.size();
-    const uint32_t perBackendShare = static_cast<uint32_t>(writerCount); // 每个 backendId 总份额
-    // 每个写者的配额 = 总份额 / 写者数 = n*(n+m)/n = n+m 份，即 backendId 总数（恒为整数）
+    const uint32_t perBackendShare = static_cast<uint32_t>(writerCount); // Total shares for each backendId
+    // Writer quota = total shares / writer count = n*(n+m)/n = n+m shares, the backendId count (always integral).
     const uint32_t quota = static_cast<uint32_t>(allBackendIds.size());
 
     std::vector<BackendDistribution> table;
@@ -66,8 +66,9 @@ std::vector<BackendDistribution> BuildBackendDistribution(const std::vector<std:
     }
     table.reserve(writerCount);
 
-    // 第一步：贪心账本。accountBook[i] = allBackendIds[i] 的剩余份额。
-    // 每个写者从「自己的 backendId」位置开始消耗（本地优先），不够再按 allBackendIds 顺序向后扩散取份额（环形）。
+    // Step 1: greedy ledger. accountBook[i] holds the remaining shares for allBackendIds[i].
+    // Each writer starts at its own backendId (local first), then takes remaining shares in circular allBackendIds
+    // order.
     std::vector<uint32_t> accountBook(totalCount, perBackendShare);
     std::unordered_map<std::string, size_t> backendIndex;
     for (size_t i = 0; i < allBackendIds.size(); ++i) {
@@ -78,10 +79,10 @@ std::vector<BackendDistribution> BuildBackendDistribution(const std::vector<std:
         dist.writerBackendId_ = writeId;
         uint32_t need = quota;
         const size_t selfIdx = (backendIndex.find(writeId) != backendIndex.end()) ? backendIndex[writeId] : 0;
-        // 扫描顺序：自己 → 所有 memory（按 allBackendIds 顺序）→ 其余 backend（环形兜底）。
-        // 目的：让「远端份额」优先落到 memory 节点，避免写请求跨到别的 writer(P) 上。
-        // 正常配置下 memory 的账本总量 (m * n) 恰好等于所有 writer 的远端需求 (n * m)，
-        // 因此兜底段只是防御，不会真正消耗其他 writer 的份额。
+        // Scan order: self -> all memory nodes (in allBackendIds order) -> remaining backends (circular fallback).
+        // Prefer memory nodes for remote shares to avoid sending writes to other writers (P nodes).
+        // With a normal configuration, the memory ledger total (m * n) equals all writers' remote demand (n * m),
+        // so fallback is defensive and does not actually consume other writers' shares.
         std::vector<size_t> scanOrder;
         scanOrder.reserve(totalCount);
         scanOrder.push_back(selfIdx);
@@ -112,14 +113,15 @@ std::vector<BackendDistribution> BuildBackendDistribution(const std::vector<std:
         table.emplace_back(std::move(dist));
     }
 
-    // 第二步（选做）：本地亲和交换 —— 让每个写者尽量多写自己。
-    // 遍历每个写者，若权重最大的目标不是本地，则在其余写者中找「持有本地 backendId 份额最多」者，
-    // 做等量置换（自己获得本地份额，对方获得 maxTarget 份额），保持各 backendId 被消耗总量守恒。
-    // 注意：swap 过程中 targets_ 会 push_back，可能触发 vector 扩容使引用/指针失效，故一律按索引+重新查找操作。
+    // Step 2 (optional): local-affinity exchange to maximize each writer's local writes.
+    // For each writer whose highest-weight target is remote, find the other writer holding the most local-backend
+    // shares.
+    // Swap equal shares (local shares for maxTarget shares), preserving total consumption for each backendId.
+    // Swapping can push_back into targets_ and invalidate references/pointers; use indices and repeat lookups.
     for (size_t i = 0; i < table.size(); ++i) {
         BackendDistribution &dist = table[i];
         const std::string localId = dist.writerBackendId_;
-        // 找权重最大条目（按索引，避免悬垂指针）
+        // Find the highest-weight entry by index to avoid dangling pointers.
         int maxIdx = -1;
         for (size_t j = 0; j < dist.targets_.size(); ++j) {
             if (maxIdx == -1 || dist.targets_[j].weight_ > dist.targets_[maxIdx].weight_) {
@@ -131,7 +133,7 @@ std::vector<BackendDistribution> BuildBackendDistribution(const std::vector<std:
         }
         const std::string maxBackendId = dist.targets_[maxIdx].backendId_;
         const uint32_t maxWeight = dist.targets_[maxIdx].weight_;
-        // 找持有 localId 份额最多的其他写者
+        // Find the other writer holding the most localId shares.
         size_t bestOtherIdx = SIZE_MAX;
         uint32_t bestHeld = 0;
         for (size_t k = 0; k < table.size(); ++k) {
@@ -149,14 +151,15 @@ std::vector<BackendDistribution> BuildBackendDistribution(const std::vector<std:
             continue;
         }
         const uint32_t exchange = std::min(maxWeight, bestHeld);
-        // 写者 dist：本地 +exchange，maxTarget -exchange（AddWeight 幂等，无引用失效）
+        // Writer dist: local +exchange, maxTarget -exchange (AddWeight is idempotent and avoids reference
+        // invalidation).
         AddWeight(dist.targets_, localId, static_cast<int32_t>(exchange));
         AddWeight(dist.targets_, maxBackendId, -static_cast<int32_t>(exchange));
-        // 对方写者：本地(localId) -exchange，maxBackendId +exchange
+        // Other writer: local(localId) -exchange, maxBackendId +exchange.
         BackendDistribution &other = table[bestOtherIdx];
         AddWeight(other.targets_, localId, -static_cast<int32_t>(exchange));
         AddWeight(other.targets_, maxBackendId, static_cast<int32_t>(exchange));
-        // 移除权重归零的条目，保持列表干净
+        // Remove zero-weight entries to keep the list clean.
         auto eraseZero = [](std::vector<BackendTarget> &targets) {
             targets.erase(
                 std::remove_if(targets.begin(), targets.end(), [](const BackendTarget &t) { return t.weight_ == 0; }),
@@ -173,8 +176,8 @@ std::vector<BackendDistribution> BuildBackendDistribution(const std::vector<std:
 void LogBackendDistributionTable(const std::vector<BackendDistribution> &table)
 {
     for (const auto &dist : table) {
-        // 注意：局部流变量不能取名为 oss —— MMC_LOG_INFO 宏内部也声明了 oss，会遮蔽本变量，
-        // 使宏里拼串时取到自己的半成品消息，最终日志内容错乱。
+        // Do not name the local stream oss: MMC_LOG_INFO declares oss internally and would shadow it,
+        // causing the macro to use its own unfinished message and corrupt the log output.
         std::ostringstream message;
         message << "ALLOC_LOCAL_FIRST: dist writer[" << dist.writerBackendId_ << "] -> {";
         for (size_t j = 0; j < dist.targets_.size(); ++j) {

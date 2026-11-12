@@ -7,7 +7,7 @@ Setup:
   - Meta service on ports 5088/6088/8088
   - Local writer 1: backend_id=192.168.0.1, writes 100 keys immediately
   - Local writer 2: backend_id=192.168.0.2, sleeps 3s then writes 100 keys
-  - Alloc strategy: local_first (set via MetaConfig, 由 MetaService 统一管理)
+  - Alloc strategy: local_first (set via MetaConfig, managed centrally by MetaService)
 
 Expected:
   - Writer 1 keys → rank 0 (local to writer 1)
@@ -42,7 +42,7 @@ def start_meta():
     config.config_store_url = CS_URL
     config.metrics_url = METRICS_URL
     config.log_level = "debug"
-    config.alloc_strategy = ALLOC_LOCAL_FIRST  # 全局策略由 MetaService 统一配置
+    config.alloc_strategy = ALLOC_LOCAL_FIRST  # Global strategy configured centrally by MetaService
     assert MetaService.setup(config) == 0, "meta setup failed"
     logger.info("[meta] setup done, starting main loop...")
     MetaService.main()

@@ -260,18 +260,19 @@ public:
     Result UpdateState(const std::string &key, const MmcLocation &loc, const BlobActionResult &actRet,
                        uint64_t operateId);
 
-    // Remove 的实际执行结果，供 REST 等调用方按真实行为统计，而不是按请求标志猜测
+    // Actual Remove outcome, allowing REST and other callers to count real behavior rather than infer from request
+    // flags.
     enum class RemoveOutcome {
-        kRemoved = 0, // 已真实释放内存层（含 KEEP_SSD 仅释放内存层、SSD-only 退化为全量删除）
-        kMarkedLazy = 1, // 仅标记为优先淘汰，数据仍可访问
-        kNoop = 2        // 未产生实际释放：key 已在目标层（如 SSD-only key 上再次请求 KEEP_SSD）
+        kRemoved = 0, // Actual release (including memory-only KEEP_SSD release and SSD-only fallback to full deletion).
+        kMarkedLazy = 1, // Only marked for priority eviction; data remains accessible.
+        kNoop = 2        // No actual release: key already in target tier (for example, repeated KEEP_SSD on SSD-only).
     };
 
     /**
      * @brief remove the meta object
      * @param key          [in] key of the to-be-removed meta object
-     * @param flags        [in] MMC_REMOVE_FLAG_* 组合
-     * @param outcome      [out] 实际执行结果，可为 nullptr
+     * @param flags        [in] Combination of MMC_REMOVE_FLAG_* values
+     * @param outcome      [out] Actual outcome; may be nullptr
      */
     Result Remove(const std::string &key, uint32_t flags = 0, RemoveOutcome *outcome = nullptr);
 
@@ -580,17 +581,18 @@ private:
 
     bool CheckActiveLease(const std::string &key, const MmcMemObjMetaPtr &meta, const MmcBlobFilterPtr &filter);
 
-    /* Remove 辅助：返回 true 表示请求已处理完毕(ret 为最终结果)，false 表示继续走普通删除路径。
-     * keepSsdOnEvict：懒删除淘汰时只释放内存层、保留 SSD 副本（LAZY|KEEP_SSD 组合语义） */
+    /* Remove helper: true means handled (ret is final); false means continue with ordinary deletion.
+     * keepSsdOnEvict: lazy eviction releases only memory and retains the SSD replica (LAZY|KEEP_SSD semantics). */
     bool TryLazyRemove(const std::string &key, Result &ret, bool keepSsdOnEvict = false);
 
-    /* examinedObj：返回本次判定所依据的对象版本；返回 false（无 SSD 副本）时调用方必须用它做条件删除，
-     * 避免按 key 删掉并发重建的新对象 */
+    /* examinedObj: object version used for the decision; when false (no SSD replica), caller must use it for
+     * conditional deletion
+     * to avoid deleting a concurrently recreated object by key. */
     bool TryKeepSsdRemove(const std::string &key, Result &ret, RemoveOutcome *outcome, MmcMemObjMetaPtr &examinedObj);
 
     Result EraseAndRemove(const std::string &key);
 
-    /* 仅当容器内 key 仍映射到 expected 时才删除并释放其全部 blob */
+    /* Delete and release all blobs only if key still maps to expected in the container. */
     Result EraseAndRemoveIfMatch(const std::string &key, const MmcMemObjMetaPtr &expected);
 
     void PushRemoveList(const std::string &key, const MmcMemObjMetaPtr &meta, const MmcBlobFilterPtr &filter,

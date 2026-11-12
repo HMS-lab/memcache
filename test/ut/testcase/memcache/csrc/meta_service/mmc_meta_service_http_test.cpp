@@ -1088,7 +1088,7 @@ TEST_F(MmcMetaServiceHttpTest, RemoveKey_LazyFlagKeepsKeyUntilEvicted)
 {
     MockMmcHttpClient client(kHttpLocalHost, httpPort_);
 
-    // flags=MMC_REMOVE_FLAG_LAZY：只做 Demote，key 仍可查询
+    // flags=MMC_REMOVE_FLAG_LAZY: Demote only; the key remains queryable.
     auto lazyResponse =
         client.Delete(std::string("/key?key=") + kHttpAllocKey + "&flags=" + std::to_string(MMC_REMOVE_FLAG_LAZY));
     ASSERT_NE(lazyResponse, nullptr);
@@ -1107,7 +1107,7 @@ TEST_F(MmcMetaServiceHttpTest, RemoveKey_InvalidFlags_ReturnsError)
 {
     MockMmcHttpClient client(kHttpLocalHost, httpPort_);
 
-    // 未知标志位：明确报错，且 key 不被删除
+    // Unknown flag bits: return an explicit error without deleting the key.
     constexpr uint32_t unknownFlags = 0x8U;
     auto unknownResponse =
         client.Delete(std::string("/key?key=") + kHttpAllocKey + "&flags=" + std::to_string(unknownFlags));
@@ -1117,7 +1117,7 @@ TEST_F(MmcMetaServiceHttpTest, RemoveKey_InvalidFlags_ReturnsError)
     EXPECT_FALSE(unknownJson.at("success").get<bool>());
     EXPECT_EQ(unknownJson.at("error_message"), "Invalid 'flags' parameter");
 
-    // 非数字取值：同样在入口被拦截
+    // Nonnumeric values are also rejected at entry.
     auto malformedResponse = client.Delete(std::string("/key?key=") + kHttpAllocKey + "&flags=abc");
     ASSERT_NE(malformedResponse, nullptr);
     ASSERT_EQ(malformedResponse->status, kHttpStatusOk);
@@ -1155,7 +1155,7 @@ TEST_F(MmcMetaServiceHttpTest, MemoryEvict_ZeroFlagsWithLocations_EvictsKeys)
     nlohmann::json requestBody;
     requestBody["chunk_hashes"] = {kHttpAllocKey};
     requestBody["locations"] = {"LocalCPUBackend"};
-    // 显式传 flags=0 等价于不传，不应与 locations 冲突
+    // Explicit flags=0 is equivalent to omission and must not conflict with locations.
     requestBody["flags"] = 0;
 
     auto response = client.Post("/memory/evict", requestBody.dump(), "application/json");
@@ -1181,23 +1181,23 @@ TEST_F(MmcMetaServiceHttpTest, MemoryEvict_LazyFlag_ReportsMarkedInsteadOfEvicte
     ASSERT_EQ(response->status, kHttpStatusOk);
     auto responseJson = nlohmann::json::parse(response->body);
     EXPECT_EQ(responseJson.at("status"), "success");
-    // 懒删除只做标记，内存尚未释放，不计入 num_evicted
+    // Lazy deletion only marks; memory remains allocated, so do not count in num_evicted.
     EXPECT_EQ(responseJson.at("num_evicted").get<size_t>(), 0u);
     EXPECT_EQ(responseJson.at("num_marked").get<size_t>(), 1u);
 
-    // 懒删除后 key 仍可访问
+    // The key remains accessible after lazy deletion.
     auto queryResponse = WaitForResponse(client, std::string("/query_key?key=") + kHttpAllocKey);
     ASSERT_NE(queryResponse, nullptr);
     auto queryJson = nlohmann::json::parse(queryResponse->body);
     EXPECT_TRUE(queryJson.at("valid").get<bool>());
 }
 
-// SSD-only key 上的懒删除会退化为立即全量删除：必须按实际结果计入 num_evicted，而不是 num_marked
+// SSD-only lazy deletion becomes immediate full deletion: count actual results in num_evicted, not num_marked.
 TEST_F(MmcMetaServiceHttpTest, MemoryEvict_LazyFlagOnSsdOnlyKey_ReportsEvicted)
 {
     MockMmcHttpClient client(kHttpLocalHost, httpPort_);
 
-    // 制造 SSD-only key：补 SSD 副本后按 KEEP_SSD 停泊出内存层
+    // Create an SSD-only key: add an SSD replica, then park outside memory using KEEP_SSD.
     ASSERT_EQ(metaManager_->AddSsdBlob(kHttpAllocKey, MmcMemBlobDesc{0, 0, SIZE_32K, MEDIA_SSD, READABLE, 0}), MMC_OK);
     ASSERT_EQ(metaManager_->Remove(kHttpAllocKey, MMC_REMOVE_FLAG_KEEP_SSD), MMC_OK);
     usleep(100000U);
@@ -1214,7 +1214,7 @@ TEST_F(MmcMetaServiceHttpTest, MemoryEvict_LazyFlagOnSsdOnlyKey_ReportsEvicted)
     EXPECT_EQ(responseJson.at("num_evicted").get<size_t>(), 1u);
     EXPECT_EQ(responseJson.at("num_marked").get<size_t>(), 0u);
 
-    // key 已被真实删除
+    // The key was actually deleted.
     auto queryResponse = WaitForResponse(client, std::string("/query_key?key=") + kHttpAllocKey);
     ASSERT_NE(queryResponse, nullptr);
     auto queryJson = nlohmann::json::parse(queryResponse->body);

@@ -29,8 +29,8 @@ struct AllocOptions {
     std::vector<uint32_t> preferredRank_{};
     uint32_t flags_{0}; // 0 ~ 7 位用来做分配策略；从第8位开始，做其他的flag标记，详见 AllocFlags
 
-    // 以下两个字段仅在 Meta 端本地填充（节点亲和 debug 用），不参与网络序列化：
-    // callerRank_ 为发起分配请求的 rank，targetBackendId_ 为权重选中的目标 backendId。
+    // These two fields are populated locally on Meta only (node-affinity debugging) and are not serialized:
+    // callerRank_ is the allocation requester rank; targetBackendId_ is the weighted target backendId.
     uint32_t callerRank_{UINT32_MAX};
     std::string targetBackendId_;
 
@@ -95,7 +95,7 @@ struct PingMsg : public MsgBase {
 
 struct AllocRequest : MsgBase {
     uint64_t operateId_;
-    uint32_t rankId_; // caller rank，本地优先策略据此识别调用者所在节点
+    uint32_t rankId_; // Caller rank; local-first allocation uses this to identify the caller's node.
     std::string key_;
     AllocOptions options_;
 
@@ -243,7 +243,7 @@ struct BatchAllocRequest : MsgBase {
     std::vector<std::string> keys_;
     std::vector<AllocOptions> options_;
     uint32_t flags_;
-    uint32_t rankId_; // caller rank，本地优先策略据此识别调用者所在节点
+    uint32_t rankId_; // Caller rank; local-first allocation uses this to identify the caller's node.
     uint64_t operateId_;
     uint64_t leaseTtlMs_{0};
 
@@ -363,7 +363,7 @@ struct RemoveRequest : MsgBase {
         packer.Deserialize(destRankId);
         packer.Deserialize(key_);
         if (packer.Deserialize(flags_) != MMC_OK) {
-            // 旧版本客户端报文不携带 flags 字段，按默认语义(0)处理，保证新旧版本互通
+            // Older client messages have no flags field; use default semantics (0) for version interoperability.
             flags_ = 0;
         }
         return MMC_OK;
@@ -396,7 +396,7 @@ struct BatchRemoveRequest : MsgBase {
         packer.Deserialize(destRankId);
         packer.Deserialize(keys_);
         if (packer.Deserialize(flags_) != MMC_OK) {
-            // 旧版本客户端报文不携带 flags 字段，按默认语义(0)处理，保证新旧版本互通
+            // Older client messages have no flags field; use default semantics (0) for version interoperability.
             flags_ = 0;
         }
         return MMC_OK;
@@ -626,7 +626,7 @@ struct BatchUpdateResponse : MsgBase {
 struct BmRegisterRequest : MsgBase {
     uint32_t rank_{UINT32_MAX};
     std::string backendId_{};
-    std::string role_{}; // "writer"(P,写者) / "memory"(D,仅提供内存)，节点亲和分配用
+    std::string role_{}; // "writer" (P, writes) / "memory" (D, provides memory only), for node-affinity allocation.
     std::vector<uint16_t> mediaType_{};
     std::vector<uint64_t> addr_{};
     std::vector<uint64_t> capacity_{};

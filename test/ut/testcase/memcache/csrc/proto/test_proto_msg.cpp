@@ -485,7 +485,7 @@ TEST_F(TestProtoMsg, RemoveRequest_FlagsRoundTrip)
     EXPECT_EQ(req2.flags_, lazyFlag);
 }
 
-// RemoveRequest 旧版本报文不含 flags 字段：反序列化失败时降级为默认语义 0
+// Older RemoveRequest messages omit flags; on deserialization failure, fall back to default semantics 0.
 TEST_F(TestProtoMsg, RemoveRequest_LegacyPayloadWithoutFlags)
 {
     constexpr int16_t legacyMsgVer = 0;
@@ -505,7 +505,7 @@ TEST_F(TestProtoMsg, RemoveRequest_LegacyPayloadWithoutFlags)
     EXPECT_EQ(req.flags_, 0U);
 }
 
-// BatchRemoveRequest 旧版本报文不含 flags 字段：反序列化失败时降级为默认语义 0
+// Older BatchRemoveRequest messages omit flags; on deserialization failure, fall back to default semantics 0.
 TEST_F(TestProtoMsg, BatchRemoveRequest_LegacyPayloadWithoutFlags)
 {
     constexpr int16_t legacyMsgVer = 0;

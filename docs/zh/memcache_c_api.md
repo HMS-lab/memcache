@@ -86,10 +86,10 @@ int32_t mmc_setup(const local_config *config);
 
 `config`：本地配置（`local_config`）。
 
-`local_config` 中与节点亲和相关的字段：
+Node-affinity fields in `local_config`:
 
-  - `backend_id`：kv_event 后端标识（如 Pod IP），为空时回退到环境变量 `MMC_LOCAL_SERVICE_BACKEND_ID`；
-  - `role`：节点角色，`writer`（P 侧，默认）/ `memory`（D 侧，只做内存）；留空表示不覆盖配置层取值（配置项 `ock.mmc.local_service.role` > 环境变量 `MMC_LOCAL_SERVICE_ROLE` > `writer`）。
+  - `backend_id`: kv_event backend identifier (for example, Pod IP); falls back to `MMC_LOCAL_SERVICE_BACKEND_ID` when empty.
+  - `role`: Node role: `writer` (P side, default) / `memory` (D side, provides memory only). An empty value leaves configuration precedence unchanged: `ock.mmc.local_service.role` > `MMC_LOCAL_SERVICE_ROLE` > `writer`.
 
 **返回值**
 
@@ -297,7 +297,7 @@ int32_t mmcc_remove(const char *key, uint32_t flags);
 **参数**
 
 - `key`：数据的键，长度小于256个字节。
-- `flags`：可选标志位，默认为 `0`（立即删除）。支持 `MMC_REMOVE_FLAG_LAZY`（值为 `1`），开启懒删除模式：key 不立即删除，而是标记为优先淘汰（多个懒删除 key 按首次懒删除先后顺序淘汰，先删先淘汰），淘汰前仍可被 Get/Query 访问；支持 `MMC_REMOVE_FLAG_KEEP_SSD`（值为 `2`），仅释放内存层（HBM/DRAM）数据与元数据，key 的 SSD 副本（数据与元数据）保留，效果等同将该 key 从内存层淘汰降级为 SSD-only：后续 Get 仍可命中并从 SSD 回热；key 无 SSD 副本时等同于默认删除；`MMC_REMOVE_FLAG_LAZY` 与 `MMC_REMOVE_FLAG_KEEP_SSD` 同时置位时表示「内存层懒删除 + SSD 副本保留」：key 的内存层按懒删除优先淘汰，淘汰时只释放内存层，SSD 数据与元数据始终保留；key 仅有 SSD 副本时不执行删除并返回成功；key 仅有内存副本时等同于普通懒删除。
+- `flags`: Optional flags; default `0` deletes immediately. `MMC_REMOVE_FLAG_LAZY` (`1`) marks keys for priority eviction in first-marked order; Get/Query can still access them before eviction. `MMC_REMOVE_FLAG_KEEP_SSD` (`2`) releases only memory-tier (HBM/DRAM) data and metadata, retaining the SSD replica and its metadata. This demotes the key to SSD-only; a subsequent Get can still find it and rewarm it from SSD. Without an SSD replica, this is equivalent to default deletion. Setting both `MMC_REMOVE_FLAG_LAZY` and `MMC_REMOVE_FLAG_KEEP_SSD` requests lazy deletion of the memory tier while retaining the SSD replica: the memory tier receives priority eviction, and eviction releases only memory while preserving SSD data and metadata. An SSD-only key returns success without deletion; a key with only memory replicas behaves like ordinary lazy deletion.
 
 **返回值**
 
@@ -486,7 +486,7 @@ int32_t mmcc_batch_remove(const char **keys, uint32_t keys_count, int32_t *remov
 - `keys`：要从 BM 中删除的键列表，每个键长度小于256个字节。
 - `keys_count`：键的数量。
 - `remove_results`：每个删除操作的结果。
-- `flags`：操作标志位，默认为 `0`（立即删除）。支持 `MMC_REMOVE_FLAG_LAZY`（值为 `1`），开启懒删除模式：key 不立即删除，而是标记为优先淘汰（多个懒删除 key 按首次懒删除先后顺序淘汰，先删先淘汰）；期间 Get/Exist/Query 等访问会恢复其正常热度并取消该标记；若因内存压力被淘汰并降级到更低层介质，则视为删除完成，在低层按普通数据对待；对已停泊为 SSD-only 的 key（如经 KEEP_SSD 删除或淘汰降级后）执行懒删除时（未同时置位 `KEEP_SSD`），因无内存层 LRU 可降级，退化为立即全量删除；分片 LRU（lruType=sharded_lru）模式下仍保证懒删除 key 优先于普通 key 淘汰；自动淘汰时同一分片内按首次懒删除先后淘汰，不同分片之间不保证全局 FIFO；碎片整理、强制释放等按候选列表处理的路径只保证懒删除 key 优先进入候选，候选之间的先后顺序不保证；支持 `MMC_REMOVE_FLAG_KEEP_SSD`（值为 `2`），仅释放内存层（HBM/DRAM）数据与元数据，key 的 SSD 副本（数据与元数据）保留，效果等同将该 key 从内存层淘汰降级为 SSD-only：后续 Get 仍可命中并从 SSD 回热；key 无 SSD 副本时等同于默认删除；`MMC_REMOVE_FLAG_LAZY` 与 `MMC_REMOVE_FLAG_KEEP_SSD` 同时置位时表示「内存层懒删除 + SSD 副本保留」：key 的内存层按懒删除优先淘汰，淘汰时只释放内存层，SSD 数据与元数据始终保留；key 仅有 SSD 副本时不执行删除并返回成功；key 仅有内存副本时等同于普通懒删除。
+- `flags`: Optional flags; default `0` deletes immediately. `MMC_REMOVE_FLAG_LAZY` (`1`) marks a key for priority eviction instead of deleting it immediately. Keys are evicted in the order they were first marked. Get/Exist/Query access restores normal recency and clears the mark. Demotion to a lower storage tier under memory pressure completes the deletion; the lower tier treats the data normally. For an SSD-only key (for example, after KEEP_SSD or eviction demotion), lazy deletion without KEEP_SSD becomes immediate full deletion because there is no memory LRU position to demote. With sharded LRU (`lruType=sharded_lru`), lazy keys still precede normal keys. Automatic eviction follows first-marked order within each shard, with no global FIFO guarantee across shards. Defragmentation and forced-release paths that process candidate lists only guarantee priority inclusion of lazy keys, not candidate order. `MMC_REMOVE_FLAG_KEEP_SSD` (`2`) releases only memory-tier (HBM/DRAM) data and metadata, retaining the SSD replica and its metadata. This demotes the key to SSD-only; a subsequent Get can still find it and rewarm it from SSD. Without an SSD replica, this is equivalent to default deletion. Setting both `MMC_REMOVE_FLAG_LAZY` and `MMC_REMOVE_FLAG_KEEP_SSD` requests lazy deletion of the memory tier while retaining the SSD replica: the memory tier receives priority eviction, and eviction releases only memory while preserving SSD data and metadata. An SSD-only key returns success without deletion; a key with only memory replicas behaves like ordinary lazy deletion.
 
 **返回值**
 
