@@ -84,13 +84,13 @@ public:
     uint16_t NumBlobs();
 
     /**
-     * @brief 标记「淘汰时保留 SSD 副本」：LAZY|KEEP_SSD 组合请求下，key 仍按懒删除优先淘汰，
-     *        但淘汰时只释放内存层，SSD 副本始终保留
+     * @brief Mark SSD retention on eviction: with LAZY|KEEP_SSD, the key still receives priority lazy eviction,
+     *        but eviction releases only memory-tier data and always retains the SSD replica.
      */
     void SetKeepSsdOnEvict(bool keepSsdOnEvict);
 
     /**
-     * @brief 是否需要在淘汰时保留 SSD 副本
+     * @brief Whether to retain the SSD replica on eviction.
      */
     bool KeepSsdOnEvict() const;
 

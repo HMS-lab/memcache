@@ -56,7 +56,7 @@ Create and manage metadata service startup configurations.
 | Parameter name | Type | Default value | Description |
 | --------- | ------ | ------- | ------ |
 | meta_service_url | str | "tcp://127.0.0.1:5000" | Metadata service startup address |
-| alloc_strategy | str | "random" | 全局分配策略：`random`（随机）/ `arrange`（顺序）/ `local_first`（本地节点优先 + 跨节点回退）。由 MetaService 统一管理，per-writer 不再携带策略 |
+| alloc_strategy | str | "random" | Global allocation strategy: `random` (random) / `arrange` (sequential) / `local_first` (local node first, then cross-node fallback). Managed centrally by MetaService; writers no longer carry individual strategies. |
 | config_store_url | str | "tcp://127.0.0.1:6000" | Config store address |
 | metrics_url | str | `"http://127.0.0.1:8000"` | Metrics HTTP service address |
 | ha_enable | bool | false | Whether to enable high availability deployment |
@@ -208,8 +208,8 @@ Create and manage client configurations.
 | Parameter name | Type | Default value | Description |
 | --------- | ------ | ------- | ------ |
 | meta_service_url | str | "tcp://127.0.0.1:5000" | The URL address of Meta service, in the format of "tcp://192.168.1.1:5000" |
-| backend_id | str | "" | kv_event 后端标识（如 Pod IP）；为空时回退到环境变量 `MMC_LOCAL_SERVICE_BACKEND_ID` |
-| role | str | "" | 节点角色：`writer`（P 侧，默认）/ `memory`（D 侧，只做内存）。留空表示不覆盖配置层取值（配置项 > 环境变量 > writer） |
+| backend_id | str | "" | kv_event backend identifier (for example, Pod IP); falls back to `MMC_LOCAL_SERVICE_BACKEND_ID` when empty. |
+| role | str | "" | Node role: `writer` (P side, default) / `memory` (D side, provides memory only). An empty value preserves configuration precedence: configuration > environment variable > writer. |
 | config_store_url | str | "tcp://127.0.0.1:6000" | Config store URL address |
 | log_level | str | "info" | Log level: debug, info, warn, error |
 | world_size | int | 256 | Maximum number of ranks supported |

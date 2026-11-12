@@ -95,7 +95,7 @@ bool GetOptionalUint32Param(ock::acc::AccHttpRequestContext &ctx, const std::str
     const auto params = ctx.Params();
     const auto paramIt = params.find(paramName);
     if (paramIt == params.end()) {
-        return true; // 未传该参数时保持调用方默认值
+        return true; // Preserve the caller's default when the parameter is absent.
     }
     constexpr int decimalBase = 10;
     const std::string &raw = paramIt->second;
@@ -404,13 +404,15 @@ void MmcHttpServer::RegisterDataManagementEndpoints()
                 }
                 flags = static_cast<uint32_t>(body["flags"].get<uint64_t>());
                 if (hasLocations && flags != 0) {
-                    // flags 只作用于删除路径（无 locations），带 locations 时静默忽略会隐藏调用方错误；
-                    // 显式传 flags=0 等价于不传，保持兼容
+                    // flags apply only to deletion without locations; silently ignoring them with locations would hide
+                    // caller errors.
+                    // Explicit flags=0 is equivalent to omission for compatibility.
                     return ReplyJsonError200(ctx, "'flags' is only supported when 'locations' is absent");
                 }
             }
-            // 按实际执行结果统计：懒删除只把 key 标记为优先淘汰，内存尚未释放，计入 num_marked；
-            // 其余真实释放了内存层的情况（含 SSD-only key 上懒删除退化为全量删除）计入 num_evicted
+            // Count actual results: lazy deletion only marks priority eviction without freeing memory, so increment
+            // num_marked.
+            // Other actual releases (including SSD-only lazy deletion becoming full deletion) increment num_evicted.
             size_t numEvicted = 0;
             size_t numMarked = 0;
             Result ret = MMC_OK;
@@ -424,11 +426,12 @@ void MmcHttpServer::RegisterDataManagementEndpoints()
                         } else if (outcome == MmcMetaManager::RemoveOutcome::kRemoved) {
                             ++numEvicted;
                         }
-                        // kNoop：key 已在目标层（如 SSD-only 上再次请求 KEEP_SSD），不产生实际释放
+                        // kNoop: the key is already in the target tier (for example, repeated KEEP_SSD on SSD-only);
+                        // nothing is freed.
                         continue;
                     }
                     // MMC_UNMATCHED_KEY 说明 key 已被上层（如 LRU 淘汰）清除，属预期结果，
-                    // 与 MMC_OK 一样可继续处理后续 key；其余错误终止处理。
+                    // Continue with subsequent keys as for MMC_OK; other errors stop processing.
                     if (ret != MMC_UNMATCHED_KEY) {
                         break;
                     }

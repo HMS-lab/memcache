@@ -33,7 +33,7 @@ public:
     {
         allocator = MmcMakeRef<MmcGlobalAllocator>();
         uint64_t size = SIZE_32K * 10U;
-        // 模拟同节点3个rank (0,1,2) + 其他节点4个rank (5,6,7,8)
+        // Simulate 3 ranks on one node (0,1,2) + 4 ranks on other nodes (5,6,7,8).
         for (int i = 0; i < 10; i++) {
             MmcLocation loc;
             MmcLocalMemlInitInfo info;
@@ -54,7 +54,7 @@ protected:
     MmcGlobalAllocatorPtr allocator;
 };
 
-// ALLOC_LOCAL_FIRST: 1个blob分配在本地rank上
+// ALLOC_LOCAL_FIRST: allocate 1 blob on a local rank.
 TEST_F(TestLocalFirstStrategy, AllocOneBlobOnLocalRanks)
 {
     AllocOptions allocReq;
@@ -62,18 +62,18 @@ TEST_F(TestLocalFirstStrategy, AllocOneBlobOnLocalRanks)
 
     allocReq.blobSize_ = SIZE_32K;
     allocReq.numBlobs_ = 1;
-    allocReq.preferredRank_ = {0, 1, 2}; // 同节点3个rank
+    allocReq.preferredRank_ = {0, 1, 2}; // 3 ranks on the same node.
     allocReq.mediaType_ = MEDIA_DRAM;
     allocReq.flags_ = ALLOC_LOCAL_FIRST;
 
     Result ret = allocator->Alloc(allocReq, blobs);
     EXPECT_EQ(ret, MMC_OK);
     EXPECT_EQ(blobs.size(), 1U);
-    // 第1个blob应在preferredRank_[0]=0上
+    // The first blob should be on preferredRank_[0]=0.
     EXPECT_EQ(blobs[0]->Rank(), 0);
 }
 
-// ALLOC_LOCAL_FIRST: 多个blob分配在多个本地rank上，按preferredRank_顺序
+// ALLOC_LOCAL_FIRST: allocate multiple blobs on multiple local ranks in preferredRank_ order.
 TEST_F(TestLocalFirstStrategy, AllocMultiBlobsOnLocalRanks)
 {
     AllocOptions allocReq;
@@ -88,21 +88,21 @@ TEST_F(TestLocalFirstStrategy, AllocMultiBlobsOnLocalRanks)
     Result ret = allocator->Alloc(allocReq, blobs);
     EXPECT_EQ(ret, MMC_OK);
     EXPECT_EQ(blobs.size(), 3U);
-    // 按preferredRank_顺序分配
+    // Allocate in preferredRank_ order.
     EXPECT_EQ(blobs[0]->Rank(), 0);
     EXPECT_EQ(blobs[1]->Rank(), 1);
     EXPECT_EQ(blobs[2]->Rank(), 2);
 }
 
-// ALLOC_LOCAL_FIRST: numBlobs超过本地rank数但有跨节点rank → fallback到远端成功
+// ALLOC_LOCAL_FIRST: more blobs than local ranks, with remote ranks available -> successful remote fallback.
 TEST_F(TestLocalFirstStrategy, FallbackToRemoteRanksWhenLocalFull)
 {
     AllocOptions allocReq;
     std::vector<MmcMemBlobPtr> blobs;
 
     allocReq.blobSize_ = SIZE_32K;
-    allocReq.numBlobs_ = 5; // 需要5个blob，本地3个rank + 远端7个rank
-    // preferredRank_模拟ExpandRanks扩展后的结果：本地rank(0,1,2) + 远端rank升序(3,4,5,6,7,8,9)
+    allocReq.numBlobs_ = 5; // Need 5 blobs; 3 local ranks + 7 remote ranks.
+    // Simulate ExpandRanks output: local ranks (0,1,2) + remote ranks in ascending order (3,4,5,6,7,8,9).
     allocReq.preferredRank_ = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
     allocReq.mediaType_ = MEDIA_DRAM;
     allocReq.flags_ = ALLOC_LOCAL_FIRST;
@@ -110,16 +110,16 @@ TEST_F(TestLocalFirstStrategy, FallbackToRemoteRanksWhenLocalFull)
     Result ret = allocator->Alloc(allocReq, blobs);
     EXPECT_EQ(ret, MMC_OK);
     EXPECT_EQ(blobs.size(), 5U);
-    // 前3个应在本地rank上
+    // The first 3 should be on local ranks.
     EXPECT_EQ(blobs[0]->Rank(), 0);
     EXPECT_EQ(blobs[1]->Rank(), 1);
     EXPECT_EQ(blobs[2]->Rank(), 2);
-    // 第4、5个fallback到远端rank
+    // The fourth and fifth fall back to remote ranks.
     EXPECT_EQ(blobs[3]->Rank(), 3);
     EXPECT_EQ(blobs[4]->Rank(), 4);
 }
 
-// ALLOC_LOCAL_FIRST: preferredRank_ 为空 → 本地无目标可试，按设计回退 ALLOC_RANDOM 并成功
+// ALLOC_LOCAL_FIRST: empty preferredRank_ -> no local targets; fall back to ALLOC_RANDOM successfully as designed.
 TEST_F(TestLocalFirstStrategy, FallbackWhenPreferredRankEmpty)
 {
     AllocOptions allocReq;
@@ -127,7 +127,7 @@ TEST_F(TestLocalFirstStrategy, FallbackWhenPreferredRankEmpty)
 
     allocReq.blobSize_ = SIZE_32K;
     allocReq.numBlobs_ = 1;
-    allocReq.preferredRank_ = {}; // 空
+    allocReq.preferredRank_ = {}; // Empty.
     allocReq.mediaType_ = MEDIA_DRAM;
     allocReq.flags_ = ALLOC_LOCAL_FIRST;
 
@@ -136,7 +136,7 @@ TEST_F(TestLocalFirstStrategy, FallbackWhenPreferredRankEmpty)
     EXPECT_EQ(blobs.size(), 1U);
 }
 
-// ALLOC_LOCAL_FIRST: 单rank节点退化情况（1个本地rank, 1个blob）
+// ALLOC_LOCAL_FIRST: single-rank node (1 local rank, 1 blob).
 TEST_F(TestLocalFirstStrategy, SingleRankSingleNode)
 {
     AllocOptions allocReq;
@@ -144,7 +144,7 @@ TEST_F(TestLocalFirstStrategy, SingleRankSingleNode)
 
     allocReq.blobSize_ = SIZE_32K;
     allocReq.numBlobs_ = 1;
-    allocReq.preferredRank_ = {5}; // 只有1个本地rank
+    allocReq.preferredRank_ = {5}; // Only 1 local rank.
     allocReq.mediaType_ = MEDIA_DRAM;
     allocReq.flags_ = ALLOC_LOCAL_FIRST;
 
@@ -154,7 +154,7 @@ TEST_F(TestLocalFirstStrategy, SingleRankSingleNode)
     EXPECT_EQ(blobs[0]->Rank(), 5);
 }
 
-// ALLOC_LOCAL_FIRST: 单rank节点 + 多blob → fallback到远端rank成功
+// ALLOC_LOCAL_FIRST: single-rank node + multiple blobs -> successful remote fallback.
 TEST_F(TestLocalFirstStrategy, SingleRankFallbackToRemote)
 {
     AllocOptions allocReq;
@@ -162,7 +162,7 @@ TEST_F(TestLocalFirstStrategy, SingleRankFallbackToRemote)
 
     allocReq.blobSize_ = SIZE_32K;
     allocReq.numBlobs_ = 2;
-    // 单本地rank + 远端rank
+    // One local rank + remote ranks.
     allocReq.preferredRank_ = {5, 0, 1, 2, 3, 4, 6, 7, 8, 9};
     allocReq.mediaType_ = MEDIA_DRAM;
     allocReq.flags_ = ALLOC_LOCAL_FIRST;
@@ -174,7 +174,7 @@ TEST_F(TestLocalFirstStrategy, SingleRankFallbackToRemote)
     EXPECT_EQ(blobs[1]->Rank(), 0);
 }
 
-// ALLOC_LOCAL_FIRST: allocators为空 → 失败
+// ALLOC_LOCAL_FIRST: empty allocators -> failure.
 TEST_F(TestLocalFirstStrategy, FailWhenAllocatorsEmpty)
 {
     MmcGlobalAllocatorPtr emptyAllocator = MmcMakeRef<MmcGlobalAllocator>();
@@ -192,7 +192,7 @@ TEST_F(TestLocalFirstStrategy, FailWhenAllocatorsEmpty)
     EXPECT_EQ(ret, MMC_ERROR);
 }
 
-// ALLOC_LOCAL_FIRST: preferredRank_ 中的 rank 不存在 → 本地无可分配，按设计回退 ALLOC_RANDOM 并成功
+// ALLOC_LOCAL_FIRST: nonexistent preferredRank_ rank -> no local allocation; fall back to ALLOC_RANDOM successfully.
 TEST_F(TestLocalFirstStrategy, FallbackWhenPreferredRankMissing)
 {
     AllocOptions allocReq;
@@ -200,7 +200,7 @@ TEST_F(TestLocalFirstStrategy, FallbackWhenPreferredRankMissing)
 
     allocReq.blobSize_ = SIZE_32K;
     allocReq.numBlobs_ = 1;
-    allocReq.preferredRank_ = {99}; // rank 99不存在
+    allocReq.preferredRank_ = {99}; // Rank 99 does not exist.
     allocReq.mediaType_ = MEDIA_DRAM;
     allocReq.flags_ = ALLOC_LOCAL_FIRST;
 
@@ -209,13 +209,13 @@ TEST_F(TestLocalFirstStrategy, FallbackWhenPreferredRankMissing)
     EXPECT_EQ(blobs.size(), 1U);
 }
 
-// ALLOC_LOCAL_FIRST: 确定性分配 — 相同preferredRank_顺序总是产生相同分配结果
+// ALLOC_LOCAL_FIRST: deterministic allocation; the same preferredRank_ order always yields the same allocation.
 TEST_F(TestLocalFirstStrategy, DeterministicAllocation)
 {
     AllocOptions allocReq;
     allocReq.blobSize_ = SIZE_32K;
     allocReq.numBlobs_ = 2;
-    allocReq.preferredRank_ = {2, 1, 0}; // 注意顺序是倒序
+    allocReq.preferredRank_ = {2, 1, 0}; // Note the reverse order.
     allocReq.mediaType_ = MEDIA_DRAM;
     allocReq.flags_ = ALLOC_LOCAL_FIRST;
 
@@ -227,12 +227,12 @@ TEST_F(TestLocalFirstStrategy, DeterministicAllocation)
     Result ret2 = allocator->Alloc(allocReq, blobs2);
     EXPECT_EQ(ret2, MMC_OK);
 
-    // 两次分配应产生相同rank顺序（按preferredRank_顺序: 2, 1）
+    // Both allocations should have the same rank order (preferredRank_ order: 2, 1).
     EXPECT_EQ(blobs1[0]->Rank(), blobs2[0]->Rank());
     EXPECT_EQ(blobs1[1]->Rank(), blobs2[1]->Rank());
 }
 
-// ALLOC_LOCAL_FIRST + ALLOC_FLAGS_GVA_MALLOC_MASK: 高位flag应被保留
+// ALLOC_LOCAL_FIRST + ALLOC_FLAGS_GVA_MALLOC_MASK: preserve the high flag bits.
 TEST_F(TestLocalFirstStrategy, LocalFirstWithGvaMallocMask)
 {
     AllocOptions allocReq;
@@ -264,17 +264,17 @@ public:
 protected:
 };
 
-// 未注册任何rank时，GetBackendIdForRank返回空字符串
+// GetBackendIdForRank returns an empty string if no rank is registered.
 TEST_F(TestMetaServiceBackendId, GetBackendIdForRank_Unregistered)
 {
     MmcRef<MmcMetaService> svc = MmcMakeRef<MmcMetaService>("test-backend-id");
     ASSERT_NE(svc, nullptr);
-    // 未启动、未BmRegister，rankBackendIdMap_为空
+    // Not started, no BmRegister; rankBackendIdMap_ is empty.
     std::string backendId = svc->GetBackendIdForRank(0);
     EXPECT_TRUE(backendId.empty());
 }
 
-// 未注册任何rank时，GetRanksForBackendId返回空vector
+// GetRanksForBackendId returns an empty vector if no rank is registered.
 TEST_F(TestMetaServiceBackendId, GetRanksForBackendId_UnknownBackendId)
 {
     MmcRef<MmcMetaService> svc = MmcMakeRef<MmcMetaService>("test-backend-id");
@@ -283,7 +283,7 @@ TEST_F(TestMetaServiceBackendId, GetRanksForBackendId_UnknownBackendId)
     EXPECT_TRUE(ranks.empty());
 }
 
-// GetRanksForBackendId返回结果（本地ranks保留自然顺序，不强制排序）
+// GetRanksForBackendId results preserve the natural local-rank order without forced sorting.
 TEST_F(TestMetaServiceBackendId, GetRanksForBackendId_NoSortResult)
 {
     MmcRef<MmcMetaService> svc = MmcMakeRef<MmcMetaService>("test-backend-id");

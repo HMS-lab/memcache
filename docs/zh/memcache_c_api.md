@@ -86,10 +86,10 @@ int32_t mmc_setup(const local_config *config);
 
 `config`：本地配置（`local_config`）。
 
-`local_config` 中与节点亲和相关的字段：
+Node-affinity fields in `local_config`:
 
-  - `backend_id`：kv_event 后端标识（如 Pod IP），为空时回退到环境变量 `MMC_LOCAL_SERVICE_BACKEND_ID`；
-  - `role`：节点角色，`writer`（P 侧，默认）/ `memory`（D 侧，只做内存）；留空表示不覆盖配置层取值（配置项 `ock.mmc.local_service.role` > 环境变量 `MMC_LOCAL_SERVICE_ROLE` > `writer`）。
+  - `backend_id`: kv_event backend identifier (for example, Pod IP); falls back to `MMC_LOCAL_SERVICE_BACKEND_ID` when empty.
+  - `role`: Node role: `writer` (P side, default) / `memory` (D side, provides memory only). An empty value leaves configuration precedence unchanged: `ock.mmc.local_service.role` > `MMC_LOCAL_SERVICE_ROLE` > `writer`.
 
 **返回值**
 

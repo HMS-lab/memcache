@@ -57,7 +57,8 @@ public:
     Result Alloc(const AllocOptions &allocOpt, std::vector<MmcMemBlobPtr> &blobs)
     {
         std::unordered_set<uint32_t> uniqueRanks(allocOpt.preferredRank_.begin(), allocOpt.preferredRank_.end());
-        // ALLOC_LOCAL_FIRST: preferredRank_是候选本地rank集合，不需要numBlobs>=preferredRank_.size()
+        // ALLOC_LOCAL_FIRST: preferredRank_ contains candidate local ranks; numBlobs >= preferredRank_.size() is not
+        // required.
         bool isLocalFirst = (allocOpt.flags_ & 0xFF) == ALLOC_LOCAL_FIRST;
         if ((!isLocalFirst && allocOpt.numBlobs_ < allocOpt.preferredRank_.size()) ||
             uniqueRanks.size() != allocOpt.preferredRank_.size()) {
@@ -71,17 +72,20 @@ public:
         }
         std::unordered_set<uint32_t> excludeRanks;
         globalAllocLock_.LockRead();
-        // ALLOC_LOCAL_FIRST: preferredRank_已被HandleAlloc扩展为同节点所有rank，
+        // ALLOC_LOCAL_FIRST: HandleAlloc has expanded preferredRank_ to all ranks on the same node.
         if (isLocalFirst) {
             auto ret = InnerAlloc(allocReq, blobs, excludeRanks);
             if (ret == MMC_OK) {
                 globalAllocLock_.UnlockRead();
                 return ret;
             }
-            // 权重选中的目标 backendId 内分配完全失败（空间不足/rank掉线），回退全 ranks 随机
-            // 注意：此处仍持有 globalAllocLock_ 读锁，而 Free() -> Free(blob) 会再次 LockRead()；
-            // std::shared_mutex 不可重入，若此时有写者（Mount/Unmount）排队，二次读锁会与写锁形成环。
-            // 因此先放锁、释放完成后再重新加锁进入回退重试（与文件内其它 Free 调用点保持一致）。
+            // Allocation failed on every rank in the weighted target backendId (no space/rank offline); fall back to
+            // all ranks randomly.
+            // globalAllocLock_ is still read-locked here, and Free() -> Free(blob) calls LockRead() again.
+            // std::shared_mutex is not reentrant: a queued writer (Mount/Unmount) can deadlock with the second read
+            // lock.
+            // Unlock before freeing, then relock for fallback retry, consistent with other Free call sites in this
+            // file.
             globalAllocLock_.UnlockRead();
             Free(blobs);
             globalAllocLock_.LockRead();

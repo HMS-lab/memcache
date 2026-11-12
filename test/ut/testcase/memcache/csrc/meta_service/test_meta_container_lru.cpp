@@ -49,7 +49,7 @@ TEST_F(TestMmcMetaContainerLRU, InsertAndGet)
     EXPECT_EQ(container->Get("key3", value), MMC_UNMATCHED_KEY);
 }
 
-// 同名 key 重建后，旧对象的 KEEP_SSD 停泊不能作用到新对象上
+// After key recreation, KEEP_SSD parking of the old object must not affect the new object.
 TEST_F(TestMmcMetaContainerLRU, InsertLruIfMatchSkipsReplacedObject)
 {
     constexpr int valueOld = 100;
@@ -58,16 +58,16 @@ TEST_F(TestMmcMetaContainerLRU, InsertLruIfMatchSkipsReplacedObject)
     EXPECT_EQ(container->Erase("key1"), MMC_OK);
     EXPECT_EQ(container->Insert("key1", valueNew), MMC_OK);
 
-    // 旧对象已不在容器中：身份不匹配时返回未命中，且新对象仍留在内存层 LRU
+    // Old object is absent: identity mismatch returns a miss; new object stays in memory LRU.
     EXPECT_EQ(container->InsertLruIfMatch("key1", valueOld, MEDIA_SSD), MMC_UNMATCHED_KEY);
     EXPECT_EQ(container->GetMediaType("key1"), MEDIA_DRAM);
 
-    // 身份匹配时行为与 InsertLru 一致：停泊出内存层
+    // Matching identity behaves like InsertLru: park outside memory.
     EXPECT_EQ(container->InsertLruIfMatch("key1", valueNew, MEDIA_SSD), MMC_OK);
     EXPECT_EQ(container->GetMediaType("key1"), MEDIA_NONE);
 }
 
-// 同名 key 重建后，旧对象的懒删除标记不能作用到新对象上
+// After key recreation, lazy marking of the old object must not affect the new object.
 TEST_F(TestMmcMetaContainerLRU, DemoteIfMatchSkipsReplacedObject)
 {
     constexpr int valueOld = 100;
@@ -76,11 +76,11 @@ TEST_F(TestMmcMetaContainerLRU, DemoteIfMatchSkipsReplacedObject)
     EXPECT_EQ(container->Insert("key1", valueOld), MMC_OK);
     EXPECT_EQ(container->Insert("key2", valueNew), MMC_OK);
     EXPECT_EQ(container->Erase("key1"), MMC_OK);
-    EXPECT_EQ(container->Insert("key1", valueNew), MMC_OK); // 新对象成为 MRU
+    EXPECT_EQ(container->Insert("key1", valueNew), MMC_OK); // New object becomes MRU.
 
     EXPECT_EQ(container->DemoteIfMatch("key1", valueOld), MMC_UNMATCHED_KEY);
 
-    // 新对象未被标记懒删除：淘汰仍按普通 LRU 顺序，更旧的 key2 先淘汰
+    // New object is not lazy: ordinary LRU eviction still evicts older key2 first.
     std::vector<std::string> evictedKeys;
     auto moveFunc = [&evictedKeys](const std::string &key, const int &, MediaType) -> EvictResult {
         evictedKeys.push_back(key);
@@ -92,7 +92,8 @@ TEST_F(TestMmcMetaContainerLRU, DemoteIfMatchSkipsReplacedObject)
     EXPECT_EQ(evictedKeys, (std::vector<std::string>{"key2", "key1"}));
 }
 
-// 身份校验删除：同名 key 重建后，针对旧对象版本的条件删除不能删掉新对象
+// Identity-checked deletion: after key recreation, conditional deletion of the old version must not delete the new
+// object.
 TEST_F(TestMmcMetaContainerLRU, EraseIfMatchSkipsReplacedObject)
 {
     constexpr int valueOld = 100;
@@ -101,14 +102,14 @@ TEST_F(TestMmcMetaContainerLRU, EraseIfMatchSkipsReplacedObject)
     EXPECT_EQ(container->Erase("key1"), MMC_OK);
     EXPECT_EQ(container->Insert("key1", valueNew), MMC_OK);
 
-    // 旧对象已不在容器中：条件删除返回未命中，新对象及其 LRU 位置保持不变
+    // Old object is absent: conditional deletion returns a miss; new object and its LRU position are unchanged.
     EXPECT_EQ(container->EraseIfMatch("key1", valueOld), MMC_UNMATCHED_KEY);
     int value = 0;
     EXPECT_EQ(container->Get("key1", value), MMC_OK);
     EXPECT_EQ(value, valueNew);
     EXPECT_EQ(container->GetMediaType("key1"), MEDIA_DRAM);
 
-    // 身份匹配时正常删除
+    // Delete normally when identity matches.
     EXPECT_EQ(container->EraseIfMatch("key1", valueNew), MMC_OK);
     EXPECT_EQ(container->Get("key1", value), MMC_UNMATCHED_KEY);
 }
@@ -199,10 +200,10 @@ TEST_F(TestLazyDemote, LazyDemoteFifoOrder)
 {
     const size_t numKeys = 5;
     InsertKeys(numKeys);
-    // 插入后 LRU 链（front=MRU）：[key4, key3, key2, key1, key0]
-    EXPECT_EQ(container->Demote("key1"), MMC_OK); // 先懒删除
-    EXPECT_EQ(container->Demote("key3"), MMC_OK); // 后懒删除
-    // FIFO：key1 最先淘汰，其次 key3，之后才是普通 LRU 顺序（key0/key2/key4）
+    // LRU list after insertion (front=MRU): [key4, key3, key2, key1, key0].
+    EXPECT_EQ(container->Demote("key1"), MMC_OK); // Marked lazy first.
+    EXPECT_EQ(container->Demote("key3"), MMC_OK); // Marked lazy later.
+    // FIFO: key1 first, then key3, then ordinary LRU order (key0/key2/key4).
     EXPECT_EQ(EvictKeys(MEDIA_DRAM, numKeys), (std::vector<std::string>{"key1", "key3", "key0", "key2", "key4"}));
 }
 
@@ -211,35 +212,39 @@ TEST_F(TestLazyDemote, LazyDemoteIdempotent)
     const size_t numKeys = 5;
     InsertKeys(numKeys);
     EXPECT_EQ(container->Demote("key1"), MMC_OK);
-    EXPECT_EQ(container->Demote("key1"), MMC_OK); // 重复懒删除：幂等，保持首次位置
+    // Repeated lazy deletion is idempotent and preserves the first position.
+    EXPECT_EQ(container->Demote("key1"), MMC_OK);
     EXPECT_EQ(container->Demote("key3"), MMC_OK);
-    // 淘汰顺序仍按首次懒删除时间，不受重复 Demote 影响
+    // Eviction order remains based on the first lazy deletion, unaffected by repeated Demote.
     EXPECT_EQ(EvictKeys(MEDIA_DRAM, numKeys), (std::vector<std::string>{"key1", "key3", "key0", "key2", "key4"}));
 }
 
-// 淘汰回调因活跃租约跳过（FAIL）时：懒 key 回到队尾且保留懒标志，
-// 之后新 Demote 的 key 仍排在其后，首次懒删除的 FIFO 顺序不被破坏
+// If eviction callback skips (FAIL) due to an active lease, the lazy key returns to the tail with its lazy flag;
+// subsequently Demoted keys stay behind it in eviction order, preserving first-marked FIFO.
 TEST_F(TestLazyDemote, LazyFlagSurvivesLeaseSkippedEviction)
 {
     const size_t numKeys = 5;
     InsertKeys(numKeys);
-    EXPECT_EQ(container->Demote("key1"), MMC_OK); // 先懒删除
-    EXPECT_EQ(container->Demote("key3"), MMC_OK); // 后懒删除
-    // 模拟 EvictCallBackFunction 因活跃租约返回 FAIL：EvictCandidate 先转换容器状态再回调
+    EXPECT_EQ(container->Demote("key1"), MMC_OK); // Marked lazy first.
+    EXPECT_EQ(container->Demote("key3"), MMC_OK); // Marked lazy later.
+    // Simulate EvictCallBackFunction returning FAIL for an active lease: EvictCandidate changes container state before
+    // callback.
     Container::EvictionCandidate candidate{"key1", kLazyDemotedAccessSequence};
     auto leaseSkipFunc = [](const std::string &, const int &, MediaType) -> EvictResult { return EvictResult::FAIL; };
     EXPECT_EQ(container->EvictCandidate(candidate, leaseSkipFunc, MEDIA_DRAM), EvictResult::FAIL);
     int value = 0;
-    EXPECT_EQ(container->Get("key1", value), MMC_OK); // 被租约跳过的 key 仍在容器中
+    EXPECT_EQ(container->Get("key1", value), MMC_OK); // The key skipped due to a lease remains in the container.
 
-    EXPECT_EQ(container->Demote("key2"), MMC_OK); // 跳过之后再懒删除 key2
-    // FIFO 仍按首次懒删除顺序：key1（曾被租约跳过）→ key3 → key2 → 普通 LRU 顺序
+    EXPECT_EQ(container->Demote("key2"), MMC_OK); // Mark key2 lazy after the skip.
+    // FIFO still follows first lazy deletion: key1 (previously skipped for lease) -> key3 -> key2 -> ordinary LRU
+    // order.
     EXPECT_EQ(EvictKeys(MEDIA_DRAM, numKeys), (std::vector<std::string>{"key1", "key3", "key2", "key0", "key4"}));
 }
 
-// 普通（非懒）候选因活跃租约返回 FAIL 时，若回调执行期间另一线程 Demote 了 key2，
-// 回滚必须把普通 key 放回懒删除后缀之前：否则它会被插到 key2 之后，下一次淘汰先选中普通 key，
-// 且 cutoff=0 的懒候选收集会在队尾提前 break，收集不到任何懒删除 key
+// If a normal candidate returns FAIL for an active lease while another thread Demotes key2 during the callback,
+// rollback must place the normal key before the lazy suffix; otherwise it goes after key2 and is evicted first next
+// time.
+// Also, lazy-candidate collection with cutoff=0 would break early at the tail and collect no lazy keys.
 TEST_F(TestLazyDemote, NormalCandidateFailRestoresBeforeLazySuffix)
 {
     const size_t numKeys = 4;
@@ -247,25 +252,25 @@ TEST_F(TestLazyDemote, NormalCandidateFailRestoresBeforeLazySuffix)
     std::vector<Container::EvictionCandidate> collected;
     container->CollectEvictionCandidates(MEDIA_DRAM, std::numeric_limits<uint64_t>::max(), true, collected);
     ASSERT_EQ(collected.size(), numKeys);
-    // 收集顺序为队尾到队头，第一个是最冷的普通 key
+    // Collect from tail to head; the first candidate is the coldest normal key.
     const auto victim = collected.front();
     ASSERT_EQ(victim.key, "key0");
     ASSERT_NE(victim.accessSequence, kLazyDemotedAccessSequence);
 
     auto failAfterConcurrentDemote = [this](const std::string &, const int &, MediaType) -> EvictResult {
-        // 模拟回调执行期间另一线程把 key2 标记为懒删除
+        // Simulate another thread marking key2 lazy during the callback.
         EXPECT_EQ(container->Demote("key2"), MMC_OK);
         return EvictResult::FAIL;
     };
     EXPECT_EQ(container->EvictCandidate(victim, failAfterConcurrentDemote, MEDIA_DRAM), EvictResult::FAIL);
 
-    // 懒删除 key2 必须仍是逐尾收集到的唯一懒候选（普通 key0 不能挡住收集）
+    // Lazy key2 must remain the only lazy candidate collected from the tail; normal key0 must not block collection.
     std::vector<Container::EvictionCandidate> lazyCandidates;
     container->CollectEvictionCandidates(MEDIA_DRAM, kLazyDemotedAccessSequence, true, lazyCandidates);
     ASSERT_EQ(lazyCandidates.size(), 1U);
     EXPECT_EQ(lazyCandidates.front().key, "key2");
 
-    // 淘汰顺序：懒删除的 key2 优先，之后按普通 LRU 顺序
+    // Eviction order: lazy key2 first, then ordinary LRU order.
     EXPECT_EQ(EvictKeys(MEDIA_DRAM, numKeys), (std::vector<std::string>{"key2", "key0", "key1", "key3"}));
 }
 
@@ -275,30 +280,30 @@ TEST_F(TestLazyDemote, LazyDemoteThenPromoteRevives)
     InsertKeys(numKeys);
     EXPECT_EQ(container->Demote("key1"), MMC_OK);
     EXPECT_EQ(container->Demote("key3"), MMC_OK);
-    EXPECT_EQ(container->Promote("key1"), MMC_OK); // 访问复活：清懒标志并提到队头
-    // key3 仍按懒删除 FIFO 最先淘汰；key1 复活后按普通 MRU 最后淘汰
+    EXPECT_EQ(container->Promote("key1"), MMC_OK); // Access revives the key: clear lazy flag and promote to head.
+    // key3 remains first in lazy FIFO; revived key1 is ordinary MRU and evicted last.
     EXPECT_EQ(EvictKeys(MEDIA_DRAM, numKeys), (std::vector<std::string>{"key3", "key0", "key2", "key4", "key1"}));
 }
 
-// 懒后缀计数在 Promote/Erase/InsertLru 混合操作后仍与链表一致：
-// 新 Demote 的 key 必须排在已有懒 key 之后、普通 key 之前
+// Lazy-suffix count must match the list after mixed Promote/Erase/InsertLru operations:
+// newly Demoted keys must follow existing lazy keys in eviction order and precede normal keys.
 TEST_F(TestLazyDemote, LazyFifoAfterMixedOperations)
 {
     const size_t numKeys = 6;
     InsertKeys(numKeys);
-    EXPECT_EQ(container->Demote("key1"), MMC_OK);  // 懒队列：key1
-    EXPECT_EQ(container->Demote("key2"), MMC_OK);  // 懒队列：key1 → key2
-    EXPECT_EQ(container->Promote("key1"), MMC_OK); // 访问复活：懒队列只剩 key2
+    EXPECT_EQ(container->Demote("key1"), MMC_OK);  // Lazy queue: key1.
+    EXPECT_EQ(container->Demote("key2"), MMC_OK);  // Lazy queue: key1 -> key2.
+    EXPECT_EQ(container->Promote("key1"), MMC_OK); // Access revival: lazy queue contains only key2.
     EXPECT_EQ(container->Erase("key3"), MMC_OK);
-    EXPECT_EQ(container->InsertLru("key2", MEDIA_NONE), MMC_OK); // 停泊出内存层：懒队列清空
-    EXPECT_EQ(container->Demote("key4"), MMC_OK);                // 懒队列：key4
-    EXPECT_EQ(container->Demote("key5"), MMC_OK);                // 懒队列：key4 → key5
-    // key4 最早懒删除，其次 key5，之后是普通 LRU 顺序（key0 最冷、key1 最热）
+    EXPECT_EQ(container->InsertLru("key2", MEDIA_NONE), MMC_OK); // Parking outside memory clears the lazy queue.
+    EXPECT_EQ(container->Demote("key4"), MMC_OK);                // Lazy queue: key4.
+    EXPECT_EQ(container->Demote("key5"), MMC_OK);                // Lazy queue: key4 -> key5.
+    // key4 was marked first, then key5, then ordinary LRU order (key0 coldest, key1 hottest).
     const std::vector<std::string> expectedOrder{"key4", "key5", "key0", "key1"};
     EXPECT_EQ(EvictKeys(MEDIA_DRAM, expectedOrder.size()), expectedOrder);
 }
 
-// 大量连续 Demote 走 O(1) 边界定位路径，淘汰顺序必须仍是首次懒删除的 FIFO
+// Many consecutive Demotes use O(1) boundary positioning; eviction must still follow first-marked FIFO.
 TEST_F(TestLazyDemote, BulkLazyDemoteKeepsFifo)
 {
     const size_t numKeys = 200;
@@ -317,7 +322,7 @@ TEST_F(TestLazyDemote, LazyDemoteMissingKey)
     EXPECT_EQ(container->Demote("nonexistent"), MMC_UNMATCHED_KEY);
 }
 
-// EraseAll 清空链表后懒后缀边界必须一并重置，新的 Demote 仍按 FIFO 生效
+// EraseAll must reset lazy-suffix boundaries with the list; subsequent Demotes still follow FIFO.
 TEST_F(TestLazyDemote, LazySuffixBoundaryResetAfterEraseAll)
 {
     InsertKeys(4);
@@ -332,7 +337,7 @@ TEST_F(TestLazyDemote, LazySuffixBoundaryResetAfterEraseAll)
     EXPECT_EQ(EvictKeys(MEDIA_DRAM, 2), (std::vector<std::string>{"keyA", "keyB"}));
 }
 
-// 停泊出内存层再重新入队后，key 已不再是懒条目：边界必须跟着链表状态走
+// After parking outside memory and requeueing, the key is no longer lazy; boundaries must follow the list state.
 TEST_F(TestLazyDemote, LazySuffixBoundaryAfterLruMoves)
 {
     InsertKeys(5);
@@ -342,13 +347,13 @@ TEST_F(TestLazyDemote, LazySuffixBoundaryAfterLruMoves)
     EXPECT_EQ(container->InsertLru("key3", MEDIA_DRAM), MMC_OK);
     EXPECT_EQ(container->Demote("key2"), MMC_OK);
 
-    // key1 最先懒删除，其次 key2；key3 回队头后按普通 LRU 顺序最后淘汰
+    // key1 was marked first, then key2; key3 returned to head and is evicted last in ordinary LRU order.
     const std::vector<std::string> expected{"key1", "key2", "key0", "key4", "key3"};
     EXPECT_EQ(EvictKeys(MEDIA_DRAM, expected.size()), expected);
 }
 
-// Demote 与 InsertLru 并发：Demote 必须在 lruLock_ 内读取介质与 lruIter_，
-// 否则 InsertLru 把 key 停泊为 MEDIA_NONE 并 erase 节点后，Demote 会使用悬空迭代器（ASan 可复现）
+// Concurrent Demote and InsertLru: Demote must read medium and lruIter_ under lruLock_,
+// or InsertLru can park as MEDIA_NONE and erase the node, leaving Demote a dangling iterator (reproducible with ASan).
 TEST_F(TestLazyDemote, ConcurrentDemoteAndInsertLruKeepsBoundaryValid)
 {
     constexpr size_t kKeyCount = 8;
@@ -363,14 +368,15 @@ TEST_F(TestLazyDemote, ConcurrentDemoteAndInsertLruKeepsBoundaryValid)
     });
     for (int i = 0; i < kIterations; ++i) {
         const std::string key = "key" + std::to_string(static_cast<size_t>(i) % kKeyCount);
-        // 交替停泊出内存层与重新入队，制造 Demote 的检查-加锁竞态窗口
+        // Alternate parking outside memory and requeueing to expose Demote's check-then-lock race window.
         container->InsertLru(key, MEDIA_NONE);
         container->InsertLru(key, MEDIA_DRAM);
     }
     stop.store(true, std::memory_order_relaxed);
     demoter.join();
 
-    // 并发结束后容器状态仍自洽：所有 key 都在 DRAM 链表中，逐个淘汰恰好覆盖全部 key
+    // State remains consistent after concurrency: all keys are in DRAM; successive evictions cover every key exactly
+    // once.
     EXPECT_EQ(container->GetKeyCount(MEDIA_DRAM), kKeyCount);
     auto evicted = EvictKeys(MEDIA_DRAM, kKeyCount);
     ASSERT_EQ(evicted.size(), kKeyCount);
@@ -397,7 +403,7 @@ protected:
 TEST_F(TestLazyDemoteSsd, LazyDemoteSsdKeyReturnsSkipped)
 {
     EXPECT_EQ(container->Insert("ssdKey", SSD_BLOB_VALUE), MMC_OK);
-    // SSD 停泊 key 不在内存层 LRU，无可降级位置：返回 MMC_SKIPPED 交由上层降级处理
+    // SSD-parked key is outside memory LRU with no position to demote: return MMC_SKIPPED for upper-layer fallback.
     EXPECT_EQ(container->Demote("ssdKey"), MMC_SKIPPED);
     int value = 0;
     EXPECT_EQ(container->Get("ssdKey", value), MMC_OK);
@@ -420,25 +426,26 @@ protected:
 
 TEST_F(TestLazyDemoteMultiMedia, LazyFlagClearedOnMoveDown)
 {
-    // HBM 层：n1(普通)、kH(懒删除)，链表 [n1, kH]
+    // HBM: n1 (normal), kH (lazy); list [n1, kH].
     EXPECT_EQ(container->Insert("n1", HBM_BLOB_VALUE), MMC_OK);
     EXPECT_EQ(container->Insert("kH", HBM_BLOB_VALUE), MMC_OK);
     EXPECT_EQ(container->Demote("kH"), MMC_OK);
-    // DRAM 层：k2(懒删除)
+    // DRAM: k2 (lazy).
     EXPECT_EQ(container->Insert("k2", DRAM_BLOB_VALUE), MMC_OK);
     EXPECT_EQ(container->Demote("k2"), MMC_OK);
 
-    // 淘汰 k2 并 MOVE_DOWN 降级：淘汰即视为删除完成，懒标志应被清除
+    // Evict k2 with MOVE_DOWN: eviction completes deletion, so clear the lazy flag.
     auto moveDownFunc = [](const std::string &, const int &, MediaType) -> EvictResult {
         return EvictResult::MOVE_DOWN;
     };
     EXPECT_TRUE(container->EvictOneLeastRecentlyUsed(moveDownFunc, MEDIA_DRAM));
 
-    // move 完成后经 InsertLru 进入 HBM：标志已清，按普通 MRU 入队头
+    // After moving, InsertLru enters HBM with the flag cleared, inserting at the ordinary MRU head.
     EXPECT_EQ(container->InsertLru("k2", MEDIA_HBM), MMC_OK);
 
-    // HBM 淘汰顺序：kH(懒后缀 FIFO) -> n1(普通 LRU) -> k2(新入层 MRU 最后)
-    // 若标志未清，k2 会插到懒后缀边界，顺序将变为 kH -> k2 -> n1，可区分
+    // HBM eviction order: kH (lazy FIFO) -> n1 (ordinary LRU) -> k2 (new-tier MRU, last).
+    // If the flag remained, k2 would enter at the lazy boundary, yielding kH -> k2 -> n1; this distinguishes the
+    // behavior.
     std::vector<std::string> evictedKeys;
     auto removeFunc = [&evictedKeys](const std::string &key, const int &, MediaType) -> EvictResult {
         evictedKeys.push_back(key);
@@ -452,20 +459,20 @@ TEST_F(TestLazyDemoteMultiMedia, LazyFlagClearedOnMoveDown)
 
 TEST_F(TestLazyDemoteMultiMedia, LazyFlagClearedOnParkToSsdAndRewarm)
 {
-    // DRAM 层：n1(普通)、k1(懒删除)
+    // DRAM: n1 (normal), k1 (lazy).
     EXPECT_EQ(container->Insert("n1", DRAM_BLOB_VALUE), MMC_OK);
     EXPECT_EQ(container->Insert("k1", DRAM_BLOB_VALUE), MMC_OK);
     EXPECT_EQ(container->Demote("k1"), MMC_OK);
 
-    // KEEP_SSD 停泊：InsertLru(key, SSD) 离开内存 LRU，lazy_ 应清除
+    // KEEP_SSD parking: InsertLru(key, SSD) leaves memory LRU and must clear lazy_.
     EXPECT_EQ(container->InsertLru("k1", MEDIA_SSD), MMC_OK);
-    // 回温：InsertLru(key, DRAM) 以 MRU 头身份重回内存层，lazy_ 应清除
+    // Rewarming: InsertLru(key, DRAM) returns to memory as MRU head and must clear lazy_.
     EXPECT_EQ(container->InsertLru("k1", MEDIA_DRAM), MMC_OK);
 
-    // 再次懒删除：若 lazy_ 残留会命中幂等分支不 reposition，k1 滞留 MRU 头
+    // Marking lazy again: a stale lazy_ would take the idempotent branch without repositioning, leaving k1 at MRU head.
     EXPECT_EQ(container->Demote("k1"), MMC_OK);
 
-    // 淘汰顺序：k1(懒删除 FIFO 最先) -> n1(普通 LRU)
+    // Eviction order: k1 (lazy FIFO first) -> n1 (ordinary LRU).
     std::vector<std::string> evictedKeys;
     auto removeFunc = [&evictedKeys](const std::string &key, const int &, MediaType) -> EvictResult {
         evictedKeys.push_back(key);
@@ -478,20 +485,20 @@ TEST_F(TestLazyDemoteMultiMedia, LazyFlagClearedOnParkToSsdAndRewarm)
 
 TEST_F(TestLazyDemoteMultiMedia, LazyFlagClearedOnRemoveFromLruAndRewarm)
 {
-    // DRAM 层：n1(普通)、k1(懒删除)
+    // DRAM: n1 (normal), k1 (lazy).
     EXPECT_EQ(container->Insert("n1", DRAM_BLOB_VALUE), MMC_OK);
     EXPECT_EQ(container->Insert("k1", DRAM_BLOB_VALUE), MMC_OK);
     EXPECT_EQ(container->Demote("k1"), MMC_OK);
 
-    // 手动淘汰停泊：RemoveFromLru 离开内存 LRU，lazy_ 应清除
+    // Manual eviction parking: RemoveFromLru leaves memory LRU and must clear lazy_.
     EXPECT_EQ(container->RemoveFromLru("k1", MEDIA_DRAM), MMC_OK);
-    // 回温：InsertLru(key, DRAM) 重回内存层
+    // Rewarming: InsertLru(key, DRAM) returns to memory.
     EXPECT_EQ(container->InsertLru("k1", MEDIA_DRAM), MMC_OK);
 
-    // 再次懒删除：应正常 reposition 到懒后缀
+    // Marking lazy again must reposition normally into the lazy suffix.
     EXPECT_EQ(container->Demote("k1"), MMC_OK);
 
-    // 淘汰顺序：k1(懒删除 FIFO 最先) -> n1(普通 LRU)
+    // Eviction order: k1 (lazy FIFO first) -> n1 (ordinary LRU).
     std::vector<std::string> evictedKeys;
     auto removeFunc = [&evictedKeys](const std::string &key, const int &, MediaType) -> EvictResult {
         evictedKeys.push_back(key);
