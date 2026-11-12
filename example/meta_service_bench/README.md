@@ -1,43 +1,42 @@
-# meta_service 性能基准测试
+# meta_service Performance Benchmark
 
-## 简介
+## Introduction
 
-本 benchmark 用于测试 **meta_service 元数据处理性能**。它将 meta_service 和模拟 local_service 拆分为多个子进程，支持多进程并发访问 metaService，测试压力下的元数据处理性能。
+This benchmark measures **meta_service metadata processing performance**. It runs meta_service and simulated local_service clients in separate child processes, allowing concurrent access from multiple processes to measure metadata processing performance under load.
 
-不使用真实的 local_service。每个客户端子进程模拟 local_service 行为：直接创建 `MetaNetClient`，注册 mock BM 资源（伪造 GVA 地址和容量），向 meta_service 发送 RPC 请求。所有 BM 数据读写操作均已打桩。
+The benchmark does not use a real local_service. Each client child process simulates local_service behavior by creating a `MetaNetClient` directly, registering mock BM resources with fake GVA addresses and capacities, and sending RPC requests to meta_service. All BM data read and write operations are stubbed out.
 
-### 多进程架构
+### Multi-Process Architecture
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
-│                  Coordinator (main)                          │
-│   1. fork meta_service 子进程                                 │
-│   2. 等待 meta_service 就绪                                    │
-│   3. fork N 个 client 子进程                                   │
-│   4. 等待所有 client 完成                                       │
-│   5. 从共享内存收集结果                                          │
-│   6. 终止 meta_service，打印聚合报告                            │
-├──────────────┬──────────────┬──────────────┐                 │
-│ meta_service │  client[0]   │  client[N-1] │                 │
-│ (子进程)      │  (子进程)     │  (子进程)     │                 │
-│              │  MetaNetClient│  MetaNetClient│                 │
-│ MmcMetaService│  + mock BM  │  + mock BM   │                 │
-│  (进程内)     │  + M 线程    │  + M 线程     │                 │
-└──────────────┴──────────────┴──────────────┘                 │
-└─────────────────────────────────────────────────────────────┘
+│                    Coordinator (main)                       │
+│  1. Fork the meta_service child process                      │
+│  2. Wait for meta_service to become ready                    │
+│  3. Fork N client child processes                            │
+│  4. Wait for all clients to finish                           │
+│  5. Collect results from shared memory                       │
+│  6. Stop meta_service and print the aggregated report         │
+├───────────────────┬───────────────────┬─────────────────────┤
+│ meta_service      │ client[0]         │ client[N-1]         │
+│ (child process)   │ (child process)   │ (child process)     │
+│                   │ MetaNetClient     │ MetaNetClient       │
+│ MmcMetaService    │ + mock BM         │ + mock BM           │
+│ (in-process)      │ + M threads       │ + M threads         │
+└───────────────────┴───────────────────┴─────────────────────┘
 ```
 
-**关键设计：**
+**Key design points:**
 
-- meta_service 运行在独立子进程中，通过 `fork()` 创建
-- 每个客户端子进程独立创建 `MetaNetClient`，注册独立 rank 的 mock BM 资源
-- 通过 `mmap(MAP_SHARED | MAP_ANONYMOUS)` 共享内存收集各进程结果
-- 不初始化 BM 库，不需要 NPU 硬件
-- 所有 BM 数据拷贝操作被跳过，仅测量 meta_service 端的元数据处理
+- meta_service runs in a separate child process created with `fork()`.
+- Each client child process creates its own `MetaNetClient` and registers mock BM resources with a unique rank.
+- Results from each process are collected through shared memory allocated with `mmap(MAP_SHARED | MAP_ANONYMOUS)`.
+- The BM library is not initialized, and no NPU hardware is required.
+- All BM data copy operations are skipped, so only metadata processing on the meta_service side is measured.
 
-### 测试的操作类型
+### Operations Tested
 
-| 单个操作 | 批量操作 |
+| Single Operations | Batch Operations |
 |---------|---------|
 | AllocRequest → AllocResponse | BatchAllocRequest → BatchAllocResponse |
 | UpdateRequest → Response | BatchGetRequest → BatchAllocResponse |
@@ -46,51 +45,51 @@
 | IsExistRequest → IsExistResponse | BatchIsExistRequest → BatchIsExistResponse |
 | RemoveRequest → Response | BatchRemoveRequest → BatchRemoveResponse |
 
-## 前置条件
+## Prerequisites
 
-### 1. 编译安装 memcache
+### 1. Build and Install memcache
 
-在 memcache 源码根目录执行：
+Run the following command from the memcache source root:
 
 ```bash
 bash script/build_and_pack_run.sh --build_mode DEBUG --incremental
 ```
 
-编译产物在 `output/` 目录下。
+Build artifacts are placed in the `output/` directory.
 
-### 2. 安装 memfabric_hybrid run 包
+### 2. Install the memfabric_hybrid .run Package
 
 ```bash
-bash memfabric_hybrid-*.run          # 安装 memfabric_hybrid
+bash memfabric_hybrid-*.run          # Install memfabric_hybrid
 source /usr/local/memfabric_hybrid/set_env.sh
 ```
 
-## 编译
+## Building
 
-### 方式一：源码树内编译（推荐）
+### Method 1: Build Within the Source Tree (Recommended)
 
-在 memcache 源码根目录，通过 `BUILD_CPP_EXAMPLE=ON` 启用 benchmark 编译：
+From the memcache source root, enable the benchmark build with `BUILD_CPP_EXAMPLE=ON`:
 
 ```bash
-# 1. CMake 配置
+# 1. Configure CMake
 cmake -G Ninja \
     -DCMAKE_BUILD_TYPE=DEBUG \
     -DBUILD_CPP_EXAMPLE=ON \
     -S . -B build/
 
-# 2. 编译 benchmark 目标
+# 2. Build the benchmark target
 ninja -C build/ bench_meta_service
 ```
 
-编译产物位于 `build/example/meta_service_bench/bench_meta_service`。
+The executable is generated at `build/example/meta_service_bench/bench_meta_service`.
 
-### 方式二：独立编译
+### Method 2: Standalone Build
 
-在安装了 memcache 和 memfabric_hybrid 的 run 包后，可在本目录独立编译：
+After installing the memcache and memfabric_hybrid .run packages, you can build the benchmark independently in this directory:
 
 ```bash
-# 设置环境变量
-export MEMCACHE_HYBRID_HOME_PATH=/path/to/memcache    # 源码根目录
+# Set environment variables
+export MEMCACHE_HYBRID_HOME_PATH=/path/to/memcache    # Source root
 source /usr/local/memfabric_hybrid/set_env.sh
 
 cd example/meta_service_bench
@@ -99,21 +98,21 @@ cmake ..
 make -j$(nproc)
 ```
 
-编译产物为 `example/meta_service_bench/build/bench_meta_service`。
+The executable is generated at `example/meta_service_bench/build/bench_meta_service`.
 
-> **注意：** 独立编译模式链接动态库 `libmf_memcache.so`，需要该库导出内部 C++ 符号。源码树内编译模式链接静态库 `mmc_static`，符号完整可用，推荐使用。
+> **Note:** The standalone build links against the shared library `libmf_memcache.so`, which must export internal C++ symbols. Building within the source tree links against the static library `mmc_static`, which provides all required symbols, and is recommended.
 
-## 运行
+## Running
 
 ```bash
-# 设置动态库搜索路径（源码树内编译时）
+# Set the shared library search path (for a build within the source tree)
 export LD_LIBRARY_PATH=$(pwd)/build/3rdparty/spdlog/lib:$(pwd)/build/3rdparty/spdlog/lib64:$LD_LIBRARY_PATH
 
-# 运行
+# Run the benchmark
 ./build/example/meta_service_bench/bench_meta_service
 ```
 
-### 命令行参数
+### Command-Line Options
 
 ```text
 Usage: bench_meta_service [options]
@@ -129,45 +128,45 @@ Options:
   --perf-freq <hz>   perf record sample frequency             (default: 99)
 ```
 
-| 参数 | 说明 | 默认值 |
+| Option | Description | Default |
 |------|------|--------|
-| `-p` | 客户端进程数（每个进程独立 rank） | 4 |
-| `-t` | 每个进程的工作线程数 | 4 |
-| `-n` | 每个线程执行的操作数 | 5000 |
-| `-k` | Key 空间大小（所有进程共享同一 key 空间） | 20000 |
-| `-w` | 预热阶段总 key 数量 | 5000 |
-| `-b` | 批量操作每批的 key 数量 | 32 |
-| `-s` | 单个 blob 大小（字节） | 32768 (32KB) |
-| `--perf` | 对 meta_service 子进程启用 perf 采样（attach 模式），输出固定为 `perf.data` | 关闭 |
-| `--perf-freq` | perf 采样频率（Hz） | 99 |
+| `-p` | Number of client processes (each process has a unique rank) | 4 |
+| `-t` | Number of worker threads per process | 4 |
+| `-n` | Number of operations per thread | 5000 |
+| `-k` | Key space size (all processes share the same key space) | 20000 |
+| `-w` | Total number of warmup keys | 5000 |
+| `-b` | Number of keys per batch operation | 32 |
+| `-s` | Size of each blob in bytes | 32768 (32KB) |
+| `--perf` | Enable perf sampling for the meta_service child process (attach mode); output is always written to `perf.data` | Off |
+| `--perf-freq` | perf sampling frequency (Hz) | 99 |
 
-### 运行示例
+### Examples
 
 ```bash
-# 2 进程 x 2 线程快速验证
+# Quick check with 2 processes x 2 threads
 ./build/example/meta_service_bench/bench_meta_service -p 2 -t 2 -n 500 -k 2000 -w 500
 
-# 8 进程 x 4 线程大规模压测（32 并发）
+# Large-scale load test with 8 processes x 4 threads (32 concurrent workers)
 ./build/example/meta_service_bench/bench_meta_service -p 8 -t 4 -n 10000 -k 50000 -w 20000
 
-# 对 meta_service 采集 perf 数据，压测结束后用 perf report 分析
+# Collect perf data for meta_service, then analyze it with perf report after the load test
 ./build/example/meta_service_bench/bench_meta_service -p 4 -t 4 -n 5000 --perf --perf-freq 999
 perf report -i perf.data
 
-# 查看帮助
+# Show help
 ./build/example/meta_service_bench/bench_meta_service -h
 ```
 
-## 输出说明
+## Understanding the Output
 
-benchmark 执行分四个阶段：
+The benchmark runs in four stages:
 
-1. **启动 meta_service**：进程内启动 `MmcMetaService`，监听 TCP 端口
-2. **创建模拟 local_service**：创建 `MetaNetClient`，连接到 meta_service
-3. **注册 mock BM**：发送 `BmRegisterRequest`，注册伪造的 HBM 资源（1GB）
-4. **预热 + 压测**：先 Alloc+Update 预热 key，再多线程跑混合读写和批量操作
+1. **Start meta_service:** Start `MmcMetaService` within its process and listen on a TCP port.
+2. **Create simulated local_service clients:** Create `MetaNetClient` instances and connect to meta_service.
+3. **Register mock BM resources:** Send `BmRegisterRequest` to register fake HBM resources (1 GB).
+4. **Warm up and run the load test:** Warm up keys with Alloc+Update, then run mixed read/write and batch operations across multiple threads.
 
-### 输出示例
+### Sample Output
 
 ```text
 ============================================================
@@ -218,29 +217,29 @@ Per-process summary:
 Benchmark finished.
 ```
 
-### 指标说明
+### Metrics
 
-| 指标 | 说明 |
+| Metric | Description |
 |------|------|
-| Success / Fail | RPC 调用成功/失败次数（返回 `MMC_OK` 为成功） |
-| Avg(us) | 平均延迟（微秒） |
-| P50(us) | 中位数延迟（50 分位） |
-| P95(us) | 95 分位延迟 |
-| P99(us) | 99 分位延迟 |
-| Min/Max(us) | 最小/最大延迟 |
-| Throughput | 总吞吐量（ops/sec） |
+| Success / Fail | Number of successful/failed RPC calls (a return value of `MMC_OK` indicates success) |
+| Avg(us) | Average latency in microseconds |
+| P50(us) | Median latency (50th percentile) |
+| P95(us) | 95th-percentile latency |
+| P99(us) | 99th-percentile latency |
+| Min/Max(us) | Minimum/maximum latency |
+| Throughput | Total throughput (ops/sec) |
 
-### 工作负载分布
+### Workload Distribution
 
-**混合读写（单操作）：**
+**Mixed reads and writes (single operations):**
 
-| 操作 | 占比 | 说明 |
+| Operation | Share | Description |
 |------|------|------|
-| Alloc | 10% | 向 meta_service 申请内存（分配器管理 + LRU 插入） |
-| Update | 10% | 更新 blob 状态为已写入 |
-| Get | 30% | 获取 blob 元数据（触发租约续期） |
-| Query | 20% | 查询 key 的元数据信息 |
-| IsExist | 20% | 检查 key 是否存在 |
-| Remove | 10% | 删除元数据并释放内存（分配器回收 + LRU 擦除） |
+| Alloc | 10% | Request memory from meta_service (allocator management + LRU insertion) |
+| Update | 10% | Update the blob status to indicate that it has been written |
+| Get | 30% | Retrieve blob metadata (triggers lease renewal) |
+| Query | 20% | Query metadata for a key |
+| IsExist | 20% | Check whether a key exists |
+| Remove | 10% | Delete metadata and free memory (allocator reclamation + LRU removal) |
 
-**批量操作：** 每轮依次执行 BatchAlloc / BatchGet / BatchUpdate / BatchQuery / BatchIsExist / BatchRemove，每批 `-b` 个 key。
+**Batch operations:** Each round runs BatchAlloc / BatchGet / BatchUpdate / BatchQuery / BatchIsExist / BatchRemove in sequence, with `-b` keys per batch.
