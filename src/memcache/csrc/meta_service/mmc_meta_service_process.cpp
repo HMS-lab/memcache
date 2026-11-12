@@ -264,6 +264,13 @@ int MmcMetaServiceProcess::ValidateConfig() const
         std::cerr << "Invalid log path, please check 'ock.mmc.log_path' " << std::endl;
         return -1;
     }
+    // kv_events 启用后必须给出 bind endpoint，否则 publisher 只会在运行期静默禁用
+    if (config_.kvEvents.enable && config_.kvEvents.endpoint[0] == '\0') {
+        std::cerr << "Invalid kv_events config: ock.mmc.kv_events.enable is true but ock.mmc.kv_events.endpoint is "
+                     "empty."
+                  << std::endl;
+        return -1;
+    }
 
     return 0;
 }
@@ -569,6 +576,16 @@ int MmcMetaServiceProcess::ExtractIpPortFromUrl(const std::string &url, std::str
 
     ip = parser->GetIp();
     port = parser->GetPort();
+
+    // 与 meta RPC 服务端口口径保持一致（mmc_net_engine_acc.cpp 拒绝 <= 1024），
+    // 避免 metrics 侦听到特权端口，导致按通信矩阵核对端口时出现不一致。
+    constexpr uint16_t kMinListenPort = 1025;
+    constexpr uint16_t kMaxListenPort = 65535;
+    if (port < kMinListenPort) {
+        MMC_LOG_ERROR("Invalid metrics URL, port must be in [" << kMinListenPort << ", " << kMaxListenPort
+                                                               << "], url: " << url);
+        return MMC_INVALID_PARAM;
+    }
     return MMC_OK;
 }
 

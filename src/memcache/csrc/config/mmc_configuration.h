@@ -211,7 +211,7 @@ public:
         using namespace ConfConstant;
         AddStrConf(OCK_MMC_META_SERVICE_URL, VNoCheck::Create(), 0);
         AddStrConf(OCK_MMC_META_SERVICE_CONFIG_STORE_URL, VNoCheck::Create(), 0);
-        AddStrConf(OCK_MMC_META_SERVICE_HTTP_URL, VNoCheck::Create(), 0);
+        AddStrConf(OCK_MMC_META_SERVICE_HTTP_URL, VUrlPort::Create(OCK_MMC_META_SERVICE_HTTP_URL.first), 0);
         AddUInt64Conf(OCK_MMC_METRICS_REPORT_INTERVAL_SECONDS,
                       VUInt64Range::Create(OCK_MMC_METRICS_REPORT_INTERVAL_SECONDS.first, MIN_INTERVAL_SECONDS,
                                            MAX_INTERVAL_SECONDS),
@@ -310,7 +310,7 @@ public:
         AddBoolConf(OCK_MMC_KV_EVENTS_ENABLE, VStrEnum::Create(OCK_MMC_KV_EVENTS_ENABLE.first, BOOL_ENUM_STR), 0);
         AddIntConf(OCK_MMC_KV_EVENTS_TRANSPORT,
                    VIntRange::Create(OCK_MMC_KV_EVENTS_TRANSPORT.first, 0, KV_EVENT_TRANSPORT_TYPE_COUNT - 1), 0);
-        AddStrConf(OCK_MMC_KV_EVENTS_ENDPOINT, VNoCheck::Create(), 0);
+        AddStrConf(OCK_MMC_KV_EVENTS_ENDPOINT, VUrlPort::Create(OCK_MMC_KV_EVENTS_ENDPOINT.first), 0);
         AddStrConf(OCK_MMC_KV_EVENTS_MODEL_NAME, VNoCheck::Create(), 0);
         AddStrConf(OCK_MMC_KV_EVENTS_TENANT_ID, VNoCheck::Create(), 0);
         AddIntConf(OCK_MMC_KV_EVENTS_BLOCK_SIZE, VNoCheck::Create(), 0);
@@ -585,8 +585,60 @@ public:
         }
     }
 
+    // hcom 的实际侦听端口 = ock.mmc.local_service.hcom_url 里的端口 + local_rank（rank ∈ [0, world_size-1]），
+    // 由 memfabric 侧派生。基准端口过大只会在运行期才报错，这里在配置期提前拦截。
+    static Result ValidateHcomDerivedPort(const mmc_local_service_config_t &config)
+    {
+        constexpr const char *kScheme = "tcp://";
+        constexpr size_t kSchemeLen = 6;
+        constexpr uint32_t kMinPort = 1024;
+        constexpr uint32_t kMaxPort = 65535;
+
+        const std::string url(config.bmHcomUrl);
+        if (url.empty() || url.compare(0, kSchemeLen, kScheme) != 0) {
+            // 非 tcp:// 形式（如 ubc://）由 memfabric 侧解析与校验，这里不做额外约束
+            return MMC_OK;
+        }
+
+        const std::string hostPort = url.substr(kSchemeLen);
+        const size_t colonPos = hostPort.rfind(':');
+        if (colonPos == std::string::npos || colonPos + 1 >= hostPort.size()) {
+            MMC_LOG_ERROR("Invalid ock.mmc.local_service.hcom_url: " << url << ", host or port is missing");
+            return MMC_INVALID_PARAM;
+        }
+
+        uint32_t port = 0;
+        for (size_t i = colonPos + 1; i < hostPort.size(); ++i) {
+            const char c = hostPort[i];
+            if (c < '0' || c > '9') {
+                MMC_LOG_ERROR("Invalid ock.mmc.local_service.hcom_url: " << url << ", port must be numeric");
+                return MMC_INVALID_PARAM;
+            }
+            port = port * 10U + static_cast<uint32_t>(c - '0');
+            if (port > kMaxPort) {
+                break;
+            }
+        }
+        if (port < kMinPort || port > kMaxPort) {
+            MMC_LOG_ERROR("Invalid ock.mmc.local_service.hcom_url: " << url << ", port must be in [" << kMinPort << ", "
+                                                                     << kMaxPort << "]");
+            return MMC_INVALID_PARAM;
+        }
+
+        const uint32_t rankCount = (config.worldSize == 0U) ? 1U : config.worldSize;
+        if (rankCount - 1U > kMaxPort - port) {
+            MMC_LOG_ERROR("Invalid ock.mmc.local_service.hcom_url: base port "
+                          << port << " leaves no room for " << rankCount << " ranks; the maximum allowed base port is "
+                          << (kMaxPort - (rankCount - 1U)) << " (65535 - (world_size - 1))");
+            return MMC_INVALID_PARAM;
+        }
+        return MMC_OK;
+    }
+
     static Result ValidateLocalServiceConfig(mmc_local_service_config_t &config)
     {
+        MMC_RETURN_ERROR(ValidateHcomDerivedPort(config), "invalid hcom_url port configuration");
+
         MMC_VALIDATE_RETURN(!config.storageEnabled || config.localDRAMSize > 0,
                             "Conflicting configuration: ock.mmc.local_service.dram.size = 0 and "
                             "ock.mmc.local_service.storage.enabled = true",
