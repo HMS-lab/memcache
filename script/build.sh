@@ -63,8 +63,10 @@ VERSION="$(cat VERSION | tr -d '[:space:]')"
 if [ "${BUILD_PYTHON_WHL_TYPE}" == "daily" ]; then
     BUILD_DATE=$(date +%Y%m%d)
     export MEMCACHE_VERSION="${VERSION}".dev"${BUILD_DATE}"
-else
+elif [ "${BUILD_PYTHON_WHL_TYPE}" == "release" ]; then
     export MEMCACHE_VERSION="${VERSION}"
+else
+    export MEMCACHE_VERSION="${VERSION}+${BUILD_PYTHON_WHL_TYPE}"
 fi
 echo "VERSION IS ${VERSION}"
 GIT_COMMIT=`git rev-parse HEAD` || true

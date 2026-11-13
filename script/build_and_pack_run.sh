@@ -29,7 +29,8 @@ show_help() {
     echo "  --incremental           Enable incremental build (skip clean), default: OFF"
     echo "  --build_ubsio <ON/OFF>  Enable/disable build and package ubs-io (SSD backend), default: ON"
     echo "  --build_cpp_example <ON/OFF> Enable/disable in-tree C++ examples, default: OFF"
-    echo "  --build_python_whl_type <release/daily> Python release/daily whl build, default: release"
+    echo "  --build_python_whl_type <release/daily/custom> Python whl build type, default: release"
+    echo "                          custom: format like b010 (b + exactly 3 digits)"
     echo "  --help                  Show this help message"
     echo ""
     echo "Example:"
@@ -60,6 +61,10 @@ while [[ "$#" -gt 0 ]]; do
             shift 2
             ;;
         --build_python_whl_type)
+            if [[ $# -lt 2 || -z "$2" ]]; then
+                echo "--build_python_whl_type requires a value"
+                exit 1
+            fi
             BUILD_PYTHON_WHL_TYPE="$2"
             shift 2
             ;;
@@ -76,6 +81,14 @@ while [[ "$#" -gt 0 ]]; do
     esac
 done
 
+LOWER_PYTHON_WHL_TYPE="${BUILD_PYTHON_WHL_TYPE,,}"
+if [[ "${LOWER_PYTHON_WHL_TYPE}" != "release" && "${LOWER_PYTHON_WHL_TYPE}" != "daily" ]] &&
+    [[ ! "${LOWER_PYTHON_WHL_TYPE}" =~ ^b[0-9]{3}$ ]]; then
+    echo "Error: invalid --build_python_whl_type '${BUILD_PYTHON_WHL_TYPE}'," \
+         "expected release/daily or format like b010 (b + exactly 3 digits)"
+    exit 1
+fi
+
 echo "BUILD_MODE: $BUILD_MODE"
 echo "BUILD_PYTHON: $BUILD_PYTHON"
 echo "BUILD_UBSIO: $BUILD_UBSIO"
@@ -84,7 +97,7 @@ echo "BUILD_PYTHON_WHL_TYPE: $BUILD_PYTHON_WHL_TYPE"
 
 cd "${ROOT_PATH}"
 
-bash build.sh "${BUILD_MODE}" OFF OFF "${BUILD_PYTHON}" ON "${INCREMENTAL}" "${BUILD_UBSIO}" "${BUILD_CPP_EXAMPLE}" "${BUILD_PYTHON_WHL_TYPE}"
+bash build.sh "${BUILD_MODE}" OFF OFF "${BUILD_PYTHON}" ON "${INCREMENTAL}" "${BUILD_UBSIO}" "${BUILD_CPP_EXAMPLE}" "${LOWER_PYTHON_WHL_TYPE}"
 
 bash run_pkg_maker/make_run.sh "${BUILD_TEST}" "${BUILD_UBSIO}"
 
