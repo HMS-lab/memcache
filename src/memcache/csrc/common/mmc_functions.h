@@ -14,13 +14,18 @@
 #define MEM_FABRIC_HYBRID_SMEM_COMMON_FUNC_H
 
 #include <algorithm>
+#include <arpa/inet.h>
 #include <climits>
 #include <cstddef>
 #include <cstdint>
 #include <dlfcn.h>
+#include <ifaddrs.h>
 #include <iomanip>
+#include <net/if.h>
+#include <netinet/in.h>
 #include <sstream>
 #include <string>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include "mmc_types.h"
 #include "mmc_logger.h"
@@ -279,6 +284,110 @@ template<typename T>
 inline void SetBits(T &value, T mask)
 {
     value |= mask;
+}
+
+/**
+ * @brief 判断网卡名是否属于「虚拟/非业务」网卡（用于本机 IP 兜底时过滤）
+ * @param name 网卡名，例如 eth0 / docker0 / vethxxxx / br-xxxx
+ * @return true 表示应跳过
+ */
+inline bool IsVirtualNetDeviceName(const std::string &name)
+{
+    static const char *const kVirtualPrefixes[] = {"lo",  "docker",  "veth", "br-",   "tun",  "tap",
+                                                   "cni", "flannel", "cali", "virbr", "kube", "dummy"};
+    for (const auto *prefix : kVirtualPrefixes) {
+        const std::string p(prefix);
+        if (name.compare(0, p.size(), p) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * @brief 尝试找一个本机可用的 IP（Linux 平台兜底用，例如 backend_id 未配置时）
+ *
+ * 实现说明：用 getifaddrs() 枚举本机全部网卡地址（底层走 netlink RTM_GETADDR，
+ * 返回 ifaddrs 链表，每项带 网卡名 / flags / 地址），按下列规则挑一个：
+ *   1. 跳过 down、loopback、以及常见虚拟网卡（见 IsVirtualNetDeviceName）；
+ *   2. 优先 IPv4；只有完全没有 IPv4 时才退到 IPv6（跳过 link-local / loopback / 未指定）；
+ *   3. 同等条件下优先 eth0（仅作为偏好，没有 eth0 时取第一个可用网卡）。
+ *
+ * @return 形如 "192.168.0.55" 或 "fd00::1" 的地址；找不到返回空串
+ * @note 容器 net=host 时拿到的是宿主地址；容器独立网络命名空间时拿到的是容器地址，
+ *       同机多实例仍会得到同一个值，可满足「同机共享 backendId」的语义。
+ */
+inline std::string TryFindLinuxFirstIp()
+{
+    struct ifaddrs *ifap = nullptr;
+    if (getifaddrs(&ifap) != 0) {
+        MMC_LOG_DEBUG("TryFindLinuxFirstIp: getifaddrs failed");
+        return std::string();
+    }
+
+    std::string firstIpv4;
+    std::string eth0Ipv4;
+    std::string firstIpv6;
+    std::string eth0Ipv6;
+
+    for (auto *ifa = ifap; ifa != nullptr; ifa = ifa->ifa_next) {
+        if (ifa->ifa_addr == nullptr) {
+            continue;
+        }
+        const int family = ifa->ifa_addr->sa_family;
+        if (family != AF_INET && family != AF_INET6) {
+            continue;
+        }
+        if ((ifa->ifa_flags & IFF_UP) == 0 || (ifa->ifa_flags & IFF_LOOPBACK) != 0) {
+            continue;
+        }
+        const std::string devName = (ifa->ifa_name != nullptr) ? ifa->ifa_name : "";
+        if (IsVirtualNetDeviceName(devName)) {
+            continue;
+        }
+
+        char buf[INET6_ADDRSTRLEN] = {0};
+        if (family == AF_INET) {
+            auto *addr4 = reinterpret_cast<struct sockaddr_in *>(ifa->ifa_addr);
+            if (inet_ntop(AF_INET, &addr4->sin_addr, buf, sizeof(buf)) == nullptr) {
+                continue;
+            }
+            if (firstIpv4.empty()) {
+                firstIpv4 = buf;
+            }
+            if (eth0Ipv4.empty() && devName == "eth0") {
+                eth0Ipv4 = buf;
+            }
+            continue;
+        }
+
+        auto *addr6 = reinterpret_cast<struct sockaddr_in6 *>(ifa->ifa_addr);
+        const struct in6_addr *in6 = &addr6->sin6_addr;
+        if (IN6_IS_ADDR_LINKLOCAL(in6) || IN6_IS_ADDR_LOOPBACK(in6) || IN6_IS_ADDR_UNSPECIFIED(in6)) {
+            continue;
+        }
+        if (inet_ntop(AF_INET6, in6, buf, sizeof(buf)) == nullptr) {
+            continue;
+        }
+        if (firstIpv6.empty()) {
+            firstIpv6 = buf;
+        }
+        if (eth0Ipv6.empty() && devName == "eth0") {
+            eth0Ipv6 = buf;
+        }
+    }
+    freeifaddrs(ifap);
+
+    if (!eth0Ipv4.empty()) {
+        return eth0Ipv4;
+    }
+    if (!firstIpv4.empty()) {
+        return firstIpv4;
+    }
+    if (!eth0Ipv6.empty()) {
+        return eth0Ipv6;
+    }
+    return firstIpv6;
 }
 
 } // namespace mmc

@@ -852,16 +852,34 @@ Result MmcLocalServiceDefault::BlobDelete(const std::string &key, const MmcMemBl
 
 std::string MmcLocalServiceDefault::ResolveBackendId()
 {
+    // 优先级：显式配置（Python API / 配置文件）> 环境变量 > 本机 IP 兜底
     if (options_.backendId[0] != '\0') {
         return std::string(options_.backendId);
     }
 
     std::string envBackendId = SafeGetEnv("MMC_LOCAL_SERVICE_BACKEND_ID");
-    if (envBackendId.empty()) {
-        MMC_LOG_WARN("backend_id is not set in config and MMC_LOCAL_SERVICE_BACKEND_ID is empty; "
-                     "backend_id will be emitted as empty string");
+    if (!envBackendId.empty()) {
+        return envBackendId;
     }
-    return envBackendId;
+
+    // 最后兜底：取本机第一个可用 IP。同一个节点的多个 LocalService 会得到同一个值，
+    // 正好满足「同机共享 backendId」的亲和分组语义，避免未配置时被排除在 local_first 分布表之外。
+    std::string localIp = TryFindLinuxFirstIp();
+    if (!localIp.empty()) {
+        MMC_LOG_INFO("backend_id is not set in config/env, fallback to local ip "
+                     << localIp
+                     << "; set ock.mmc.local_service.backend_id or MMC_LOCAL_SERVICE_BACKEND_ID to override");
+        return localIp;
+    }
+
+    // 走到这里说明「配置 / 环境变量 / 本机 IP 兜底」全部失效。LocalService 侧看不到 MetaService 的
+    // alloc_strategy，无法判断当前是否为 local_first，因此只提示风险，不做校验。
+    MMC_LOG_WARN("backend_id is not set in config/env and the local-ip fallback also found no usable address; "
+                 "backend_id will be empty. If MetaService is running with alloc_strategy=local_first, this rank "
+                 "will not appear in the write distribution: it stays writable, but is starved by priority and "
+                 "only receives data when allocation falls back to ALLOC_RANDOM. It still contributes DRAM "
+                 "capacity, so the pool looks bigger than the capacity actually in use");
+    return std::string();
 }
 std::vector<Result> MmcLocalServiceDefault::BatchCopyBlob(const std::vector<std::string> &keys,
                                                           const std::vector<MmcMemBlobDesc> &srcBlobs,
