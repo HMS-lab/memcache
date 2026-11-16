@@ -1,10 +1,8 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 # Licensed under Mulan PSL v2. See the repository LICENSE file.
 
-"""-----------------------------------------------------------------------"""
 
-
-def _size_bytes(raw: str) -> int:
+def size_bytes(raw: str) -> int:
     # Note: Keep the common suffix 'B' at the very end
     units = {"GiB": 1 << 30, "MiB": 1 << 20, "KiB": 1 << 10, "B": 1}
 
@@ -15,12 +13,9 @@ def _size_bytes(raw: str) -> int:
     return int(raw)
 
 
-""" ----------------------------------------------------------------------- """
-
-
 def key_and_size(raw: str) -> tuple[str, int]:
     key, size_str = raw.split(":")
-    return key, _size_bytes(size_str)
+    return key, size_bytes(size_str)
 
 
 def keys_and_sizes(raw: str) -> dict[str, int]:
@@ -36,7 +31,7 @@ def keys_and_sizes(raw: str) -> dict[str, int]:
 
 def size_and_value(raw: str) -> tuple[int, int]:
     size_str, value_str = raw.split(":")
-    return _size_bytes(size_str), int(value_str)
+    return size_bytes(size_str), int(value_str)
 
 
 def sizes_and_values(raw: str) -> dict[int, int]:

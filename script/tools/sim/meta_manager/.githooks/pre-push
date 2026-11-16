@@ -5,9 +5,9 @@
 set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
-python -m isort --check-only --diff sim_random.py sim_trace.py src tests
-python -m black --check --diff sim_random.py sim_trace.py src tests
-python -m pycodestyle sim_random.py sim_trace.py src tests
+python -m isort --check-only --diff sim_*.py src tests
+python -m black --check --diff sim_*.py src tests
+python -m pycodestyle sim_*.py src tests
 
 clang-format --dry-run --Werror src/meta_manager_sim/native/src/*.cpp \
                                 src/meta_manager_sim/native/src/*.h

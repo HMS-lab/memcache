@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from meta_manager_sim.workloads import RandomWorkload, TraceWorkload
+from meta_manager_sim.workloads import (
+    RandomWorkload,
+    SequentialWorkload,
+    TraceWorkload,
+)
 
 
 def test_seeded_random_reads_keep_each_keys_size() -> None:
@@ -33,6 +37,16 @@ def test_single_random_block() -> None:
         list(RandomWorkload().reads(3, 1, {4096: 1}, 1, 0))
         == [("random:0", 4096)] * 3
     )
+
+
+def test_sequential_reads_order_and_size() -> None:
+    workload = SequentialWorkload()
+    assert list(workload.reads(3, 8192)) == [
+        ("sequential:0", 8192),
+        ("sequential:1", 8192),
+        ("sequential:2", 8192),
+    ]
+    assert list(workload.reads(0, 8192)) == []
 
 
 def test_trace_order_models_and_line_selection(tmp_path: Path) -> None:

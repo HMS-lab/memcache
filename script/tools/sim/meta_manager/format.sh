@@ -5,9 +5,9 @@
 set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 
-python -m isort sim_random.py sim_trace.py src tests
-python -m black sim_random.py sim_trace.py src tests
-python -m pycodestyle sim_random.py sim_trace.py src tests
+python -m isort sim_*.py src tests
+python -m black sim_*.py src tests
+python -m pycodestyle sim_*.py src tests
 
 clang-format -i src/meta_manager_sim/native/src/*.cpp \
                 src/meta_manager_sim/native/src/*.h

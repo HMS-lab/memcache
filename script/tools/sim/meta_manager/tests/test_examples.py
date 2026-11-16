@@ -30,6 +30,20 @@ ROOT = Path(__file__).resolve().parents[1]
             8,
             7,
         ),
+        (
+            (
+                "bash",
+                ROOT / "examples/sequential_example.sh",
+                "--num-reads",
+                "3",
+                "--block-size",
+                "4KiB",
+                "--pools",
+                "1:64KiB",
+            ),
+            3,
+            0,
+        ),
         (("bash", ROOT / "examples/trace_example.sh"), 12, 7),
         (
             (
@@ -48,7 +62,12 @@ ROOT = Path(__file__).resolve().parents[1]
             2,
         ),
     ],
-    ids=["random-example", "trace-example", "trace-line"],
+    ids=[
+        "random-example",
+        "sequential-example",
+        "trace-example",
+        "trace-line",
+    ],
 )
 def test_examples_and_trace_cli(
     command: tuple[str | Path, ...], reads: int, hits: int, tmp_path: Path
@@ -79,7 +98,9 @@ def test_examples_and_trace_cli(
     assert imread(path).std() > 0
 
 
-@pytest.mark.parametrize("entry", ["sim_random.py", "sim_trace.py"])
+@pytest.mark.parametrize(
+    "entry", ["sim_random.py", "sim_sequential.py", "sim_trace.py"]
+)
 def test_help_without_build_tools(entry: str, tmp_path: Path) -> None:
     result = subprocess.run(
         [sys.executable, str(ROOT / entry), "--help"],

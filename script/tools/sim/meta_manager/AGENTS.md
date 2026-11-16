@@ -16,11 +16,14 @@
 ## Structure
 
 ```text
-sim_random.py / sim_trace.py     Argument parsing and workload preparation
+sim_random.py                   Seeded random reads
+sim_sequential.py               Consecutive block reads
+sim_trace.py                    Reads from one JSONL conversation
 src/meta_manager_sim/
   cli/                          Shared CLI arguments and size parsers
   config.py                     Manager/run settings and RunConfig.from_args
   workloads/random/             Seeded generator and random workload adapter
+  workloads/sequential/         Consecutive keys with one fixed block size
   workloads/trace/              JSONL reader and trace workload adapter
   simulation.py                 Sequential replay, RSS samples and tables
   metrics/                      RSS reading, summaries and plot export
@@ -43,6 +46,8 @@ from `cli/arguments.py`; programmatic defaults in `config.py` can differ.
   Python threads, a virtual clock or replay wall-time/throughput metrics.
 - Trace timestamps determine ordering only. Keys are `model:hash`, without a
   conversation-line component. Seed random workload generation.
+- Sequential workloads read `sequential:0`, `sequential:1`, etc. once each,
+  using the same configured byte size for every block.
 - MetaManager owns placement, alignment, residency and eviction. Resolve reads
   through native `Get`; a hit completes its read lease, and a miss attempts one
   `Alloc`. Use one DRAM backing blob and native random placement without
@@ -105,16 +110,19 @@ from `cli/arguments.py`; programmatic defaults in `config.py` can differ.
 
 ## Running and building
 
-Follow the README setup and activate `.venv`. Both entrypoints support
+Follow the README setup and activate `.venv`. All three entrypoints support
 `--help` without building or launching the native worker. Examples:
 
 ```bash
 bash examples/random_example.sh
+bash examples/sequential_example.sh --num-reads 8 --block-size 4KiB
 bash examples/trace_example.sh
 ```
 
 The trace example enables `--profile` and requires Heaptrack on PATH. Examples
 save their plots in `build/`; profiling captures go in `build/profiles/`.
+The sequential example defaults to a million reads; the override above keeps
+the run short.
 
 Native code rebuilds automatically before a simulation. To build it alone:
 
@@ -171,15 +179,16 @@ MPLBACKEND=Agg python -m pytest -q -m "not native"
 Keep coverage focused:
 
 - `test_workloads.py`: seeded reads, fixed per-key sizes, hot/cold selection,
-  trace ordering, nested requests, model keys and line selection
+  consecutive sequential keys, empty sequential workloads, trace ordering,
+  nested requests, model keys and line selection
 - `test_config.py`: size/group parsing and CLI-to-config conversion
 - `test_metrics.py`: RSS units, exact integer totals, signed RSS changes,
   display formatting and the actual coordinates exported in plots
 - `test_simulation.py`: real hits/misses, allocation failures, prefix/size
   breakdowns, native timings, sampling, unequal pools, both eviction policies,
   empty workloads and cleanup after an input failure
-- `test_examples.py`: actual Bash/CLI paths, bundled traces and plot export;
-  help also works without build tools
+- `test_examples.py`: all three Bash examples, trace line selection and plot
+  export; all three entrypoints support help without build tools
 - `test_profile.py`: optional real Heaptrack capture and native-PID sampling
 
 Prefer deterministic workloads and accounting invariants to exact timing/RSS
@@ -188,4 +197,5 @@ MetaManager, repeat the same native scenario across modules, test argparse or
 pandas themselves, or retain tests for removed APIs. Reuse a native result
 when several assertions concern the same run. Keep large traces and profiler
 benchmarks out of the suite; inspect plots manually when changing rendering.
+Override the sequential example's million-read default in tests.
 Report exactly which checks ran and any optional skips.

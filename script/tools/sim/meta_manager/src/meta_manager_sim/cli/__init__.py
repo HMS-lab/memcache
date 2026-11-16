@@ -6,6 +6,7 @@ from .parsers import (
     key_and_size,
     keys_and_sizes,
     size_and_value,
+    size_bytes,
     sizes_and_values,
 )
 
@@ -14,5 +15,6 @@ __all__ = [
     "key_and_size",
     "keys_and_sizes",
     "size_and_value",
+    "size_bytes",
     "sizes_and_values",
 ]

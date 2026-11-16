@@ -40,6 +40,13 @@ Heaptrack requires a separate installation. Captures are saved in `build/profile
 | `--hot-block-fraction F`         | Fraction of blocks in the hot set          | `0.2`    |
 | `--hot-read-probability P`       | Probability of reading a hot block         | `0.8`    |
 
+## Sequential simulator - `sim_sequential.py`
+
+| Argument            | Meaning                     | Default  |
+| --------------------| --------------------------- | -------- |
+| `--num-reads N`     | Number of reads to generate | Required |
+| `--block-size SIZE` | Bytes per each block        | Required |
+
 ## Trace simulator - `sim_trace.py`
 
 | Argument                        | Meaning                            | Default  |
