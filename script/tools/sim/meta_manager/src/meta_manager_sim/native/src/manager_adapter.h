@@ -23,7 +23,7 @@ public:
     explicit Manager(const Json &config, bool detailedStats);
     ~Manager();
 
-    void Access(const std::string &key, uint64_t size);
+    void Access(const std::string &key, uint64_t size, const std::string &model);
 
     Json Progress() const;
     Json Snapshot();
@@ -39,7 +39,7 @@ private:
     size_t CachedKeyCount() const;
 
     void RecordTiming(const std::string &name, Clock::time_point before);
-    void RecordAccess(const std::string &key, uint64_t size, bool hit, uint64_t reserved);
+    void RecordAccess(const std::string &model, uint64_t size, bool hit, uint64_t reserved);
     void RecordAllocation(uint64_t size, uint64_t reserved, Result code);
 
     MmcMetaManagerPtr manager_;

@@ -134,7 +134,7 @@ void Manager::Close()
 
 // Sequential block access and lease completion
 
-void Manager::Access(const std::string &key, uint64_t size)
+void Manager::Access(const std::string &key, uint64_t size, const std::string &model)
 {
     if (key.empty() || size == 0 || size > UINT64_MAX - kPoolBase) {
         throw std::runtime_error("Invalid key/size");
@@ -148,7 +148,7 @@ void Manager::Access(const std::string &key, uint64_t size)
 
     if (result == MMC_OK) {
         CompleteLease(key, size, id, descriptor, false, before);
-        RecordAccess(key, size, true, 0);
+        RecordAccess(model, size, true, 0);
         return;
     }
     if (result != MMC_UNMATCHED_KEY) {
@@ -169,7 +169,7 @@ void Manager::Access(const std::string &key, uint64_t size)
         Check(result, "Alloc");
     }
 
-    RecordAccess(key, size, false, reserved);
+    RecordAccess(model, size, false, reserved);
     RecordAllocation(size, reserved, result);
     if (result != MMC_OK) {
         return;
@@ -291,16 +291,14 @@ void Manager::RecordTiming(const std::string &name, Clock::time_point before)
     row["max_ns"] = std::max(row.value("max_ns", nanoseconds), nanoseconds);
 }
 
-void Manager::RecordAccess(const std::string &key, uint64_t size, bool hit, uint64_t reserved)
+void Manager::RecordAccess(const std::string &model, uint64_t size, bool hit, uint64_t reserved)
 {
     CountAccess(counters_, size, hit, reserved);
     if (!detailedStats_) {
         return;
     }
 
-    // Note: The last separator preserves model names which contain ':'
-    const auto separator = key.rfind(':');
-    auto &row = prefixes_[separator == std::string::npos ? "" : key.substr(0, separator)];
+    auto &row = prefixes_[model];
     if (row.is_null()) {
         row = AccessCounters();
     }

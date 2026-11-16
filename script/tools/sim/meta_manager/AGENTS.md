@@ -48,6 +48,10 @@ from `cli/arguments.py`; programmatic defaults in `config.py` can differ.
   conversation-line component. Seed random workload generation.
 - Sequential workloads read `sequential:0`, `sequential:1`, etc. once each,
   using the same configured byte size for every block.
+- Convert workload keys to the native `MODEL_BLOCK_tp_0_pp_0_HASH` format
+  before sending them. Normalize model-name hyphens to underscores, then
+  compute SHA-256 of `MODEL_BLOCK_tp_0_pp_0`. Send the original model
+  separately for statistics.
 - MetaManager owns placement, alignment, residency and eviction. Resolve reads
   through native `Get`; a hit completes its read lease, and a miss attempts one
   `Alloc`. Use one DRAM backing blob and native random placement without
@@ -61,9 +65,9 @@ from `cli/arguments.py`; programmatic defaults in `config.py` can differ.
   cached keys plus completed removal callbacks in this one-blob model.
 - Keep the Python/C++ JSONL fields synchronized. `init` takes `config` and
   `detailed_stats`, returning flat `pid`, `progress`, `pools` and `details`
-  fields. `read` takes `reads=[(key, size)]` and returns counters; `snapshot`
-  returns final state, and `stop` shuts down the manager. There is no version
-  field or simulator batch-size setting.
+  fields. `read` takes `reads=[(key, size)]` and `model`, returning counters.
+  `snapshot` returns final state, and `stop` shuts down the manager. There is
+  no version field or simulator batch-size setting.
 - Measure RSS from the actual C++ PID, including under Heaptrack. RSS covers
   the whole worker process, including runtime and adapter overhead. Keep only
   read counts, RSS and cached-key counts in memory samples; timing breakdowns
