@@ -13,7 +13,11 @@
 #ifndef MMC_CONFIG_VALIDATOR_H
 #define MMC_CONFIG_VALIDATOR_H
 
+#include <algorithm>
+#include <cctype>
+#include <set>
 #include <string>
+#include <vector>
 #include <unistd.h>
 #include <utility>
 #include <sys/stat.h>
@@ -174,6 +178,58 @@ public:
 private:
     std::string mEnumString;
     std::set<std::string> validEnumSet;
+};
+
+class VStrLayeredProtocol : public Validator {
+public:
+    static ValidatorPtr Create(const std::string &name, const std::string &enumStr)
+    {
+        return {new (std::nothrow) VStrLayeredProtocol(name, enumStr)};
+    }
+
+    VStrLayeredProtocol(const std::string &name, std::string enumStr) : Validator(name), mEnumString(std::move(enumStr))
+    {
+        SplitStr(mEnumString, "||", validProtocols);
+    }
+
+    ~VStrLayeredProtocol() override = default;
+
+    bool Initialize() override
+    {
+        SplitStr(mEnumString, "||", validProtocols);
+        if (validProtocols.empty()) {
+            mErrMsg = "Failed to initialize validator for <" + mName + ">, because protocol enum string is not correct";
+            return false;
+        }
+        return true;
+    }
+
+    bool Validate(const std::string &value) override
+    {
+        if (value.empty() || value.front() == ':' || value.back() == ':') {
+            mErrMsg = "Invalid value for <" + mName + ">, protocol layers cannot be empty";
+            return false;
+        }
+
+        std::vector<std::string> layers;
+        SplitStr(value, ":", layers);
+
+        for (const auto &layer : layers) {
+            if (!layer.empty() && validProtocols.find(layer) == validProtocols.end()) {
+                mErrMsg = "Invalid value for <" + mName + ">, protocol layer should be one of " + mEnumString;
+                return false;
+            }
+        }
+        if (std::all_of(layers.begin(), layers.end(), [](const std::string &layer) { return layer.empty(); })) {
+            mErrMsg = "Invalid value for <" + mName + ">, protocol must contain at least one valid layer";
+            return false;
+        }
+        return true;
+    }
+
+private:
+    std::string mEnumString;
+    std::set<std::string> validProtocols;
 };
 
 class VStrNotNull : public Validator {
