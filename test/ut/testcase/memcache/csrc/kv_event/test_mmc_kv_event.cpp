@@ -95,6 +95,42 @@ TEST(MmcKvEventParseTest, ExtractTakesLastSegment)
     EXPECT_EQ(ExtractBlockHashFromObjectKey("deadbeef"), "deadbeef"); // 无 '@'，整串即 hash
 }
 
+TEST(MmcKvEventParseTest, ExtractHashBeforeDecimalRank)
+{
+    const std::string hash = "3bb61b5f4f104508bfce20107f10324ef835fff2a6bf10015b8fcea4db906503";
+    constexpr uint64_t expectedHash = 0x5b8fcea4db906503ULL;
+    for (const auto &rank : {"0", "3", "127"}) {
+        const auto key = "model@group:0@" + hash + "@" + rank;
+        EXPECT_EQ(ExtractBlockHashFromObjectKey(key), hash);
+        EXPECT_EQ(ParseSeqHashFromObjectKey(key), expectedHash);
+    }
+    const std::string upperHash = "3BB61B5F4F104508BFCE20107F10324EF835FFF2A6BF10015B8FCEA4DB906503";
+    EXPECT_EQ(ExtractBlockHashFromObjectKey("model@" + upperHash + "@0"), upperHash);
+}
+
+TEST(MmcKvEventParseTest, ExtractPreservesLayerwiseAndDraftHashLastKeys)
+{
+    const std::string hash = "3bb61b5f4f104508bfce20107f10324ef835fff2a6bf10015b8fcea4db906503";
+    EXPECT_EQ(ExtractBlockHashFromObjectKey("model@group:0@layer_id:3@" + hash), hash);
+    EXPECT_EQ(ExtractBlockHashFromObjectKey("dspark-prefix-v1@identity@pp0@tp0@" + hash), hash);
+    EXPECT_EQ(ExtractBlockHashFromObjectKey("model@0X2A"), "2A");
+    // Only a full hash followed by decimal digits selects the rank-suffix format.
+    EXPECT_EQ(ExtractBlockHashFromObjectKey("model@deadbeef@3"), "3");
+    EXPECT_EQ(ExtractBlockHashFromObjectKey("model@" + hash + "@2a"), "2a");
+}
+
+TEST(MmcKvEventParseTest, ExtractRejectsPrivatePartialSnapshots)
+{
+    const std::string hash = "3bb61b5f4f104508bfce20107f10324ef835fff2a6bf10015b8fcea4db906503";
+    for (const auto &key : {std::string("model@partial@request@0@0@127@0"), "model@partial@" + hash}) {
+        EXPECT_FALSE(ExtractBlockHashFromObjectKey(key).has_value());
+        EXPECT_FALSE(ParseSeqHashFromObjectKey(key).has_value());
+    }
+    EXPECT_FALSE(ExtractBlockHashFromObjectKey("model@" + hash + "@").has_value());
+    EXPECT_FALSE(ExtractBlockHashFromObjectKey("model@" + hash + "@-1").has_value());
+    EXPECT_FALSE(ExtractBlockHashFromObjectKey("model@" + hash + "@rank0").has_value());
+}
+
 TEST(MmcKvEventParseTest, ExtractRejectsEmptyOrNonHex)
 {
     EXPECT_FALSE(ExtractBlockHashFromObjectKey("").has_value());

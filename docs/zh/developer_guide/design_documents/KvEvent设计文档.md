@@ -130,6 +130,17 @@ CURVE 是 ZMQ 官方推荐的加密通讯机制，基于 NaCl 加密库，提供
 
 > **适用事件类型**：common = STORED/REMOVED/CLEARED均有；stored + removed = 仅STORED和REMOVED（CLEARED在seq\_hashes后直接return）；stored only = 仅STORED。
 
+### objectKey 的 block hash 解析
+
+`ExtractBlockHashFromObjectKey` 同时兼容以下格式：
+
+- hash 在末尾：`<前缀>@<hash>`，保留纯 hash 和可选 `0x` / `0X` 前缀的支持。
+- GVA rank 后缀：`<前缀>@<64 位十六进制 hash>@<十进制 rank>`，提取倒数第二段 hash，避免将 rank 当成 hash。
+- layerwise key（如 `<前缀>@group:0@layer_id:3@<hash>`）和 DSpark 配对状态 key 继续使用末段 hash。
+
+包含独立 `@partial@` 字段的对象属于请求私有的部分快照，解析返回空值，不把其末尾数字作为共享缓存的 block hash。
+此规则只影响事件 hash 提取，不修改对象存储 key、读写标识或事件线格式。未解析 key 仍沿用现有的统计和事件处理流程。
+
 ### 性能约束
 
 - 入队操作：O(1)加锁入队，不影响写入热路径。
