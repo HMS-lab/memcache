@@ -452,9 +452,10 @@ private:
     const std::vector<std::string> forbiddenWords{".."};
 };
 
-// 通用 URL 端口校验：scheme 不限（tcp/http/https/etcd/...），中间部分（userinfo、host、IPv6 方括号）不解析，
-// 只按字符串取最后一个 ':' 之后的端口数字并检查是否落在 [minPort, maxPort] 内；端口后允许跟路径/参数。
-// 允许配置为空（表示该项未启用），是否必填由各配置项自己标记决定。
+// Generic URL port validation accepts any scheme (tcp/http/https/etcd/...) without parsing userinfo, host,
+// or IPv6 brackets. It reads the port digits after the last colon and checks [minPort, maxPort].
+// Paths or parameters may follow the port. Empty values are allowed for disabled options;
+// each configuration option determines whether a value is required.
 class VUrlPort : public Validator {
 public:
     static constexpr uint32_t kDefaultMinPort = 1025;
