@@ -10,6 +10,8 @@
  * See the Mulan PSL v2 for more details.
 */
 #include <iostream>
+#include <memory>
+#include <sstream>
 #include "gtest/gtest.h"
 #include "mmc_ref.h"
 #include "mmc_meta_service.h"
@@ -17,10 +19,18 @@
 #include "mmc_msg_client_meta.h"
 #include "mmc_locality_strategy.h"
 #include "mmc_mem_obj_meta.h"
+#include "mmc_client_default.h"
+#include "mmc_periodic_task.h"
 
 using namespace testing;
 using namespace std;
 using namespace ock::mmc;
+
+namespace {
+constexpr const char *EXCEEDS_LIMIT_LOG = "exceeds limit";
+// 反序列化框架 NetMsgUnpacker 的所有错误日志都带此文件标签，出现即说明反序列化路径报错。
+constexpr const char *PACKER_LOG_TAG = "mmc_msg_packer.h";
+} // namespace
 
 class TestMmcMetaService : public testing::Test {
 public:
@@ -148,18 +158,109 @@ TEST_F(TestMmcMetaService, ExistRequest)
 
     IsExistRequest reqExist;
     reqExist.key_ = "test";
-    Response respExist;
+    IsExistResponse respExist;
     ASSERT_TRUE(localServiceDefault->SyncCallMeta(reqExist, respExist, 30) == MMC_OK);
     ASSERT_TRUE(respExist.ret_ == MMC_OK);
 
     IsExistRequest reqNotExist;
     reqNotExist.key_ = "another_test";
-    Response respNotExist;
+    IsExistResponse respNotExist;
     ASSERT_TRUE(localServiceDefault->SyncCallMeta(reqNotExist, respNotExist, 30) == MMC_OK);
     ASSERT_TRUE(respNotExist.ret_ != MMC_OK);
 
     localServicePtr->Stop();
     metaService->Stop();
+}
+
+// 通过真实客户端 MmcClientDefault::IsExist 走完整 TCP + 序列化/反序列化链路，
+// 校验命中/未命中返回值，并断言捕获窗口内没有反序列化 ERROR 日志（旧 bug 误用 Response 解析
+// IsExistResponse，流耗尽后会打出 "Deserialize container size: 0 exceeds limit" 误报）。
+TEST_F(TestMmcMetaService, IsExistClientRoundTrip)
+{
+    std::string metaUrl = "tcp://127.0.0.1:5678";
+    std::string bmUrl = "tcp://127.0.0.1:5681";
+    std::string hcomUrl = "tcp://127.0.0.1:5682";
+    mmc_meta_service_config_t metaServiceConfig{};
+    metaServiceConfig.logLevel = INFO_LEVEL;
+    metaServiceConfig.logRotationFileSize = 2 * 1024 * 1024;
+    metaServiceConfig.logRotationFileCount = 20;
+    metaServiceConfig.evictThresholdHigh = 70;
+    metaServiceConfig.evictThresholdLow = 60U;
+    metaServiceConfig.haEnable = true;
+    metaServiceConfig.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
+    metaServiceConfig.accTlsConfig.tlsEnable = false;
+    metaServiceConfig.asyncFlushIntervalMs = 1000UL;
+    metaServiceConfig.asyncFlushBatchLimit = 8UL;
+    UrlStringToChar(metaUrl, metaServiceConfig.discoveryURL);
+    UrlStringToChar(bmUrl, metaServiceConfig.configStoreURL);
+    auto metaService = MmcMakeRef<MmcMetaService>("testMetaService");
+    auto stopMetaService = [](MmcMetaService *service) { service->Stop(); };
+    std::unique_ptr<MmcMetaService, decltype(stopMetaService)> metaServiceGuard(metaService.Get(), stopMetaService);
+    ASSERT_TRUE(metaService->Start(metaServiceConfig) == MMC_OK);
+
+    mmc_local_service_config_t localServiceConfig = {
+        "", 0, 0, 1, "", "", "", "", 0, "device_sdma", 0, 0, 104857600, 104857600, 0, 0, {}, 0, nullptr, {}, {}};
+    localServiceConfig.logLevel = INFO_LEVEL;
+    localServiceConfig.accTlsConfig.tlsEnable = false;
+    UrlStringToChar(metaUrl, localServiceConfig.discoveryURL);
+    UrlStringToChar(bmUrl, localServiceConfig.bmIpPort);
+    UrlStringToChar(hcomUrl, localServiceConfig.bmHcomUrl);
+    auto localServiceDefault = MmcMakeRef<MmcLocalServiceDefault>("testLocalService");
+    MmcLocalServicePtr localServicePtr = Convert<MmcLocalServiceDefault, MmcLocalService>(localServiceDefault);
+    auto stopLocalService = [](MmcLocalService *service) { service->Stop(); };
+    std::unique_ptr<MmcLocalService, decltype(stopLocalService)> localServiceGuard(localServicePtr.Get(),
+                                                                                   stopLocalService);
+    ASSERT_TRUE(localServicePtr->Start(localServiceConfig) == MMC_OK);
+
+    const std::string hitKey = "client_roundtrip_exist";
+    AllocRequest reqAlloc;
+    reqAlloc.key_ = hitKey;
+    reqAlloc.options_ = AllocOptions(SIZE_32K, 1, MEDIA_HBM, {0}, 0);
+    AllocResponse respAlloc;
+    ASSERT_TRUE(localServiceDefault->SyncCallMeta(reqAlloc, respAlloc, 30) == MMC_OK);
+
+    UpdateRequest updateRequest{MMC_WRITE_OK, hitKey, 0, MEDIA_HBM, 0};
+    Response updateResponse;
+    ASSERT_TRUE(localServiceDefault->SyncCallMeta(updateRequest, updateResponse, 30) == MMC_OK);
+
+    mmc_client_config_t clientConfig{};
+    UrlStringToChar(metaUrl, clientConfig.discoveryURL);
+    clientConfig.rankId = 0;
+    clientConfig.rpcRetryTimeOut = 30;
+    clientConfig.timeOut = 30;
+    clientConfig.readThreadPoolNum = 1;
+    clientConfig.writeThreadPoolNum = 1;
+    clientConfig.aggregateIO = false;
+    clientConfig.logLevel = INFO_LEVEL;
+    ASSERT_TRUE(MmcClientDefault::RegisterInstance() == MMC_OK);
+    // Wait for in-flight periodic callbacks before stopping and deleting the singleton.
+    auto cleanupClient = [&localServiceGuard](MmcClientDefault *client) {
+        UnregisterPeriodicTask("client_lease_cleanup");
+        UnregisterPeriodicTask("client_metric_report");
+        localServiceGuard.reset();
+        client->Stop();
+        EXPECT_EQ(MmcClientDefault::UnregisterInstance(), MMC_OK);
+    };
+    std::unique_ptr<MmcClientDefault, decltype(cleanupClient)> clientGuard(MmcClientDefault::GetInstance(),
+                                                                           cleanupClient);
+    MmcClientDefault *client = clientGuard.get();
+    ASSERT_TRUE(client != nullptr);
+    ASSERT_TRUE(client->Start(clientConfig) == MMC_OK);
+
+    // UT 构建下所有 MMC_LOG_* 走 std::cout，重定向捕获 IsExist 期间的反序列化日志。
+    std::stringstream logCapture;
+    std::streambuf *originalBuf = std::cout.rdbuf(logCapture.rdbuf());
+    const Result hitRet = client->IsExist(hitKey, 0);
+    const Result missRet = client->IsExist("client_roundtrip_missing", 0);
+    std::cout.rdbuf(originalBuf);
+
+    ASSERT_TRUE(hitRet == MMC_OK);
+    ASSERT_TRUE(missRet == MMC_UNMATCHED_KEY);
+    const std::string capturedLogs = logCapture.str();
+    ASSERT_TRUE(capturedLogs.find(EXCEEDS_LIMIT_LOG) == std::string::npos)
+        << "IsExist triggered deserialize size-limit log: " << capturedLogs;
+    ASSERT_TRUE(capturedLogs.find(PACKER_LOG_TAG) == std::string::npos)
+        << "IsExist triggered packer error log: " << capturedLogs;
 }
 
 TEST_F(TestMmcMetaService, BatchExistRequest)

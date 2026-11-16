@@ -141,7 +141,11 @@ public:
     {
         uint32_t size = 0;
         inStream_.read(reinterpret_cast<char *>(&size), sizeof(size));
-        if (!inStream_.good() || size > MAX_CONTAINER_SIZE) {
+        if (!inStream_.good()) {
+            MMC_LOG_ERROR("Failed to read string size, stream error");
+            return MMC_ERROR;
+        }
+        if (size > MAX_CONTAINER_SIZE) {
             MMC_LOG_ERROR("string size: " << size << " exceeds limit: " << MAX_CONTAINER_SIZE);
             return MMC_ERROR;
         }
@@ -165,7 +169,11 @@ public:
     {
         std::size_t size = 0;
         inStream_.read(reinterpret_cast<char *>(&size), sizeof(size));
-        if (!inStream_.good() || size > MAX_CONTAINER_SIZE) {
+        if (!inStream_.good()) {
+            MMC_LOG_ERROR("Failed to read container size, stream error");
+            return MMC_ERROR;
+        }
+        if (size > MAX_CONTAINER_SIZE) {
             MMC_LOG_ERROR("container size: " << size << " exceeds limit: " << MAX_CONTAINER_SIZE);
             return MMC_ERROR;
         }
@@ -194,7 +202,11 @@ public:
     {
         std::size_t size = 0;
         inStream_.read(reinterpret_cast<char *>(&size), sizeof(size));
-        if (!inStream_.good() || size > MAX_CONTAINER_SIZE) {
+        if (!inStream_.good()) {
+            MMC_LOG_ERROR("Failed to read container size, stream error");
+            return MMC_ERROR;
+        }
+        if (size > MAX_CONTAINER_SIZE) {
             MMC_LOG_ERROR("container size: " << size << " exceeds limit: " << MAX_CONTAINER_SIZE);
             return MMC_ERROR;
         }

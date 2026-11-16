@@ -817,7 +817,7 @@ Result MmcClientDefault::IsExist(const std::string &key, uint32_t flags) const
     }
 
     IsExistRequest request{key};
-    Response response;
+    IsExistResponse response;
     MMC_RETURN_ERROR(metaNetClient_->SyncCall(request, response, rpcRetryTimeOut_),
                      "client " << name_ << " IsExist " << key << " failed");
     return response.ret_;
