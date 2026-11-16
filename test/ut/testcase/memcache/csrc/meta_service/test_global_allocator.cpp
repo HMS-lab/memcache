@@ -870,3 +870,91 @@ TEST_F(TestMmcGlobalAllocator, BlobAllocatorMaxContiguousFreeSize)
     EXPECT_EQ(blobAllocator.Release(blob), MMC_OK);
     EXPECT_EQ(blobAllocator.GetMaxContiguousFreeSize(), SIZE_32K * 4);
 }
+
+namespace {
+constexpr uint64_t FRAG_SMALL_SIZE = SIZE_32K;
+constexpr uint64_t FRAG_LARGE_SIZE = SIZE_32K * 2U;
+constexpr uint64_t FRAG_SMALL_COUNT = 10U;
+// 10 个小块 + 1 个大块后尾部仅剩 32K，碎片瓶颈只能来自隔块释放产生的 32K 空洞
+constexpr uint64_t FRAG_CAPACITY = FRAG_SMALL_SIZE * (FRAG_SMALL_COUNT + 3U); // 13 * 32K = 416K
+
+// 构造碎片棋盘：先按 32K 分配 FRAG_SMALL_COUNT 块，再用 64K 大块把全局 maxAlignedSize 抬到 64K；
+// makeHoles 为 true 时隔块释放，留下多个互不相邻的 32K 空洞（总空闲 192K，最大连续空闲 32K）
+void LayoutFragmentedBoard(const MmcGlobalAllocatorPtr &allocator, uint32_t rank, bool enableMaxValueMode,
+                           bool makeHoles)
+{
+    MmcLocation loc{rank, MEDIA_DRAM};
+    MmcLocalMemlInitInfo info{static_cast<uint64_t>(rank) * FRAG_CAPACITY, FRAG_CAPACITY};
+    ASSERT_EQ(allocator->Mount(loc, info, enableMaxValueMode), MMC_OK);
+    ASSERT_EQ(allocator->Start(loc), MMC_OK);
+
+    std::vector<MmcMemBlobPtr> smalls;
+    for (uint64_t i = 0; i < FRAG_SMALL_COUNT; ++i) {
+        AllocOptions req{FRAG_SMALL_SIZE, 1, MEDIA_DRAM, {rank}, ALLOC_FORCE_BY_RANK};
+        std::vector<MmcMemBlobPtr> blobs;
+        ASSERT_EQ(allocator->Alloc(req, blobs), MMC_OK);
+        ASSERT_EQ(blobs.size(), 1U);
+        smalls.push_back(blobs[0]);
+    }
+
+    AllocOptions bigReq{FRAG_LARGE_SIZE, 1, MEDIA_DRAM, {rank}, ALLOC_FORCE_BY_RANK};
+    std::vector<MmcMemBlobPtr> bigs;
+    ASSERT_EQ(allocator->Alloc(bigReq, bigs), MMC_OK);
+    ASSERT_EQ(bigs.size(), 1U);
+
+    if (!makeHoles) {
+        return;
+    }
+    for (size_t i = 0; i < smalls.size(); i += 2U) {
+        ASSERT_EQ(allocator->Free(smalls[i]), MMC_OK);
+    }
+}
+} // namespace
+
+// max 模式碎片判定按放大后的切块粒度比较：32K 申请实际需要 64K 连续块，
+// 同布局非 max 模式可复用 32K 空洞，max 模式则因最大连续空闲仅 32K 判定为碎片
+TEST_F(TestMmcGlobalAllocator, MaxValueModeFragmentationUsesMaxAlignedSize)
+{
+    // 对照组：非 max 模式，maxAlignedSize 虽被 64K 大块抬升，但不参与碎片判定
+    auto plainAllocator = MmcMakeRef<MmcGlobalAllocator>();
+    LayoutFragmentedBoard(plainAllocator, 0U, false, true);
+    EXPECT_EQ(plainAllocator->GetMaxAlignedSize(), FRAG_LARGE_SIZE);
+    EXPECT_EQ(plainAllocator->GetFreeSpace(MEDIA_DRAM), FRAG_SMALL_SIZE * 6U);
+    EXPECT_FALSE(plainAllocator->IsFragmentation(MEDIA_DRAM, FRAG_SMALL_SIZE));
+
+    // 实验组：max 模式，32K 申请被放大到 64K，32K 空洞不可复用，属碎片
+    auto maxAllocator = MmcMakeRef<MmcGlobalAllocator>();
+    LayoutFragmentedBoard(maxAllocator, 0U, true, true);
+    EXPECT_EQ(maxAllocator->GetMaxAlignedSize(), FRAG_LARGE_SIZE);
+    EXPECT_EQ(maxAllocator->GetFreeSpace(MEDIA_DRAM), FRAG_SMALL_SIZE * 6U);
+    EXPECT_EQ(maxAllocator->GetMaxContiguousFreeSize(MEDIA_DRAM), FRAG_SMALL_SIZE);
+    EXPECT_TRUE(maxAllocator->IsFragmentation(MEDIA_DRAM, FRAG_SMALL_SIZE));
+}
+
+// 逐 rank 碎片检测：只返回存在碎片空洞的 rank，健康 rank 与 SSD 介质不参与
+TEST_F(TestMmcGlobalAllocator, GetFragmentedRanksOnlyReturnsFragmentedRank)
+{
+    auto maxAllocator = MmcMakeRef<MmcGlobalAllocator>();
+    // rank0：隔块释放形成 32K 空洞，max 模式下属碎片
+    LayoutFragmentedBoard(maxAllocator, 0U, true, true);
+
+    // rank1：仅占用一个 64K 大块，剩余 352K 连续空闲，不属碎片
+    MmcLocation healthyLoc{1U, MEDIA_DRAM};
+    MmcLocalMemlInitInfo healthyInfo{FRAG_CAPACITY, FRAG_CAPACITY};
+    ASSERT_EQ(maxAllocator->Mount(healthyLoc, healthyInfo, true), MMC_OK);
+    ASSERT_EQ(maxAllocator->Start(healthyLoc), MMC_OK);
+    AllocOptions healthyReq{FRAG_LARGE_SIZE, 1, MEDIA_DRAM, {1U}, ALLOC_FORCE_BY_RANK};
+    std::vector<MmcMemBlobPtr> healthyBlobs;
+    ASSERT_EQ(maxAllocator->Alloc(healthyReq, healthyBlobs), MMC_OK);
+    ASSERT_EQ(healthyBlobs.size(), 1U);
+
+    auto fragmentedRanks = maxAllocator->GetFragmentedRanks(MEDIA_DRAM, FRAG_SMALL_SIZE);
+    ASSERT_EQ(fragmentedRanks.size(), 1U);
+    EXPECT_EQ(fragmentedRanks[0], 0U);
+    EXPECT_TRUE(maxAllocator->GetFragmentedRanks(MEDIA_SSD, FRAG_SMALL_SIZE).empty());
+
+    // 对照组：同布局非 max 模式，32K 空洞可满足 32K 申请，不返回碎片 rank
+    auto plainAllocator = MmcMakeRef<MmcGlobalAllocator>();
+    LayoutFragmentedBoard(plainAllocator, 0U, false, true);
+    EXPECT_TRUE(plainAllocator->GetFragmentedRanks(MEDIA_DRAM, FRAG_SMALL_SIZE).empty());
+}

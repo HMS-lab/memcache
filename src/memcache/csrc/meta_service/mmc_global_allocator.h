@@ -201,6 +201,7 @@ public:
         }
 
         MMC_LOG_INFO("GlobalAllocator Mount " << loc << " enableMaxValueMode:" << enableMaxValueMode);
+        enableMaxValueMode_.store(enableMaxValueMode, std::memory_order_relaxed);
         auto allocator = MmcBlobAllocator::Create(loc, localMemInitInfo, enableMaxValueMode, &maxAlignedSize_);
         allocators_[loc] = allocator;
         if (allocator != nullptr && static_cast<int>(loc.mediaType_) < MEDIA_NONE) {
@@ -473,6 +474,10 @@ public:
             return false;
         }
         auto alignedSize = MmcBlobAllocator::AllocSizeAlignUp(wantSize);
+        // max 模式下切块粒度会被放大到历史最大对齐值，与 MmcBlobAllocator::Alloc 的实际切块保持一致
+        if (enableMaxValueMode_.load(std::memory_order_relaxed)) {
+            alignedSize = std::max(alignedSize, GetMaxAlignedSize());
+        }
         // 总空闲不足属于容量耗尽而非碎片：应由常规水位淘汰（可搬移到低层介质）处理，
         // 强制淘汰直接丢弃数据，不应在容量不足时触发
         if (GetFreeSpace(media) < alignedSize) {
@@ -498,6 +503,9 @@ public:
             return {};
         }
         auto alignedSize = MmcBlobAllocator::AllocSizeAlignUp(wantSize);
+        if (enableMaxValueMode_.load(std::memory_order_relaxed)) {
+            alignedSize = std::max(alignedSize, GetMaxAlignedSize());
+        }
         std::vector<uint32_t> ranks;
         globalAllocLock_.LockRead();
         for (const auto &[loc, allocator] : allocators_) {
@@ -667,6 +675,7 @@ private:
 
     // maxAlignedSize_ 声明在 allocators_ 之前，确保析构时 blob allocator 先销毁（它们持有此指针）
     std::atomic<uint64_t> maxAlignedSize_{0};
+    std::atomic<bool> enableMaxValueMode_{false};
     MmcAllocators allocators_;
     ReadWriteLock globalAllocLock_;
     // Approximate per-media usage, updated on the allocation/free hot path so
