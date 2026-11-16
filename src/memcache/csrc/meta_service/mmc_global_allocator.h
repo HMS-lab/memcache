@@ -488,7 +488,26 @@ public:
         if (GetFreeSpace(media) < alignedSize) {
             return false;
         }
-        return GetMaxContiguousFreeSize(media) < alignedSize;
+        bool hasFragmentedRank = false;
+        globalAllocLock_.LockRead();
+        for (const auto &[loc, allocator] : allocators_) {
+            if (loc.mediaType_ != media || allocator == nullptr) {
+                continue;
+            }
+            auto [total, used] = allocator->GetUsageInfo();
+            uint64_t freeSpace = (total >= used) ? (total - used) : 0;
+            if (freeSpace < alignedSize) {
+                continue;
+            }
+            if (allocator->IsFragmentedFor(alignedSize)) {
+                hasFragmentedRank = true;
+            } else if (allocator->CanAlloc(wantSize)) {
+                globalAllocLock_.UnlockRead();
+                return false;
+            }
+        }
+        globalAllocLock_.UnlockRead();
+        return hasFragmentedRank;
     }
 
     /**
@@ -498,8 +517,8 @@ public:
      *        Alloc can fail on any rank through ArrangeLocality/RandomAssign, so check all mounted ranks.
      * @param media          [in] Medium type; MEDIA_NONE indicates the top-layer medium.
      * @param wantSize       [in] Requested blob data size.
-     * @return Fragmented ranks (total free space >= request, but largest contiguous free block < request),
-     *         or an empty list if no ranks are fragmented.
+     * @return Fragmented ranks (total free space >= request, but largest contiguous free block < request or slab
+     *         class cannot satisfy it), or an empty list if no ranks are fragmented.
      */
     std::vector<uint32_t> GetFragmentedRanks(MediaType media, uint64_t wantSize)
     {
@@ -517,9 +536,9 @@ public:
                 continue;
             }
             auto [total, used] = allocator->GetUsageInfo();
-            uint64_t freeSpace = total - used;
+            uint64_t freeSpace = (total >= used) ? (total - used) : 0;
             // Skip ranks with insufficient total free space: evicting a few keys cannot resolve capacity exhaustion.
-            if (freeSpace >= alignedSize && allocator->GetMaxContiguousFreeSize() < alignedSize) {
+            if (freeSpace >= alignedSize && allocator->IsFragmentedFor(alignedSize)) {
                 ranks.push_back(loc.rank_);
             }
         }
