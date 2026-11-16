@@ -571,8 +571,9 @@ public:
         }
     }
 
-    // hcom 的实际侦听端口 = ock.mmc.local_service.hcom_url 里的端口 + local_rank（rank ∈ [0, world_size-1]），
-    // 由 memfabric 侧派生。基准端口过大只会在运行期才报错，这里在配置期提前拦截。
+    // MemFabric derives the actual HCOM listening port from the port in ock.mmc.local_service.hcom_url
+    // plus local_rank (in [0, world_size - 1]). Reject excessive base ports during configuration loading
+    // to prevent errors at runtime.
     static Result ValidateHcomDerivedPort(const mmc_local_service_config_t &config)
     {
         constexpr const char *kScheme = "tcp://";
@@ -582,7 +583,7 @@ public:
 
         const std::string url(config.bmHcomUrl);
         if (url.empty() || url.compare(0, kSchemeLen, kScheme) != 0) {
-            // 非 tcp:// 形式（如 ubc://）由 memfabric 侧解析与校验，这里不做额外约束
+            // MemFabric parses and validates non-tcp:// URLs (such as ubc://); no additional constraints here.
             return MMC_OK;
         }
 
