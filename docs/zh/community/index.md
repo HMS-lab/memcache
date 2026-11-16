@@ -11,7 +11,7 @@
 
 * **[MemCache 主仓库](https://gitcode.com/Ascend/memcache)** — 源码浏览、Issue 反馈与 PR 贡献
 * **[MemFabric Hybrid 仓库](https://gitcode.com/Ascend/memfabric_hybrid)** — 配套组件源码与 Wiki
-* **[常见问题（FAQ）](../getting_started/FAQ.md)** — 常见问题及解决办法
+* **[常见问题（FAQ）](../getting_started/FAQ/index.md)** — 常见问题及解决办法
 
 ## 用户案例
 

@@ -23,7 +23,6 @@ nav:
               - A3 4机PD分离: getting_started/tutorials/models/GLM-5.2+A3-4机PD分离.md
       - 评测教程:
           - 多轮对话参考测试: getting_started/tutorials/evaluation/多轮对话参考测试.md
-      - 常见问题: getting_started/FAQ.md
   - 用户指南:
       - 特性指南:
           - 多级池化:
@@ -67,6 +66,16 @@ nav:
           - C++ API: memcache_c++_api.md
           - Python API: memcache_python_api.md
           - RESTful API: memcache_restful_api.md
+  - FAQ:
+      - 概述: getting_started/FAQ/index.md
+      - "1. HalMemCreate 失败（ret: 6）": getting_started/FAQ/halmemcreate.md
+      - 2. store 对象初始化失败: getting_started/FAQ/store_init_failed.md
+      - 3. HOST_RDMA 跨机传输数据不一致: getting_started/FAQ/host_rdma_data_consistency.md
+      - 4. 池化 Size 不一致导致 AddVaInfo failed: getting_started/FAQ/pool_size_mismatch.md
+      - 5. HA 模式下 master 频繁切换: getting_started/FAQ/ha_master_switch.md
+      - 6. 多 Python 环境混用 memcache 与 memfabric: getting_started/FAQ/python_env_mismatch.md
+      - 7. 推理过程中报 lease 过期: getting_started/FAQ/lease_expired.md
+      - 8. 内存池初始化报错 AutoRanking failed: getting_started/FAQ/auto_ranking_failed.md
   - 社区:
       - 社区首页: community/index.md
       - 版本规划: community/Roadmap.md

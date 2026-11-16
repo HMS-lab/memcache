@@ -16,6 +16,12 @@ High-performance distributed key-value cache
 </div>
 <br/>
 
+<div align="center">
+
+### 📖 [**完整文档 / Full Documentation →**](https://ascend-memcache.readthedocs.io/zh-cn/latest/)
+
+</div>
+
 ## 🔄Latest News
 
 - [2026/06] MemCache使能推理PrefixCache加速案例实践，请关注[wiki主页案例库](https://gitcode.com/Ascend/memcache/wiki/Home.md)获取最新案例
