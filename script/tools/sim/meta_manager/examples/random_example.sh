@@ -9,6 +9,7 @@ python sim_random.py --pools 2:8MiB \
                      --memory-sample-every 10 \
                      --memory-plot build/random_example.png \
                      --detailed-stats \
+                     --progress-bar \
                      --num-reads 1000 \
                      --num-blocks 200 \
                      --size-weights 4KiB:3,64KiB:1 "$@"

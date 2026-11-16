@@ -3,6 +3,8 @@
 
 import argparse
 
+from tqdm import tqdm
+
 from meta_manager_sim import (
     RandomWorkload,
     RunConfig,
@@ -35,6 +37,9 @@ def main() -> None:
         args.hot_block_fraction,
         args.hot_read_probability,
     )
+
+    if config.progress_bar:
+        reads = tqdm(reads, total=args.num_reads)
 
     run_simulation(reads, config)
 

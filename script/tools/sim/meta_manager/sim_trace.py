@@ -4,6 +4,8 @@
 import argparse
 from pathlib import Path
 
+from tqdm import tqdm
+
 from meta_manager_sim import (
     RunConfig,
     TraceWorkload,
@@ -35,6 +37,10 @@ def main() -> None:
     reads = TraceWorkload(args.trace_path, args.line).reads(
         dict(args.model_block_sizes)
     )
+
+    if config.progress_bar:
+        # Note: The number of reads is not predetermined
+        reads = tqdm(list(reads))
 
     run_simulation(reads, config)
 

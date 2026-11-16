@@ -26,6 +26,7 @@ python -m pip install -e .
 | `--memory-plot PATH`        | Path for the optional memory and cached-key plots          | `None`        |
 | `--detailed-stats`          | Collect additional metrics (pool, keys, sizes, timings)    | `False`       |
 | `--profile`                 | Collect C++ heap allocations with Heaptrack                | `False`       |
+| `--progress-bar`            | Display a progress bar                                     | `False`       |
 
 Heaptrack requires a separate installation. Captures are saved in `build/profiles/`.
 

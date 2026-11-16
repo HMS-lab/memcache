@@ -23,6 +23,7 @@ class RunConfig:
     memory_plot: Path | None = None
     detailed_stats: bool = False
     profile: bool = False
+    progress_bar: bool = False
 
     @staticmethod
     def from_args(args: Namespace) -> "RunConfig":
@@ -39,4 +40,5 @@ class RunConfig:
             memory_plot=args.memory_plot,
             detailed_stats=args.detailed_stats,
             profile=args.profile,
+            progress_bar=args.progress_bar,
         )

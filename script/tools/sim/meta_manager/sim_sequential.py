@@ -3,6 +3,8 @@
 
 import argparse
 
+from tqdm import tqdm
+
 from meta_manager_sim import (
     RunConfig,
     SequentialWorkload,
@@ -25,6 +27,9 @@ def main() -> None:
 
     # Prepare a stream of sequential block reads
     reads = SequentialWorkload().reads(args.num_reads, args.block_size)
+
+    if config.progress_bar:
+        reads = tqdm(reads, total=args.num_reads)
 
     run_simulation(reads, config)
 

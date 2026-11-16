@@ -39,6 +39,9 @@ def _add_simulator_arguments(parser: ArgumentParser) -> None:
     parser.add_argument("--detailed-stats", action="store_true")
     parser.add_argument("--profile", action="store_true")
 
+    # Utility
+    parser.add_argument("--progress-bar", action="store_true")
+
 
 """ ----------------------------------------------------------------------- """
 

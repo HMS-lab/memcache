@@ -9,6 +9,7 @@ python sim_trace.py --pools 1:64KiB \
                     --memory-plot build/trace_example.png \
                     --detailed-stats \
                     --profile \
+                    --progress-bar \
                     --trace-path examples/traces.jsonl \
                     --line 0 \
                     --model-block-size example-model-a:4KiB \
