@@ -45,12 +45,14 @@ public:
 
     /**
      * @brief
-     * blob分配策略实现
+     * Implements the blob allocation strategy.
      * @param allocOpt
-     * 1. preferredRank为空时（实际上至少有一个local rank），numBlobs可以是 <= MAX_BLOB_COPIES 的任意值
-     * 2. preferredRank非空时，rank不能重复，且rank个数 <= numBlobs
-     * 3. preferredRank大于1的时候，必定是强制分配场景，例如：
-     *    replicaNum=4，preferredLocalServiceIDs=[0,1]场景，需要强制在0,1上分配两个副本，剩下2个副本按默认分配策略处理；且需要排除已分配过的rank列表
+     * 1. When preferredRank is empty (in practice, there is at least one local rank), numBlobs can be any value
+     *    <= MAX_BLOB_COPIES.
+     * 2. When preferredRank is nonempty, ranks must be unique, and the number of ranks must be <= numBlobs.
+     * 3. When preferredRank contains more than one rank, allocation is always forced. For example:
+     *    with replicaNum=4 and preferredLocalServiceIDs=[0,1], allocate one replica on each of ranks 0 and 1.
+     *    Allocate the remaining two replicas using the default strategy, excluding ranks already allocated to.
      * @param blobs
      * @return Result
      */
@@ -291,7 +293,7 @@ public:
         return MMC_OK;
     }
 
-    // 死节点清理：整段丢弃分配器，不再校验 allocatedSize_==0
+    // Dead node cleanup: discard the entire allocator without checking allocatedSize_==0.
     Result ForceUnmount(const MmcLocation &loc)
     {
         globalAllocLock_.LockWrite();
@@ -300,8 +302,9 @@ public:
             globalAllocLock_.UnlockWrite();
             return MMC_OK;
         }
-        // 死节点路径下 RemoveBlobsForDeadRank 直接丢弃 blob、不回调 Free，usedSize_ 仍包含该 rank 的用量；
-        // 这里按分配器实际容量/用量对称扣减，与 Unmount 保持一致，避免重连后 Mount 重复累加。
+        // For dead nodes, RemoveBlobsForDeadRank discards blobs without calling Free, so usedSize_ still includes
+        // this rank's usage. Subtract the allocator's actual capacity and usage, as in Unmount, to prevent Mount
+        // from counting them again after reconnection.
         if (static_cast<int>(loc.mediaType_) < MEDIA_NONE && iter->second != nullptr) {
             const auto usage = iter->second->GetUsageInfo();
             SubSat(totalSize_[loc.mediaType_], usage.first);
@@ -343,7 +346,7 @@ public:
         return ret;
     }
 
-    // 判断某个 (rank, media) 是否还有已分配的 blob；用于断链清理前的短路判断。
+    // Check whether (rank, media) still has allocated blobs to allow an early exit before disconnection cleanup.
     bool HasAllocatedBlobs(uint32_t rank, MediaType media)
     {
         globalAllocLock_.LockRead();
@@ -375,9 +378,9 @@ public:
     }
 
     /**
-     * @brief 查询指定介质在所有 rank 上最大的单个连续空闲块大小
-     * @param type    [in] 介质类型，MEDIA_NONE 表示最顶层介质
-     * @return 最大连续空闲块大小，无可用分配器时为 0
+     * @brief Get the largest contiguous free block size across all ranks for the specified medium.
+     * @param type    [in] Medium type; MEDIA_NONE indicates the top-layer medium.
+     * @return Largest contiguous free block size, or 0 if no allocator is available.
      */
     uint64_t GetMaxContiguousFreeSize(MediaType type)
     {
@@ -400,9 +403,9 @@ public:
     }
 
     /**
-     * @brief 查询指定 location 的空闲空间概要：总空闲大小与最大连续空闲块大小
-     * @param loc    [in] 位置（rank + 介质）
-     * @return (总空闲大小, 最大连续空闲块大小)，location 不存在时为 (0, 0)
+     * @brief Get the total free space and largest contiguous free block size for the specified location.
+     * @param loc    [in] Location (rank + medium).
+     * @return (total free space, largest contiguous free block size), or (0, 0) if the location does not exist.
      */
     std::pair<uint64_t, uint64_t> GetLocFreeSummary(const MmcLocation &loc)
     {
@@ -422,9 +425,10 @@ public:
     }
 
     /**
-     * @brief 获取指定 location 分配器 addressTree 中的空闲地址段快照（gva 绝对地址）
-     * @param loc    [in] 位置（rank + 介质）
-     * @return 空闲地址段列表，location 不存在时为空
+     * @brief Get a snapshot of free address ranges in the specified location's allocator addressTree
+     *        (absolute GVA addresses).
+     * @param loc    [in] Location (rank + medium).
+     * @return List of free address ranges, or an empty list if the location does not exist.
      */
     std::vector<SpaceRange> GetFreeSegments(const MmcLocation &loc)
     {
@@ -442,9 +446,9 @@ public:
     }
 
     /**
-     * @brief 枚举指定介质已挂载的所有 location（rank + 介质），按 map 序（rank 升序）
-     * @param type    [in] 介质类型
-     * @return location 列表，无挂载分配器时为空
+     * @brief List all mounted locations (rank + medium) for the specified medium in map order (ascending rank).
+     * @param type    [in] Medium type.
+     * @return List of locations, or an empty list if no allocators are mounted.
      */
     std::vector<MmcLocation> GetMediaLocations(MediaType type)
     {
@@ -463,10 +467,11 @@ public:
     }
 
     /**
-     * @brief 判断一次分配失败是否由内存碎片导致：总空闲足够（非容量耗尽），但申请大小超过系统中最大的单个连续空闲块
-     * @param media       [in] 介质类型，MEDIA_NONE 表示最顶层介质
-     * @param wantSize    [in] 申请的 blob 数据大小
-     * @return true 表示属于碎片场景，可通过强制淘汰整理出满足申请的连续内存
+     * @brief Check whether allocation failed due to fragmentation: total free space is sufficient, but the request
+     *        exceeds the largest contiguous free block in the system.
+     * @param media       [in] Medium type; MEDIA_NONE indicates the top-layer medium.
+     * @param wantSize    [in] Requested blob data size.
+     * @return true if fragmentation is the cause and forced eviction can free enough contiguous memory for the request.
      */
     bool IsFragmentation(MediaType media, uint64_t wantSize)
     {
@@ -477,8 +482,9 @@ public:
             return false;
         }
         auto alignedSize = MmcBlobAllocator::AllocSizeAlignUp(wantSize);
-        // 总空闲不足属于容量耗尽而非碎片：应由常规水位淘汰（可搬移到低层介质）处理，
-        // 强制淘汰直接丢弃数据，不应在容量不足时触发
+        // Insufficient total free space means capacity exhaustion, not fragmentation. Handle it through normal
+        // watermark eviction, which can move data to a lower-layer medium. Forced eviction discards data directly
+        // and should not be triggered by insufficient capacity.
         if (GetFreeSpace(media) < alignedSize) {
             return false;
         }
@@ -486,12 +492,14 @@ public:
     }
 
     /**
-     * @brief 获取指定介质上因碎片化无法满足申请大小的 rank 列表，用于限定强制淘汰的目标 rank。
-     *        不同 rank 的 gva 地址空间独立，跨 rank 释放无法为失败 rank 整理出连续内存。
-     *        Alloc 经 ArrangeLocality/RandomAssign 可能在任意 rank 上失败，须检查所有已挂载 rank
-     * @param media          [in] 介质类型，MEDIA_NONE 表示最顶层介质
-     * @param wantSize       [in] 申请的 blob 数据大小
-     * @return 碎片化 rank 列表（总空闲 ≥ 申请但最大连续空闲块 < 申请），无碎片化 rank 时为空
+     * @brief Get ranks on the specified medium that cannot satisfy the request due to fragmentation, to restrict
+     *        the target ranks for forced eviction. Each rank has an independent GVA address space; freeing memory
+     *        on another rank cannot create contiguous memory on the rank where allocation failed.
+     *        Alloc can fail on any rank through ArrangeLocality/RandomAssign, so check all mounted ranks.
+     * @param media          [in] Medium type; MEDIA_NONE indicates the top-layer medium.
+     * @param wantSize       [in] Requested blob data size.
+     * @return Fragmented ranks (total free space >= request, but largest contiguous free block < request),
+     *         or an empty list if no ranks are fragmented.
      */
     std::vector<uint32_t> GetFragmentedRanks(MediaType media, uint64_t wantSize)
     {
@@ -510,7 +518,7 @@ public:
             }
             auto [total, used] = allocator->GetUsageInfo();
             uint64_t freeSpace = total - used;
-            // 总空闲不足属于容量耗尽：淘汰少量 key 无法补足，跳过
+            // Skip ranks with insufficient total free space: evicting a few keys cannot resolve capacity exhaustion.
             if (freeSpace >= alignedSize && allocator->GetMaxContiguousFreeSize() < alignedSize) {
                 ranks.push_back(loc.rank_);
             }
@@ -669,7 +677,7 @@ private:
         return ret;
     }
 
-    // maxAlignedSize_ 声明在 allocators_ 之前，确保析构时 blob allocator 先销毁（它们持有此指针）
+    // Declare maxAlignedSize_ before allocators_ so blob allocators, which hold a pointer to it, are destroyed first.
     std::atomic<uint64_t> maxAlignedSize_{0};
     MmcAllocators allocators_;
     ReadWriteLock globalAllocLock_;
