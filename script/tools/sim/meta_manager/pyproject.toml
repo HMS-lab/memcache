@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "meta-manager-sim"
+version = "0.2.0"
+description = "Workload simulator for the MetaManager"
+authors = [
+    { name = "Adam Bęcłowicz", email = "beclowiczadam@gmail.com" },
+]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "cmake>=3.18",
+    "matplotlib>=3.6",
+    "nlohmann_json>=3.12",
+    "pandas>=2.2,<3",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+namespaces = false
+
+[tool.setuptools.package-data]
+meta_manager_sim = [
+    "native/CMakeLists.txt",
+    "native/src/*.cpp",
+    "native/src/*.h",
+    "native/src/standalone/prometheus/*.h",
+]
+
+[tool.black]
+force-exclude = "/(build|\\.venv|venv)/"
+line-length = 79
+skip-magic-trailing-comma = true
+target-version = ["py310"]
+
+[tool.isort]
+profile = "black"
+line_length = 79
+skip_gitignore = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "--import-mode=importlib"
+markers = ["native: requires the standalone C++ build"]
