@@ -125,6 +125,211 @@ void CheckFailures()
     Require(allocator.Release(second) == MMC_OK);
 }
 
+void CheckBatch()
+{
+    TestAllocator allocator;
+    const std::vector<uint64_t> sizes{kSlot, 2 * kSlot, 0, kSlot, kCapacity};
+    auto blocks = allocator.AllocBatch(sizes);
+    Require(blocks.size() == sizes.size());
+    Require(blocks[0] != nullptr && blocks[1] != nullptr && blocks[2] == nullptr &&
+            blocks[3] != nullptr && blocks[4] == nullptr);
+    for (const auto &blob : blocks) { if (blob != nullptr) { Require(allocator.Release(blob) == MMC_OK); } }
+    Require(allocator.GetUsageInfo().second == 0);
+    std::vector<uint64_t> full(kCapacity / kSlot + 1, kSlot);
+    blocks = allocator.AllocBatch(full);
+    Require(blocks.back() == nullptr);
+    for (const auto &blob : blocks) { if (blob != nullptr) { Require(allocator.Release(blob) == MMC_OK); } }
+    Require(allocator.GetUsageInfo().second == 0);
+}
+
+// Przesuwamy miejsce awarii przez planowanie batcha, przygotowanie ramki
+// i tworzenie deskryptorów. Po dowolnym wyniku zwolnienie zwróconych bloków
+// musi przywrócić cały region, także gdy wyjątek wystąpił po części przydziałów.
+void CheckBatchFailures()
+{
+    constexpr int kFailurePoints = 40;
+    const std::vector<uint64_t> sizes{kSlot, kSlot, 2 * kSlot, kSlot};
+    for (int point = 0; point < kFailurePoints; ++point) {
+        TestAllocator allocator;
+        std::vector<MmcMemBlobPtr> blocks;
+        failAfter = point;
+        try { blocks = allocator.AllocBatch(sizes); } catch (const std::bad_alloc &) {}
+        failAfter = -1;
+        for (const auto &blob : blocks) {
+            if (blob != nullptr) { Require(allocator.Release(blob) == MMC_OK); }
+        }
+        Require(allocator.GetUsageInfo().second == 0);
+        Require(allocator.GetFragmentationBytes() == 0);
+    }
+}
+
+void CheckGlobalBatch()
+{
+    MmcGlobalAllocator global;
+    MmcLocalMemlInitInfo info{};
+    info.bmAddr_ = 0;
+    info.capacity_ = kCapacity;
+    Require(global.Mount({0, MEDIA_DRAM}, info) == MMC_OK);
+    Require(global.Start({0, MEDIA_DRAM}) == MMC_OK);
+    const std::vector<AllocOptions> options{
+        {kSlot, 1, MEDIA_DRAM, {0}, ALLOC_FORCE_BY_RANK},
+        {kSlot, 2, MEDIA_DRAM, {0, 1}, ALLOC_ARRANGE},
+        {2 * kSlot, 1, MEDIA_NONE, {}, ALLOC_ARRANGE}};
+    std::vector<std::vector<MmcMemBlobPtr>> blobs;
+    std::vector<Result> results;
+    global.AllocBatch(options, blobs, results);
+    Require(results.size() == options.size());
+    Require(results[0] == MMC_OK && results[1] != MMC_OK && results[2] == MMC_OK);
+    Require(blobs[1].empty());
+    uint64_t total[MEDIA_NONE]{};
+    uint64_t used[MEDIA_NONE]{};
+    global.GetUsedInfo(total, used);
+    Require(used[MEDIA_DRAM] == 3 * kSlot);
+    for (auto &group : blobs) { global.Free(group); }
+
+    // Niemożliwe żądanie (numBlobs=2 przy 1 ranku) nie może zabrać ostatniego slotu kolejnemu kluczowi.
+    std::vector<MmcMemBlobPtr> singleRankFiller;
+    for (int i = 0; i < 15; ++i) {
+        std::vector<MmcMemBlobPtr> one;
+        Require(global.Alloc({65536, 1, MEDIA_DRAM, {0}, ALLOC_FORCE_BY_RANK}, one) == MMC_OK);
+        singleRankFiller.push_back(one[0]);
+    }
+    for (uint64_t i = 0; i < (65536 / kSlot) - 1; ++i) {
+        std::vector<MmcMemBlobPtr> one;
+        Require(global.Alloc({kSlot, 1, MEDIA_DRAM, {0}, ALLOC_FORCE_BY_RANK}, one) == MMC_OK);
+        singleRankFiller.push_back(one[0]);
+    }
+    const std::vector<AllocOptions> impossibleFirst{
+        {kSlot, 2, MEDIA_DRAM, {}, ALLOC_RANDOM},
+        {kSlot, 1, MEDIA_DRAM, {}, ALLOC_RANDOM}};
+    global.AllocBatch(impossibleFirst, blobs, results);
+    Require(results.size() == 2 && results[0] != MMC_OK && blobs[0].empty());
+    Require(results[1] == MMC_OK && blobs[1].size() == 1);
+    for (auto &group : blobs) { global.Free(group); }
+    global.Free(singleRankFiller);
+
+    Require(global.Mount({1, MEDIA_DRAM}, info) == MMC_OK);
+    Require(global.Start({1, MEDIA_DRAM}) == MMC_OK);
+    const std::vector<AllocOptions> replicated{
+        {kSlot, 2, MEDIA_DRAM, {0, 1}, ALLOC_ARRANGE},
+        {kSlot, 2, MEDIA_DRAM, {0, 0}, ALLOC_ARRANGE},
+        {kSlot, 1, MEDIA_DRAM, {2}, ALLOC_ARRANGE}};
+    global.AllocBatch(replicated, blobs, results);
+    Require(results[0] == MMC_OK && blobs[0].size() == 2);
+    Require(blobs[0][0]->Rank() != blobs[0][1]->Rank());
+    Require(results[1] != MMC_OK && blobs[1].empty());
+    Require(results[2] == MMC_OK); // Brak preferowanego ranka dopuszcza inny cel.
+    global.GetUsedInfo(total, used);
+    Require(used[MEDIA_DRAM] == 3 * kSlot);
+    for (auto &group : blobs) { global.Free(group); }
+    global.AllocBatch({}, blobs, results);
+    Require(blobs.empty() && results.empty());
+    global.GetUsedInfo(total, used);
+    Require(used[MEDIA_DRAM] == 0);
+
+    // Weryfikacja ALLOC_LOCAL_FIRST w MmcGlobalAllocator::AllocBatch
+    Require(global.Mount({2, MEDIA_DRAM}, info) == MMC_OK);
+    Require(global.Start({2, MEDIA_DRAM}) == MMC_OK);
+    std::vector<MmcMemBlobPtr> rank0Filler;
+    for (int i = 0; i < 16; ++i) {
+        std::vector<MmcMemBlobPtr> one;
+        Require(global.Alloc({65536, 1, MEDIA_DRAM, {0}, ALLOC_FORCE_BY_RANK}, one) == MMC_OK);
+        rank0Filler.push_back(one[0]);
+    }
+    const std::vector<AllocOptions> localFirstOpts{
+        {kSlot, 1, MEDIA_DRAM, {0, 1, 2}, ALLOC_LOCAL_FIRST},
+        {kSlot, 2, MEDIA_DRAM, {0, 1}, ALLOC_LOCAL_FIRST},
+        {kSlot, 1, MEDIA_DRAM, {}, ALLOC_LOCAL_FIRST | ALLOC_FLAGS_GVA_MALLOC_MASK},
+        {kSlot, 1, MEDIA_DRAM, {99}, ALLOC_LOCAL_FIRST}};
+    global.AllocBatch(localFirstOpts, blobs, results);
+    Require(results.size() == localFirstOpts.size());
+    Require(results[0] == MMC_OK && blobs[0].size() == 1 && blobs[0][0]->Rank() == 1);
+    Require(results[1] == MMC_OK && blobs[1].size() == 2 && blobs[1][0]->Rank() != blobs[1][1]->Rank());
+    Require(results[2] == MMC_OK && blobs[2].size() == 1);
+    Require(results[3] == MMC_OK && blobs[3].size() == 1);
+    for (auto &group : blobs) { global.Free(group); }
+
+    // preferredRank_.size() < numBlobs_ lub niezamontowany rank w preferredRank_ przechodzi od razu do ALLOC_RANDOM.
+    const std::vector<AllocOptions> underSizedPreferred{
+        {kSlot, 2, MEDIA_DRAM, {1}, ALLOC_LOCAL_FIRST},
+        {kSlot, 2, MEDIA_DRAM, {1, 99}, ALLOC_LOCAL_FIRST}};
+    global.AllocBatch(underSizedPreferred, blobs, results);
+    Require(results.size() == 2);
+    Require(results[0] == MMC_OK && blobs[0].size() == 2 && blobs[0][0]->Rank() != blobs[0][1]->Rank());
+    Require(results[1] == MMC_OK && blobs[1].size() == 2 && blobs[1][0]->Rank() != blobs[1][1]->Rank());
+    for (auto &group : blobs) { global.Free(group); }
+
+    // Częściowy sukces lokalny: rank 1 ma tylko 1 slot kSlot, rank 0 pełny -> brak rollbacku uniemożliwiłby fallback.
+    std::vector<MmcMemBlobPtr> rank1Filler;
+    for (int i = 0; i < 15; ++i) {
+        std::vector<MmcMemBlobPtr> one;
+        Require(global.Alloc({65536, 1, MEDIA_DRAM, {1}, ALLOC_FORCE_BY_RANK}, one) == MMC_OK);
+        rank1Filler.push_back(one[0]);
+    }
+    for (uint64_t i = 0; i < (65536 / kSlot) - 1; ++i) {
+        std::vector<MmcMemBlobPtr> one;
+        Require(global.Alloc({kSlot, 1, MEDIA_DRAM, {1}, ALLOC_FORCE_BY_RANK}, one) == MMC_OK);
+        rank1Filler.push_back(one[0]);
+    }
+    const std::vector<AllocOptions> partialLocalOpt{{kSlot, 2, MEDIA_DRAM, {1, 0}, ALLOC_LOCAL_FIRST}};
+    global.AllocBatch(partialLocalOpt, blobs, results);
+    Require(results.size() == 1 && results[0] == MMC_OK && blobs[0].size() == 2 &&
+            blobs[0][0]->Rank() != blobs[0][1]->Rank());
+    for (auto &group : blobs) { global.Free(group); }
+    global.Free(rank1Filler);
+
+    global.Free(rank0Filler);
+    global.GetUsedInfo(total, used);
+    Require(used[MEDIA_DRAM] == 0);
+    Require(global.Unmount({0, MEDIA_DRAM}) == MMC_OK);
+    Require(global.Unmount({1, MEDIA_DRAM}) == MMC_OK);
+    Require(global.Unmount({2, MEDIA_DRAM}) == MMC_OK);
+
+    // Wstrzyknięcie std::bad_alloc (np. w triggerLocalFirstFallback) w trybie Slab nie może zgubić slotów grupy.
+    {
+        SlabEnvGuard slabGuard("1");
+        MmcGlobalAllocator slabGlobal;
+        Require(slabGlobal.Mount({0, MEDIA_DRAM}, info) == MMC_OK);
+        Require(slabGlobal.Start({0, MEDIA_DRAM}) == MMC_OK);
+        Require(slabGlobal.Mount({1, MEDIA_DRAM}, info) == MMC_OK);
+        Require(slabGlobal.Start({1, MEDIA_DRAM}) == MMC_OK);
+
+        std::vector<MmcMemBlobPtr> slabFiller;
+        for (int i = 0; i < 15; ++i) {
+            std::vector<MmcMemBlobPtr> one;
+            Require(slabGlobal.Alloc({65536, 1, MEDIA_DRAM, {0}, ALLOC_FORCE_BY_RANK}, one) == MMC_OK);
+            slabFiller.push_back(one[0]);
+        }
+        for (uint64_t i = 0; i < (65536 / kSlot) - 1; ++i) {
+            std::vector<MmcMemBlobPtr> one;
+            Require(slabGlobal.Alloc({kSlot, 1, MEDIA_DRAM, {0}, ALLOC_FORCE_BY_RANK}, one) == MMC_OK);
+            slabFiller.push_back(one[0]);
+        }
+
+        bool sawBatchThrow = false;
+        for (int point = 0; point < 40; ++point) {
+            const std::vector<AllocOptions> sameGroupThrowOpts{
+                {2 * kSlot, 2, MEDIA_DRAM, {0, 1}, ALLOC_LOCAL_FIRST},
+                {kSlot, 1, MEDIA_DRAM, {0}, ALLOC_LOCAL_FIRST}};
+            failAfter = point;
+            try {
+                slabGlobal.AllocBatch(sameGroupThrowOpts, blobs, results);
+            } catch (const std::bad_alloc &) {
+                sawBatchThrow = true;
+            }
+            failAfter = -1;
+            for (auto &group : blobs) { slabGlobal.Free(group); }
+        }
+        Require(sawBatchThrow);
+
+        slabGlobal.Free(slabFiller);
+        slabGlobal.GetUsedInfo(total, used);
+        Require(used[MEDIA_DRAM] == 0);
+        Require(slabGlobal.Unmount({0, MEDIA_DRAM}) == MMC_OK);
+        Require(slabGlobal.Unmount({1, MEDIA_DRAM}) == MMC_OK);
+    }
+}
+
 void CheckInvalidRelease()
 {
     TestAllocator allocator;
@@ -170,14 +375,15 @@ void CheckConcurrentPools()
             const uint64_t size = (index % kSharedClasses + 1) * kSlot;
             for (int iteration = 0; iteration < kIterations; ++iteration) {
                 auto first = allocator.Alloc(size);
+                auto batch = allocator.AllocBatch({size, size});
+                Require(batch[0] != nullptr && batch[1] != nullptr);
+                Require(batch[0]->Gva() != batch[1]->Gva());
                 auto second = allocator.Alloc(size);
-                auto third = allocator.Alloc(size);
-                Require(first != nullptr && second != nullptr && third != nullptr);
-                Require(first->Gva() != second->Gva() && first->Gva() != third->Gva() && second->Gva() != third->Gva());
+                Require(first != nullptr && second != nullptr && first->Gva() != second->Gva());
                 Require(allocator.CanAlloc(size));
                 Require(allocator.Release(first) == MMC_OK);
                 Require(allocator.Release(second) == MMC_OK);
-                Require(allocator.Release(third) == MMC_OK);
+                for (const auto &blob : batch) { Require(allocator.Release(blob) == MMC_OK); }
             }
         }));
     }
@@ -573,6 +779,8 @@ void CheckConcurrentFrameChurnAndAba(const StressConfig &cfg)
     for (int i = 0; i < n; ++i) {
         if (i == n - 1) {
             roles.push_back("observer");
+        } else if (i % 4 == 3) {
+            roles.push_back("batch_churner");
         } else {
             roles.push_back("churn_worker");
         }
@@ -621,6 +829,34 @@ void CheckConcurrentFrameChurnAndAba(const StressConfig &cfg)
                     // Observer również czasem zdejmuje z mailboxa, aby testować cross-thread release.
                     MmcMemBlobPtr cross = mailbox.TryTake(rng());
                     safeRelease(cross, tp);
+                } else if (roles[tid] == "batch_churner") {
+                    const size_t batchLen = 2 + (rng() % 5);
+                    std::vector<uint64_t> batchSizes(batchLen);
+                    for (size_t j = 0; j < batchLen; ++j) {
+                        batchSizes[j] = reqSizes[rng() % reqSizes.size()];
+                    }
+                    auto blobs = allocator.AllocBatch(batchSizes);
+                    for (auto &b : blobs) {
+                        if (b != nullptr) {
+                            tracker.MarkAllocated(b);
+                            tp.allocOk.fetch_add(1, std::memory_order_relaxed);
+                            if ((rng() & 3ULL) == 0) {
+                                MmcMemBlobPtr evicted = mailbox.SwapOrDeposit(rng(), std::move(b));
+                                safeRelease(evicted, tp);
+                            } else {
+                                local.push_back(std::move(b));
+                            }
+                        } else {
+                            tp.allocFail.fetch_add(1, std::memory_order_relaxed);
+                        }
+                    }
+                    while (local.size() > 8) {
+                        const size_t idx = rng() % local.size();
+                        MmcMemBlobPtr victim = std::move(local[idx]);
+                        local[idx] = std::move(local.back());
+                        local.pop_back();
+                        safeRelease(victim, tp);
+                    }
                 } else {
                     const uint64_t sz = reqSizes[rng() % reqSizes.size()];
                     auto blob = allocator.Alloc(sz);
@@ -728,17 +964,16 @@ void CheckConcurrentClassCreationAndStarvation(const StressConfig &cfg)
             } else {
                 const uint64_t hotSize = ((tid % 2) == 0) ? kSlot : (2 * kSlot);
                 while (!stopFlag.load(std::memory_order_acquire)) {
-                    MmcMemBlobPtr held[3];
-                    for (int k = 0; k < 3; ++k) {
-                        held[k] = allocator.Alloc(hotSize);
-                        if (held[k] != nullptr) {
-                            tracker.MarkAllocated(held[k]);
+                    auto batch = allocator.AllocBatch({hotSize, hotSize, hotSize});
+                    for (const auto &b : batch) {
+                        if (b != nullptr) {
+                            tracker.MarkAllocated(b);
                             tp.allocOk.fetch_add(1, std::memory_order_relaxed);
                         } else {
                             tp.allocFail.fetch_add(1, std::memory_order_relaxed);
                         }
                     }
-                    for (const auto &b : held) {
+                    for (const auto &b : batch) {
                         if (b != nullptr) {
                             tracker.MarkReleased(b);
                             Require(allocator.Release(b) == MMC_OK, "HotHammer Release failed");
@@ -765,9 +1000,9 @@ void CheckConcurrentClassCreationAndStarvation(const StressConfig &cfg)
     Require(allocator.GetReservedSize() == 0, "ClassCreation leaked reservedSize");
 }
 
-void CheckConcurrentStartStopAndGlobalAlloc(const StressConfig &cfg)
+void CheckConcurrentStartStopAndGlobalBatch(const StressConfig &cfg)
 {
-    // Część 1: Start/Stop w trakcie równoległych Alloc / CanAlloc / Release
+    // Część 1: Start/Stop w trakcie równoległych Alloc / AllocBatch / CanAlloc / Release
     {
         constexpr uint64_t kCap = 2ULL * 1024 * 1024;
         TestAllocator allocator(kCap, 0);
@@ -776,7 +1011,8 @@ void CheckConcurrentStartStopAndGlobalAlloc(const StressConfig &cfg)
         const int n = std::max(5, cfg.threads);
         std::vector<std::string> roles;
         roles.push_back("start_stop_toggler");
-        for (int i = 1; i < n; ++i) {
+        roles.push_back("batch_worker");
+        for (int i = 2; i < n; ++i) {
             roles.push_back("worker");
         }
 
@@ -786,7 +1022,9 @@ void CheckConcurrentStartStopAndGlobalAlloc(const StressConfig &cfg)
                 if (tid == 0) {
                     while (!stopFlag.load(std::memory_order_acquire)) {
                         allocator.Stop();
-                        Require(allocator.Alloc(kSlot) == nullptr, "StartStop Alloc succeeded while stopped");
+                        const auto stoppedBatch = allocator.AllocBatch({kSlot, 2 * kSlot});
+                        Require(stoppedBatch.size() == 2 && stoppedBatch[0] == nullptr && stoppedBatch[1] == nullptr,
+                                "StartStop AllocBatch succeeded while stopped");
                         std::this_thread::sleep_for(std::chrono::milliseconds(2));
                         allocator.Start();
                         std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -799,10 +1037,21 @@ void CheckConcurrentStartStopAndGlobalAlloc(const StressConfig &cfg)
                     while (!stopFlag.load(std::memory_order_acquire)) {
                         const uint64_t sz = ((rng() % 4) + 1) * kSlot;
                         (void)allocator.CanAlloc(sz);
-                        auto b = allocator.Alloc(sz);
-                        if (b != nullptr) {
-                            tracker.MarkAllocated(b);
-                            held.push_back(std::move(b));
+                        if (tid == 1) {
+                            const std::vector<uint64_t> sizes{sz, kSlot, 2 * kSlot};
+                            auto batch = allocator.AllocBatch(sizes);
+                            Require(batch.size() == sizes.size(), "StartStop AllocBatch result size mismatch");
+                            for (auto &b : batch) {
+                                if (b == nullptr) { continue; }
+                                tracker.MarkAllocated(b);
+                                held.push_back(std::move(b));
+                            }
+                        } else {
+                            auto b = allocator.Alloc(sz);
+                            if (b != nullptr) {
+                                tracker.MarkAllocated(b);
+                                held.push_back(std::move(b));
+                            }
                         }
                         if (held.size() > 4 || ((rng() & 1ULL) == 0 && !held.empty())) {
                             tracker.MarkReleased(held.back());
@@ -840,7 +1089,7 @@ void CheckConcurrentStartStopAndGlobalAlloc(const StressConfig &cfg)
         }
 
         const int n = std::max(6, cfg.threads);
-        std::vector<std::string> roles(static_cast<size_t>(n), "global_worker");
+        std::vector<std::string> roles(static_cast<size_t>(n), "global_batch_worker");
         roles.back() = "global_frag_prober";
 
         RunConcurrentPhase("GlobalMultiRankSlab", cfg, n, roles,
@@ -864,16 +1113,26 @@ void CheckConcurrentStartStopAndGlobalAlloc(const StressConfig &cfg)
                     while (!stopFlag.load(std::memory_order_acquire)) {
                         const uint32_t prefRank = static_cast<uint32_t>(rng() % kRanks);
                         const uint64_t sz = ((rng() % 3) + 1) * kSlot;
-                        const uint32_t numBlobs = ((rng() % 3) == 0) ? 2U : 1U;
-                        std::vector<MmcMemBlobPtr> blobs;
-                        if (global.Alloc({sz, numBlobs, MEDIA_DRAM, {prefRank}, ALLOC_ARRANGE}, blobs) == MMC_OK) {
-                            Require(blobs.size() == numBlobs, "Incomplete replica count on MMC_OK");
-                            for (const auto &b : blobs) {
-                                rankTrackers[b->Rank()]->MarkAllocated(b);
+                        std::vector<AllocOptions> opts{
+                            {sz, 1, MEDIA_DRAM, {prefRank}, ALLOC_ARRANGE},
+                            {sz, 2, MEDIA_DRAM, {prefRank}, ALLOC_ARRANGE},
+                            {kSlot, 1, MEDIA_DRAM, {}, ALLOC_RANDOM}
+                        };
+                        std::vector<std::vector<MmcMemBlobPtr>> blobs;
+                        std::vector<Result> results;
+                        global.AllocBatch(opts, blobs, results);
+                        for (size_t i = 0; i < results.size(); ++i) {
+                            if (results[i] == MMC_OK) {
+                                Require(blobs[i].size() == opts[i].numBlobs_, "Incomplete replica count on MMC_OK");
+                                for (const auto &b : blobs[i]) {
+                                    rankTrackers[b->Rank()]->MarkAllocated(b);
+                                }
+                                held.push_back(std::move(blobs[i]));
+                            } else {
+                                Require(blobs[i].empty(), "Failed batch key retained unreleased blobs");
                             }
-                            held.push_back(std::move(blobs));
                         }
-                        while (held.size() > 8 || (!held.empty() && (rng() & 1ULL) == 0)) {
+                        while (held.size() > 6 || (!held.empty() && (rng() & 1ULL) == 0)) {
                             for (const auto &b : held.back()) {
                                 rankTrackers[b->Rank()]->MarkReleased(b);
                             }
@@ -934,6 +1193,9 @@ int main(int argc, char **argv)
     const StressConfig cfg = ParseCliArgs(argc, argv);
     try {
         if (!cfg.stressMode) {
+            CheckBatch();
+            CheckBatchFailures();
+            CheckGlobalBatch();
             CheckFailures();
             CheckInvalidRelease();
             CheckIndependentFastPaths();
@@ -942,7 +1204,7 @@ int main(int argc, char **argv)
         }
         CheckConcurrentFrameChurnAndAba(cfg);
         CheckConcurrentClassCreationAndStarvation(cfg);
-        CheckConcurrentStartStopAndGlobalAlloc(cfg);
+        CheckConcurrentStartStopAndGlobalBatch(cfg);
         if (!cfg.stressMode) {
             std::cout << "fault injection, independent fast paths, concurrent pools: OK\n";
         } else {

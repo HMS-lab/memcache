@@ -76,6 +76,18 @@ public:
         return GetMaxContiguousFreeSize() < alignedSize;
     }
     virtual MmcMemBlobPtr Alloc(uint64_t blobSize);
+    // Każda pozycja odpowiada jednemu żądaniu. nullptr oznacza błąd tej pozycji.
+    virtual std::vector<MmcMemBlobPtr> AllocBatch(const std::vector<uint64_t> &sizes)
+    {
+        std::vector<MmcMemBlobPtr> result(sizes.size());
+        try {
+            for (size_t i = 0; i < sizes.size(); ++i) { result[i] = Alloc(sizes[i]); }
+        } catch (...) {
+            for (const auto &blob : result) { if (blob != nullptr) { Release(blob); } }
+            throw;
+        }
+        return result;
+    }
     virtual Result Release(const MmcMemBlobPtr &blob);
     virtual Result BuildFromBlobs(std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList);
 
@@ -187,6 +199,7 @@ public:
     bool CanAlloc(uint64_t blobSize) override;
     bool IsFragmentedFor(uint64_t alignedSize) override;
     MmcMemBlobPtr Alloc(uint64_t blobSize) override;
+    std::vector<MmcMemBlobPtr> AllocBatch(const std::vector<uint64_t> &sizes) override;
     Result Release(const MmcMemBlobPtr &blob) override;
     void Stop() override;
     Result BuildFromBlobs(std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList) override;

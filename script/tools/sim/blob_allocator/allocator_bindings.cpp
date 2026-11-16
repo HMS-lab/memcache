@@ -87,6 +87,27 @@ public:
         return py::make_tuple(handle, gva, allocSize);
     }
 
+    py::list alloc_batch(const std::vector<uint64_t> &sizes)
+    {
+        for (auto size : sizes) { CheckSize(size); }
+        auto blobs = alloc_->AllocBatch(sizes);
+        const uint64_t firstHandle = nextHandle_;
+        try {
+            py::list result;
+            for (const auto &blob : blobs) {
+                if (blob == nullptr) { result.append(py::none()); continue; }
+                const uint64_t handle = nextHandle_++;
+                liveBlobs_.emplace(handle, blob);
+                result.append(py::make_tuple(handle, blob->Gva(), blob->AllocSize()));
+            }
+            return result;
+        } catch (...) {
+            for (uint64_t handle = firstHandle; handle < nextHandle_; ++handle) { liveBlobs_.erase(handle); }
+            for (const auto &blob : blobs) { if (blob != nullptr) { alloc_->Release(blob); } }
+            throw;
+        }
+    }
+
     bool release(uint64_t handle)
     {
         auto it = liveBlobs_.find(handle);
@@ -243,6 +264,7 @@ PYBIND11_MODULE(_allocator_sim_native, m)
         .def(py::init<uint64_t, const std::string &>(), py::arg("capacity"), py::arg("mode") = "4k-align")
         .def("can_alloc", &NativeAllocatorSim::can_alloc)
         .def("alloc", &NativeAllocatorSim::alloc)
+        .def("alloc_batch", &NativeAllocatorSim::alloc_batch)
         .def("release", &NativeAllocatorSim::release)
         .def("capacity", &NativeAllocatorSim::capacity)
         .def("allocated_size", &NativeAllocatorSim::allocated_size)

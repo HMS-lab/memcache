@@ -562,6 +562,67 @@ MmcMemBlobPtr MmcSlabAllocator::Alloc(uint64_t blobSize)
     return blob;
 }
 
+std::vector<MmcMemBlobPtr> MmcSlabAllocator::AllocBatch(const std::vector<uint64_t> &sizes)
+{
+    std::vector<MmcMemBlobPtr> result(sizes.size());
+    if (!started_) { return result; }
+    // Grupujemy indeksy, nie wyniki. Dzięki temu odbiorca zachowuje kolejność kluczy,
+    // nawet gdy w jednym żądaniu występują różne rozmiary slotów.
+    std::map<uint64_t, std::vector<size_t>> groups;
+    for (size_t i = 0; i < sizes.size(); ++i) {
+        const uint64_t aligned = AllocSizeAlignUp(sizes[i]);
+        if (sizes[i] != 0 && aligned != UINT64_MAX && aligned <= frameSize_ && aligned <= capacity_) {
+            groups[aligned].push_back(i);
+        }
+    }
+    try {
+        for (const auto &group : groups) {
+            int classIdx = GetOrCreateClassIndex(group.first);
+            if (classIdx < 0) { continue; }
+            std::unique_lock<Spinlock> guard(pools_[classIdx].poolLock);
+            for (size_t index : group.second) {
+                if (!started_) { break; }
+                try {
+                    SlabPool &pool = pools_[classIdx];
+                    const int32_t frameId =
+                        (pool.slotSize.load(std::memory_order_relaxed) == group.first) ? pool.GetFrame(frames_) : -1;
+                    if (frameId >= 0) {
+                        result[index] = CommitAllocationLocked(classIdx, static_cast<size_t>(frameId), sizes[index]);
+                    } else {
+                        // Nowa ramka lub podmiana klasy wymaga kolejności zarządca -> pula. Zwalniamy
+                        // lokalną blokadę, a wspólna wolna ścieżka ponownie sprawdza stan.
+                        guard.unlock();
+                        result[index] = AllocateFromPool(classIdx, group.first, sizes[index]);
+                        guard = std::unique_lock<Spinlock>(pools_[classIdx].poolLock);
+                    }
+                } catch (const std::bad_alloc &) {
+                    if (!guard.owns_lock()) { guard = std::unique_lock<Spinlock>(pools_[classIdx].poolLock); }
+                    // Brak deskryptora dotyczy tego elementu; pozostałe można wykonać.
+                }
+                if (result[index] != nullptr) {
+                    if (maxAlignedSize_ != nullptr) {
+                        uint64_t current = maxAlignedSize_->load(std::memory_order_relaxed);
+                        while (current < group.first && !maxAlignedSize_->compare_exchange_weak(
+                            current, group.first, std::memory_order_relaxed)) {}
+                    }
+                    try {
+                        const uint64_t internalFragBytes = result[index]->AllocSize() - sizes[index];
+                        if (internalFragBytes > 0) {
+                            TP_TRACE_RECORD(TP_MMC_ALLOC_FRAG, internalFragBytes, 0);
+                        }
+                    } catch (const std::bad_alloc &) {
+                        // Pomijamy diagnostykę, ale przekazujemy właścicielowi istniejący deskryptor.
+                    }
+                }
+            }
+        }
+    } catch (...) {
+        for (const auto &blob : result) { if (blob != nullptr) { Release(blob); } }
+        throw;
+    }
+    return result;
+}
+
 MmcMemBlobPtr MmcSlabAllocator::AllocateFromPool(int &classIdx, uint64_t alignedSize, uint64_t requestedSize)
 {
     if (classIdx >= 0 && static_cast<size_t>(classIdx) < poolCount_.load(std::memory_order_acquire)) {

@@ -1469,6 +1469,53 @@ Result MmcMetaManager::Alloc(const std::string &key, const AllocOptions &allocOp
         }
     }
 
+    return PublishAllocated(key, allocOpt, operateId, leaseTtlMs, tempMetaObj, blobs, objMeta);
+}
+
+void MmcMetaManager::AllocBatch(const std::vector<std::string> &keys, const std::vector<AllocOptions> &options,
+    uint64_t operateId, uint64_t leaseTtlMs, std::vector<MmcMemMetaDesc> &metadata, std::vector<Result> &results)
+{
+    metadata.clear();
+    metadata.resize(keys.size());
+    results.assign(keys.size(), MMC_ERROR);
+    if (keys.size() != options.size()) { return; }
+    std::vector<std::vector<MmcMemBlobPtr>> blobs;
+    globalAllocator_->AllocBatch(options, blobs, results);
+    try {
+        for (size_t i = 0; i < keys.size(); ++i) {
+            if (results[i] != MMC_OK) {
+                // Wywołujemy ścieżkę odzyskiwania (AllocWithForceEvict) wyłącznie gdy istnieje fragmentacja,
+                // unikając zbędnej powtórnej próby alokacji przy błędnych opcjach lub braku zasobów.
+                MediaType media = static_cast<MediaType>(options[i].mediaType_);
+                if (media == MEDIA_NONE) {
+                    media = globalAllocator_->GetTopLayerMediumType();
+                }
+                if (media != MEDIA_NONE && media != MEDIA_SSD &&
+                    globalAllocator_->IsFragmentation(media, options[i].blobSize_)) {
+                    results[i] = Alloc(keys[i], options[i], operateId, leaseTtlMs, metadata[i]);
+                }
+                continue;
+            }
+            auto object = MmcMakeRef<MmcMemObjMeta>();
+            if (object == nullptr) {
+                globalAllocator_->Free(blobs[i]);
+                results[i] = MMC_MALLOC_FAILED;
+                continue;
+            }
+            results[i] = PublishAllocated(keys[i], options[i], operateId, leaseTtlMs, object, blobs[i], metadata[i]);
+            blobs[i].clear();
+        }
+    } catch (...) {
+        for (auto &pending : blobs) { globalAllocator_->Free(pending); }
+        throw;
+    }
+}
+
+Result MmcMetaManager::PublishAllocated(const std::string &key, const AllocOptions &allocOpt,
+    uint64_t operateId, uint64_t leaseTtlMs, MmcMemObjMetaPtr tempMetaObj,
+    std::vector<MmcMemBlobPtr> &blobs, MmcMemMetaDesc &objMeta)
+{
+    Result ret = MMC_OK;
     const uint64_t actualLeaseTtlMs = leaseTtlMs == 0 ? defaultTtlMs_.load(std::memory_order_relaxed) : leaseTtlMs;
     MMC_LOG_DEBUG("Alloc key=" << key << ", leaseTtlMs=" << leaseTtlMs
                                << ", defaultTtlMs_=" << defaultTtlMs_.load(std::memory_order_relaxed)
@@ -1489,6 +1536,11 @@ Result MmcMetaManager::Alloc(const std::string &key, const AllocOptions &allocOp
     }
 
     ret = metaContainer_->Insert(key, tempMetaObj);
+    if (ret == MMC_OK) {
+        // Od tej chwili bloki należą do opublikowanego obiektu. Wyjątek przy budowie
+        // odpowiedzi nie może zwolnić pamięci, którą inni klienci mogą już widzieć.
+        blobs.clear();
+    }
     if (ret != MMC_OK) {
         globalAllocator_->Free(blobs);
         if (ret != MMC_DUPLICATED_OBJECT) {

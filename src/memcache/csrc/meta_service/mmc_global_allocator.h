@@ -151,6 +151,220 @@ public:
         return MMC_OK;
     }
 
+    // Wyniki pozostają w kolejności wejścia. Sukces oznacza komplet replik jednego
+    // klucza; brak którejkolwiek wymaganej repliki wycofuje tylko ten klucz.
+    // Parametry wyjściowe nie mogą zawierać bloków oczekujących na zwolnienie.
+    void AllocBatch(const std::vector<AllocOptions> &options,
+                    std::vector<std::vector<MmcMemBlobPtr>> &blobs, std::vector<Result> &results)
+    {
+        blobs.clear();
+        blobs.resize(options.size());
+        results.assign(options.size(), MMC_ERROR);
+        struct Request {
+            std::vector<MmcLocation> candidates;
+            size_t next = 0;
+            size_t mandatory = 0;
+            MediaType media = MEDIA_NONE;
+            bool isLocalFirst = false;
+            bool inFallback = false;
+            bool failed = false;
+        };
+        std::vector<Request> requests(options.size());
+        // Blokada odczytu chroni zamontowane alokatory przez planowanie i przydział.
+        // Nie blokuje innych czytelników, w tym równoległego Alloc/Free.
+        ReadLock batchGuard(globalAllocLock_);
+        try {
+            std::mt19937 rng(std::random_device{}());
+            auto releaseKeyBlobs = [&](size_t index) {
+                for (const auto &blob : blobs[index]) {
+                    allocators_.at({blob->Rank(), static_cast<MediaType>(blob->Type())})->Release(blob);
+                }
+                blobs[index].clear();
+            };
+            auto buildShuffledCandidates = [&](MediaType media, const std::vector<MmcLocation> &exclude) {
+                std::vector<MmcLocation> remaining;
+                for (const auto &entry : allocators_) {
+                    if (entry.first.mediaType_ != media || entry.second == nullptr) { continue; }
+                    bool listed = false;
+                    for (const auto &loc : exclude) {
+                        if (loc.rank_ == entry.first.rank_) { listed = true; break; }
+                    }
+                    if (!listed) { remaining.push_back(entry.first); }
+                }
+                std::shuffle(remaining.begin(), remaining.end(), rng);
+                return remaining;
+            };
+            auto triggerLocalFirstFallback = [&](size_t index) {
+                auto &req = requests[index];
+                const auto &opt = options[index];
+                releaseKeyBlobs(index);
+                MmcMetaMetricManager::GetInstance().IncrementLocalFirstFallbackCounter();
+                MMC_LOG_WARN("ALLOC_LOCAL_FIRST: target backendId[" << opt.targetBackendId_ << "] alloc failed for "
+                                                                    << "callerRank=" << opt.callerRank_
+                                                                    << ", retry with ALLOC_RANDOM");
+                req.inFallback = true;
+                req.next = 0;
+                req.mandatory = 0;
+                req.candidates = buildShuffledCandidates(req.media, {});
+                if (req.candidates.size() < opt.numBlobs_) {
+                    req.failed = true;
+                }
+            };
+
+            auto countMountedOnMedia = [&](MediaType media) -> size_t {
+                size_t count = 0;
+                for (const auto &entry : allocators_) {
+                    if (entry.first.mediaType_ == media && entry.second != nullptr) { ++count; }
+                }
+                return count;
+            };
+            auto countMountedCandidates = [&](const std::vector<MmcLocation> &candidates) -> size_t {
+                size_t count = 0;
+                for (const auto &loc : candidates) {
+                    auto it = allocators_.find(loc);
+                    if (it != allocators_.end() && it->second != nullptr) { ++count; }
+                }
+                return count;
+            };
+
+            for (size_t i = 0; i < options.size(); ++i) {
+                const auto &opt = options[i];
+                auto &request = requests[i];
+                std::unordered_set<uint32_t> preferred(opt.preferredRank_.begin(), opt.preferredRank_.end());
+                const bool isLocalFirst = (opt.flags_ & 0xFF) == ALLOC_LOCAL_FIRST;
+                if (opt.numBlobs_ == 0 || preferred.size() != opt.preferredRank_.size() ||
+                    (!isLocalFirst && opt.numBlobs_ < preferred.size())) {
+                    request.failed = true;
+                    continue;
+                }
+                MediaType media = static_cast<MediaType>(opt.mediaType_);
+                if (media == MEDIA_NONE) {
+                    media = allocators_.empty() ? MEDIA_NONE : allocators_.begin()->first.mediaType_;
+                }
+                request.media = media;
+                request.isLocalFirst = isLocalFirst;
+                blobs[i].reserve(opt.numBlobs_);
+                if (countMountedOnMedia(media) < opt.numBlobs_) {
+                    request.failed = true;
+                    continue;
+                }
+
+                if (isLocalFirst) {
+                    for (uint32_t rank : opt.preferredRank_) {
+                        request.candidates.push_back({rank, media});
+                    }
+                    if (countMountedCandidates(request.candidates) < opt.numBlobs_) {
+                        triggerLocalFirstFallback(i);
+                    }
+                    continue;
+                }
+
+                const bool force = (opt.flags_ & 0xFF) == ALLOC_FORCE_BY_RANK;
+                if (opt.preferredRank_.size() > 1 || force) {
+                    if (force && opt.preferredRank_.size() <= 1 && opt.numBlobs_ != 1) {
+                        request.failed = true;
+                        continue;
+                    }
+                    for (uint32_t rank : opt.preferredRank_) { request.candidates.push_back({rank, media}); }
+                    if (request.candidates.empty()) { request.candidates.push_back({0, media}); }
+                    request.mandatory = request.candidates.size();
+                } else if ((opt.flags_ & 0xFF) != ALLOC_RANDOM && !opt.preferredRank_.empty()) {
+                    request.candidates.push_back({opt.preferredRank_[0], media});
+                }
+                if (!force || opt.preferredRank_.size() > 1) {
+                    auto remaining = buildShuffledCandidates(media, request.candidates);
+                    request.candidates.insert(request.candidates.end(), remaining.begin(), remaining.end());
+                }
+                if (countMountedCandidates(request.candidates) < opt.numBlobs_) {
+                    request.failed = true;
+                }
+            }
+            // Jedna runda przydziela najwyżej jedną replikę każdego klucza. Grupowanie
+            // po celu daje natywny batch; niepowodzenie opcjonalnego celu przechodzi
+            // do następnego ranka, a w trybie ALLOC_LOCAL_FIRST po wyczerpaniu ranków
+            // lokalnych przełącza klucz na losową alokację ALLOC_RANDOM.
+            for (;;) {
+                std::map<MmcLocation, std::vector<size_t>> groups;
+                for (size_t i = 0; i < options.size(); ++i) {
+                    auto &req = requests[i];
+                    if (!req.failed && blobs[i].size() < options[i].numBlobs_) {
+                        if (req.next < req.candidates.size()) {
+                            groups[req.candidates[req.next++]].push_back(i);
+                        } else if (req.isLocalFirst && !req.inFallback) {
+                            triggerLocalFirstFallback(i);
+                            if (!req.failed && req.next < req.candidates.size()) {
+                                groups[req.candidates[req.next++]].push_back(i);
+                            }
+                        }
+                    }
+                }
+                if (groups.empty()) { break; }
+                for (const auto &group : groups) {
+                    std::vector<uint64_t> sizes;
+                    sizes.reserve(group.second.size());
+                    for (size_t index : group.second) { sizes.push_back(options[index].blobSize_); }
+                    auto found = allocators_.find(group.first);
+                    std::vector<MmcMemBlobPtr> allocated(group.second.size());
+                    if (found != allocators_.end() && found->second != nullptr) {
+                        allocated = found->second->AllocBatch(sizes);
+                    }
+                    // Przekazujemy najpierw wszystkie udane bloki z grupy do blobs (noexcept dzięki reserve),
+                    // aby późniejszy std::bad_alloc np. w triggerLocalFirstFallback nie spowodował wycieku slotów.
+                    for (size_t j = 0; j < group.second.size(); ++j) {
+                        if (j < allocated.size() && allocated[j] != nullptr) {
+                            blobs[group.second[j]].push_back(allocated[j]);
+                        }
+                    }
+                    for (size_t j = 0; j < group.second.size(); ++j) {
+                        if (j < allocated.size() && allocated[j] != nullptr) {
+                            continue;
+                        }
+                        size_t index = group.second[j];
+                        auto &req = requests[index];
+                        if ((req.isLocalFirst && !req.inFallback) ?
+                            ((options[index].numBlobs_ - blobs[index].size()) >
+                             (req.candidates.size() - req.next)) :
+                            (req.next <= req.mandatory ||
+                             (options[index].numBlobs_ - blobs[index].size()) >
+                                 (req.candidates.size() - req.next))) {
+                            if (req.isLocalFirst && !req.inFallback) {
+                                triggerLocalFirstFallback(index);
+                            } else {
+                                req.failed = true;
+                                releaseKeyBlobs(index);
+                            }
+                        }
+                    }
+                }
+            }
+            for (size_t i = 0; i < options.size(); ++i) {
+                if (!requests[i].failed && blobs[i].size() == options[i].numBlobs_) {
+                    results[i] = MMC_OK;
+                    for (const auto &blob : blobs[i]) {
+                        if (blob->Type() < MEDIA_NONE) {
+                            usedSize_[blob->Type()].fetch_add(blob->AllocSize(), std::memory_order_relaxed);
+                        }
+                    }
+                } else {
+                    for (const auto &blob : blobs[i]) {
+                        allocators_.at({blob->Rank(), static_cast<MediaType>(blob->Type())})->Release(blob);
+                    }
+                    blobs[i].clear();
+                }
+            }
+        } catch (...) {
+            for (size_t i = 0; i < blobs.size(); ++i) {
+                for (const auto &blob : blobs[i]) {
+                    allocators_.at({blob->Rank(), static_cast<MediaType>(blob->Type())})->Release(blob);
+                    if (results[i] == MMC_OK && blob->Type() < MEDIA_NONE) { SubSat(usedSize_[blob->Type()], blob->AllocSize()); }
+                }
+                blobs[i].clear();
+                results[i] = MMC_ERROR;
+            }
+            throw;
+        }
+    }
+
     void Free(std::vector<MmcMemBlobPtr> &blobs) noexcept
     {
         for (const auto &blob : blobs) {

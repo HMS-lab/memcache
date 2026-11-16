@@ -518,6 +518,41 @@ TEST_F(TestMmcMetaManager, AllocUsesPerRequestLeaseTtl)
     metaMng->Stop();
 }
 
+TEST_F(TestMmcMetaManager, AllocBatchPreservesPerKeyResultsAndLeases)
+{
+    constexpr uint64_t capacity = 1024 * 1024;
+    constexpr uint64_t leaseTtl = 5000;
+    constexpr uint64_t operation = 1;
+    MmcLocation loc{0, MEDIA_DRAM};
+    auto manager = MmcMakeRef<MmcMetaManager>(leaseTtl, 70U, 60U);
+    manager->Start();
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> mountedBlobs;
+    ASSERT_EQ(manager->Mount(loc, {0, capacity}, mountedBlobs), MMC_OK);
+    const AllocOptions valid{SIZE_32K, 1, MEDIA_DRAM, {0}, ALLOC_FORCE_BY_RANK};
+    const AllocOptions missingRank{SIZE_32K, 1, MEDIA_DRAM, {1}, ALLOC_FORCE_BY_RANK};
+    std::vector<MmcMemMetaDesc> metadata;
+    std::vector<Result> results;
+    // Powtórzony klucz zwalnia nowo zarezerwowany blok. Błąd innego ranka
+    // nie cofa poprawnych kluczy ani nie przesuwa ich pozycji w odpowiedzi.
+    manager->AllocBatch({"batch_first", "batch_first", "batch_missing", "batch_last"},
+        {valid, valid, missingRank, valid}, operation, leaseTtl, metadata, results);
+    ASSERT_EQ(results.size(), 4U);
+    EXPECT_EQ(results[0], MMC_OK);
+    EXPECT_EQ(results[1], MMC_DUPLICATED_OBJECT);
+    EXPECT_NE(results[2], MMC_OK);
+    EXPECT_EQ(results[3], MMC_OK);
+    EXPECT_EQ(metadata[0].NumBlobs(), 1U);
+    EXPECT_EQ(metadata[3].NumBlobs(), 1U);
+    EXPECT_TRUE(metadata[1].blobs_.empty());
+    EXPECT_TRUE(metadata[2].blobs_.empty());
+    EXPECT_GT(metadata[0].blobs_[0].leaseTimeoutTtlMs_, 0U);
+    EXPECT_EQ(manager->UpdateState("batch_first", loc, MMC_WRITE_OK, operation), MMC_OK);
+    EXPECT_EQ(manager->UpdateState("batch_last", loc, MMC_WRITE_OK, operation), MMC_OK);
+    EXPECT_EQ(manager->Remove("batch_first"), MMC_OK);
+    EXPECT_EQ(manager->Remove("batch_last"), MMC_OK);
+    manager->Stop();
+}
+
 TEST_F(TestMmcMetaManager, AllocAndFreeMulti)
 {
     MmcLocation loc{0, MEDIA_DRAM};

@@ -16,6 +16,7 @@
 #include <array>
 #include <cctype>
 #include <future>
+#include <limits>
 #include <utility>
 
 namespace {
@@ -92,10 +93,15 @@ Result MmcMetaMgrProxy::BatchAlloc(const BatchAllocRequest &req, BatchAllocRespo
     // MEDIA_NONE means the default (top layer) media and is what clients send when no media is
     // specified, so keep one extra slot for it; otherwise the default path would skip eviction.
     std::array<uint64_t, MEDIA_NONE + 1> wantSize{};
+    constexpr uint64_t kMaxWantSize = (std::numeric_limits<uint64_t>::max)();
     for (const auto &option : req.options_) {
         const int media = static_cast<int>(option.mediaType_);
-        if (media >= 0 && media <= MEDIA_NONE) {
-            wantSize[media] += option.blobSize_ * option.numBlobs_;
+        if (media >= 0 && media <= MEDIA_NONE && option.blobSize_ > 0 && option.numBlobs_ > 0) {
+            const uint64_t blobSize = static_cast<uint64_t>(option.blobSize_);
+            const uint64_t numBlobs = static_cast<uint64_t>(option.numBlobs_);
+            const uint64_t optionSize = (blobSize <= kMaxWantSize / numBlobs) ? (blobSize * numBlobs) : kMaxWantSize;
+            wantSize[media] =
+                (wantSize[media] > kMaxWantSize - optionSize) ? kMaxWantSize : (wantSize[media] + optionSize);
         }
     }
     for (int media = 0; media <= MEDIA_NONE; ++media) {
@@ -103,14 +109,14 @@ Result MmcMetaMgrProxy::BatchAlloc(const BatchAllocRequest &req, BatchAllocRespo
             metaMangerPtr_->CheckAndEvict(static_cast<MediaType>(media), wantSize[media]);
         }
     }
+    std::vector<MmcMemMetaDesc> metadata;
+    metaMangerPtr_->AllocBatch(req.keys_, req.options_, req.operateId_, req.leaseTtlMs_, metadata, resp.results_);
     for (size_t i = 0; i < req.keys_.size(); ++i) {
         // per-rank tracking: UINT32_MAX if no preferred rank specified
         const uint32_t rank = req.options_[i].preferredRank_.empty() ? UINT32_MAX : req.options_[i].preferredRank_[0];
-        MmcMemMetaDesc objMeta{};
-        TP_TRACE_BEGIN(TP_MMC_META_MGR_ALLOC);
+        const auto &objMeta = metadata[i];
         metricManager.IncrementRequestCounter(RestMetricType::ALLOC, rank);
-        Result ret = metaMangerPtr_->Alloc(req.keys_[i], req.options_[i], req.operateId_, req.leaseTtlMs_, objMeta);
-        TP_TRACE_END(TP_MMC_META_MGR_ALLOC, ret);
+        Result ret = resp.results_[i];
         IncrementResultCounter(metricManager, RestMetricType::ALLOC, ret, rank);
         if (ret != MMC_OK) {
             if (ret != MMC_DUPLICATED_OBJECT) {

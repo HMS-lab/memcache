@@ -239,6 +239,9 @@ public:
      * @param key          [in] key of the meta object
      * @param metaInfo     [out] the meta object created
      */
+    void AllocBatch(const std::vector<std::string> &keys, const std::vector<AllocOptions> &options,
+                    uint64_t operateId, uint64_t leaseTtlMs, std::vector<MmcMemMetaDesc> &metadata,
+                    std::vector<Result> &results);
     Result Alloc(const std::string &key, const AllocOptions &allocOpt, uint64_t operateId, uint64_t leaseTtlMs,
                  MmcMemMetaDesc &objMeta);
 
@@ -563,6 +566,9 @@ public:
                               std::vector<uint64_t> &sizes, uint32_t requestRank);
 
 private:
+    Result PublishAllocated(const std::string &key, const AllocOptions &allocOpt,
+                            uint64_t operateId, uint64_t leaseTtlMs, MmcMemObjMetaPtr tempMetaObj,
+                            std::vector<MmcMemBlobPtr> &blobs, MmcMemMetaDesc &objMeta);
     Result ExistKeyCore(const std::string &key, MmcMemObjMetaPtr &memObj, MmcMemBlobPtr &upperBlob,
                         MmcMemBlobPtr &lowerBlob);
     Result ResolveAndFillMetaDesc(const std::string &key, uint64_t operateId, MmcBlobFilterPtr filterPtr,

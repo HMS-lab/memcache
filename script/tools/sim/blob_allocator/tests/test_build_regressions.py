@@ -54,6 +54,21 @@ class NativeTests(unittest.TestCase):
     def setUpClass(cls):
         cls.native = sim._load_native_module()
 
+    def test_batch_partial_success_and_order(self):
+        for mode in ("4k-align", "max-value-align", "slab"):
+            with self.subTest(mode=mode):
+                allocator = self.native.NativeAllocatorSim(CAPACITY, mode)
+                sizes = [ALIGNMENT, 2 * CAPACITY, 2 * ALIGNMENT, ALIGNMENT]
+                result = allocator.alloc_batch(sizes)
+                self.assertEqual(len(result), len(sizes))
+                self.assertIsNone(result[1])
+                self.assertTrue(all(result[i] is not None for i in (0, 2, 3)))
+                self.assert_accounting(allocator, 4 * ALIGNMENT)
+                for block in result:
+                    if block is not None:
+                        allocator.release(block[0])
+                self.assert_accounting(allocator, 0)
+
     def test_native_failure_and_concurrency(self):
         build = Path(self.native.__file__).resolve().parents[1]
         subprocess.run(["cmake", "--build", str(build), "--target", "slab_allocator_safety_test",
