@@ -24,6 +24,7 @@
 #include "mmc_ptracer.h"
 #include "mmc_functions.h"
 #include "mmc_configuration.h"
+#include "mmc_smem_bm_helper.h"
 #include "mmc_local_service_default.h"
 
 namespace ock {
@@ -297,17 +298,23 @@ void MmcLocalServiceDefault::Stop()
 
 Result MmcLocalServiceDefault::InitBm()
 {
+    uint32_t initFlags = options_.flags;
+    const std::string protocol(options_.dataOpType);
+    MMC_RETURN_ERROR(
+        MmcSmemBmHelper::ResolveSmemBmFlags(protocol, options_.localDRAMSize, options_.localHBMSize, initFlags),
+        "Invalid protocol and memory config, protocol=" << protocol << ", dramSize=" << options_.localDRAMSize
+                                                        << ", hbmSize=" << options_.localHBMSize);
     mmc_bm_init_config_t initConfig = {.deviceId = options_.deviceId,
                                        .worldSize = options_.worldSize,
                                        .ipPort = options_.bmIpPort,
                                        .hcomUrl = options_.bmHcomUrl,
                                        .logLevel = options_.logLevel,
                                        .logFunc = options_.logFunc,
-                                       .flags = options_.flags,
+                                       .flags = initFlags,
                                        .hcomTlsConfig = options_.hcomTlsConfig,
                                        .storeTlsConfig = options_.configStoreTlsConfig};
 
-    uint32_t createFlags = options_.flags;
+    uint32_t createFlags = initFlags;
     if (options_.storageEnabled && options_.localDRAMSize > 0) {
         createFlags |= SMEM_BM_FLAG_DRAM_MAP_HOST_VA;
     }
@@ -315,7 +322,6 @@ Result MmcLocalServiceDefault::InitBm()
                                            .memberSize = options_.worldSize,
                                            .dataOpType = options_.dataOpType,
                                            .tag = options_.tag,
-                                           .tagOpInfo = options_.tagOpInfo,
                                            .localDRAMSize = options_.localDRAMSize,
                                            .localMaxDRAMSize = options_.localMaxDRAMSize,
                                            .localHBMSize = options_.localHBMSize,

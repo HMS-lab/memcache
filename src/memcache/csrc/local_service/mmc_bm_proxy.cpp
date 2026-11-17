@@ -105,10 +105,16 @@ Result MmcBmProxy::InternalCreateBm(const mmc_bm_create_config_t &createConfig)
         MMC_LOG_INFO("dram and hbm hybrid pool");
     }
 
-    smem_bm_data_op_type opType = MmcSmemBmHelper::TransSmemBmDataOpType(createConfig.dataOpType);
-    if (opType == SMEMB_DATA_OP_BUTT) {
+    smem_bm_data_op_type opType = SMEMB_DATA_OP_BUTT;
+    std::string generatedTagOpInfo;
+    if (MmcSmemBmHelper::ParseSmemBmProtocol(createConfig.dataOpType, opType, generatedTagOpInfo) != MMC_OK) {
         MMC_LOG_ERROR("MmcBmProxy unknown data op type " << createConfig.dataOpType);
-        return MMC_ERROR;
+        return MMC_INVALID_PARAM;
+    }
+    const std::string &tagOpInfo = generatedTagOpInfo;
+    if (tagOpInfo.size() >= MMC_TAG_OP_INFO_SIZE) {
+        MMC_LOG_ERROR("MmcBmProxy tag op info is too long, size=" << tagOpInfo.size());
+        return MMC_INVALID_PARAM;
     }
 
     smem_bm_create_option_t option{};
@@ -120,7 +126,7 @@ Result MmcBmProxy::InternalCreateBm(const mmc_bm_create_config_t &createConfig)
     option.enable56BitsGva = true;
     option.flags = createConfig.flags;
     SafeCopy(createConfig.tag, option.tag, MMC_TAG_SIZE);
-    SafeCopy(createConfig.tagOpInfo, option.tagOpInfo, MMC_TAG_OP_INFO_SIZE);
+    SafeCopy(tagOpInfo, option.tagOpInfo, MMC_TAG_OP_INFO_SIZE);
     handle_ = MFSmemApi::SmemBmCreate2(createConfig.id, &option);
     if (handle_ == nullptr) {
         MMC_LOG_ERROR("Failed to create smem bm");

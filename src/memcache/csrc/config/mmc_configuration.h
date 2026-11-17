@@ -27,6 +27,7 @@
 #include "mmc_logger.h"
 #include "mmc_types.h"
 #include "mmc_last_error.h"
+#include "common/mmc_smem_bm_helper.h"
 #include "smem_bm_def.h"
 
 #ifndef SMEM_BM_FLAG_DRAM_BEST_EFFORT
@@ -211,7 +212,7 @@ public:
         using namespace ConfConstant;
         AddStrConf(OCK_MMC_META_SERVICE_URL, VNoCheck::Create(), 0);
         AddStrConf(OCK_MMC_META_SERVICE_CONFIG_STORE_URL, VNoCheck::Create(), 0);
-        AddStrConf(OCK_MMC_META_SERVICE_HTTP_URL, VNoCheck::Create(), 0);
+        AddStrConf(OCK_MMC_META_SERVICE_HTTP_URL, VUrlPort::Create(OCK_MMC_META_SERVICE_HTTP_URL.first), 0);
         AddUInt64Conf(OCK_MMC_METRICS_REPORT_INTERVAL_SECONDS,
                       VUInt64Range::Create(OCK_MMC_METRICS_REPORT_INTERVAL_SECONDS.first, MIN_INTERVAL_SECONDS,
                                            MAX_INTERVAL_SECONDS),
@@ -266,9 +267,6 @@ public:
             VIntRange::Create(OCK_MMC_META_LRU_SHARD_COUNT.first, MIN_META_LRU_SHARD_COUNT, MAX_META_LRU_SHARD_COUNT),
             0);
         AddStrConf(OCK_MMC_META_LRU_TYPE, VStrEnum::Create(OCK_MMC_META_LRU_TYPE.first, META_LRU_TYPE_ENUM_STR), 0);
-        AddIntConf(OCK_MMC_META_NET_POOL_BASE,
-                   VIntRange::Create(OCK_MMC_META_NET_POOL_BASE.first, MIN_META_NET_POOL_BASE, MAX_META_NET_POOL_BASE),
-                   0);
         AddIntConf(
             OKC_MMC_EVICT_YIELD_INTERVAL,
             VIntRange::Create(OKC_MMC_EVICT_YIELD_INTERVAL.first, MIN_EVICT_YIELD_INTERVAL, MAX_EVICT_YIELD_INTERVAL),
@@ -310,7 +308,7 @@ public:
         AddBoolConf(OCK_MMC_KV_EVENTS_ENABLE, VStrEnum::Create(OCK_MMC_KV_EVENTS_ENABLE.first, BOOL_ENUM_STR), 0);
         AddIntConf(OCK_MMC_KV_EVENTS_TRANSPORT,
                    VIntRange::Create(OCK_MMC_KV_EVENTS_TRANSPORT.first, 0, KV_EVENT_TRANSPORT_TYPE_COUNT - 1), 0);
-        AddStrConf(OCK_MMC_KV_EVENTS_ENDPOINT, VNoCheck::Create(), 0);
+        AddStrConf(OCK_MMC_KV_EVENTS_ENDPOINT, VUrlPort::Create(OCK_MMC_KV_EVENTS_ENDPOINT.first), 0);
         AddStrConf(OCK_MMC_KV_EVENTS_MODEL_NAME, VNoCheck::Create(), 0);
         AddStrConf(OCK_MMC_KV_EVENTS_TENANT_ID, VNoCheck::Create(), 0);
         AddIntConf(OCK_MMC_KV_EVENTS_BLOCK_SIZE, VNoCheck::Create(), 0);
@@ -374,7 +372,6 @@ public:
         config.pendingWaitTimeoutMs = static_cast<uint64_t>(GetInt(ConfConstant::OCK_MMC_PENDING_WAIT_TIMEOUT_MS));
         config.leaseTtlMs = static_cast<uint64_t>(GetInt(ConfConstant::OCK_MMC_META_LEASE_TTL_MS));
         config.lruShardCount = static_cast<uint32_t>(GetInt(ConfConstant::OCK_MMC_META_LRU_SHARD_COUNT));
-        config.netPoolBase = static_cast<uint32_t>(GetInt(ConfConstant::OCK_MMC_META_NET_POOL_BASE));
         config.lruType = GetString(ConfConstant::OCK_MMC_META_LRU_TYPE) == "sharded_lru" ? MMC_META_LRU_TYPE_SHARDED_LRU
                                                                                          : MMC_META_LRU_TYPE_LRU;
         config.evictYieldInterval = static_cast<uint32_t>(GetInt(ConfConstant::OKC_MMC_EVICT_YIELD_INTERVAL));
@@ -449,11 +446,8 @@ public:
         AddStrConf(OKC_MMC_LOCAL_SERVICE_BM_IP_PORT_DOMAIN, VNoCheck::Create(), 0);
 
         AddStrConf(OKC_MMC_LOCAL_SERVICE_PROTOCOL,
-                   VStrEnum::Create(OKC_MMC_LOCAL_SERVICE_PROTOCOL.first, LOCAL_SERVER_PROTOCAL_ENUM_STR),
-                   1); // REQUIRED
-        AddStrConf(OKC_MMC_LOCAL_SERVICE_TAG, VStrLength::Create(OKC_MMC_LOCAL_SERVICE_TAG.first, MMC_TAG_SIZE - 1), 0);
-        AddStrConf(OKC_MMC_LOCAL_SERVICE_TAG_OP_INFO,
-                   VStrLength::Create(OKC_MMC_LOCAL_SERVICE_TAG_OP_INFO.first, MMC_TAG_OP_INFO_SIZE - 1), 0);
+                   VStrLayeredProtocol::Create(OKC_MMC_LOCAL_SERVICE_PROTOCOL.first, LOCAL_SERVER_PROTOCAL_ENUM_STR),
+                   1);                                                      // REQUIRED
         AddStrConf(OKC_MMC_LOCAL_SERVICE_DRAM_SIZE, VNoCheck::Create(), 1); // REQUIRED
         AddStrConf(OKC_MMC_LOCAL_SERVICE_MAX_DRAM_SIZE, VNoCheck::Create(), 0);
         AddStrConf(OKC_MMC_LOCAL_SERVICE_HBM_SIZE, VNoCheck::Create(), 0);
@@ -525,8 +519,6 @@ public:
         }
         config.createId = 0;
         SafeCopy(GetString(ConfConstant::OKC_MMC_LOCAL_SERVICE_PROTOCOL), config.dataOpType, PROTOCOL_SIZE);
-        SafeCopy(GetString(ConfConstant::OKC_MMC_LOCAL_SERVICE_TAG), config.tag, MMC_TAG_SIZE);
-        SafeCopy(GetString(ConfConstant::OKC_MMC_LOCAL_SERVICE_TAG_OP_INFO), config.tagOpInfo, MMC_TAG_OP_INFO_SIZE);
         config.localDRAMSize = GetUInt64(ConfConstant::OKC_MMC_LOCAL_SERVICE_DRAM_SIZE.first, GB_MEM_BYTES);
         config.localMaxDRAMSize =
             GetUInt64(ConfConstant::OKC_MMC_LOCAL_SERVICE_MAX_DRAM_SIZE.first, config.localDRAMSize);
@@ -587,13 +579,65 @@ public:
         }
     }
 
+    // MemFabric derives the actual HCOM listening port from the port in ock.mmc.local_service.hcom_url
+    // plus local_rank (in [0, world_size - 1]). Reject excessive base ports during configuration loading
+    // to prevent errors at runtime.
+    static Result ValidateHcomDerivedPort(const mmc_local_service_config_t &config)
+    {
+        constexpr const char *kScheme = "tcp://";
+        constexpr size_t kSchemeLen = 6;
+        constexpr uint32_t kMinPort = 1024;
+        constexpr uint32_t kMaxPort = 65535;
+
+        const std::string url(config.bmHcomUrl);
+        if (url.empty() || url.compare(0, kSchemeLen, kScheme) != 0) {
+            // MemFabric parses and validates non-tcp:// URLs (such as ubc://); no additional constraints here.
+            return MMC_OK;
+        }
+
+        const std::string hostPort = url.substr(kSchemeLen);
+        const size_t colonPos = hostPort.rfind(':');
+        if (colonPos == std::string::npos || colonPos + 1 >= hostPort.size()) {
+            MMC_LOG_ERROR("Invalid ock.mmc.local_service.hcom_url: " << url << ", host or port is missing");
+            return MMC_INVALID_PARAM;
+        }
+
+        uint32_t port = 0;
+        for (size_t i = colonPos + 1; i < hostPort.size(); ++i) {
+            const char c = hostPort[i];
+            if (c < '0' || c > '9') {
+                MMC_LOG_ERROR("Invalid ock.mmc.local_service.hcom_url: " << url << ", port must be numeric");
+                return MMC_INVALID_PARAM;
+            }
+            port = port * 10U + static_cast<uint32_t>(c - '0');
+            if (port > kMaxPort) {
+                break;
+            }
+        }
+        if (port < kMinPort || port > kMaxPort) {
+            MMC_LOG_ERROR("Invalid ock.mmc.local_service.hcom_url: " << url << ", port must be in [" << kMinPort << ", "
+                                                                     << kMaxPort << "]");
+            return MMC_INVALID_PARAM;
+        }
+
+        const uint32_t rankCount = (config.worldSize == 0U) ? 1U : config.worldSize;
+        if (rankCount - 1U > kMaxPort - port) {
+            MMC_LOG_ERROR("Invalid ock.mmc.local_service.hcom_url: base port "
+                          << port << " leaves no room for " << rankCount << " ranks; the maximum allowed base port is "
+                          << (kMaxPort - (rankCount - 1U)) << " (65535 - (world_size - 1))");
+            return MMC_INVALID_PARAM;
+        }
+        return MMC_OK;
+    }
+
     static Result ValidateLocalServiceConfig(mmc_local_service_config_t &config)
     {
+        MMC_RETURN_ERROR(ValidateHcomDerivedPort(config), "invalid hcom_url port configuration");
+
         MMC_VALIDATE_RETURN(!config.storageEnabled || config.localDRAMSize > 0,
                             "Conflicting configuration: ock.mmc.local_service.dram.size = 0 and "
                             "ock.mmc.local_service.storage.enabled = true",
                             MMC_INVALID_PARAM);
-
         constexpr uint64_t GB_SIZE_ALIGNMENT = 1073741824; // 1GB
         uint64_t alignment = DRAM_SIZE_ALIGNMENT;          // 默认 2MB 对齐
         std::string protocol(config.dataOpType);
@@ -657,6 +701,14 @@ public:
         MMC_LOG_INFO("After alignment " << (alignment == GB_SIZE_ALIGNMENT ? "1GB" : "2MB")
                                         << ", ock.mmc.local_service.hbm.size is " << config.localHBMSize
                                         << ", ock.mmc.local_service.max.hbm.size is " << config.localMaxHBMSize);
+
+        if (MmcSmemBmHelper::ResolveSmemBmFlags(protocol, config.localDRAMSize, config.localHBMSize, config.flags) !=
+            MMC_OK) {
+            MMC_LOG_ERROR("Invalid protocol and memory config, protocol is " << protocol << ", dramSize is "
+                                                                             << config.localDRAMSize << ", hbmSize is "
+                                                                             << config.localHBMSize);
+            return MMC_INVALID_PARAM;
+        }
 
         MMC_VALIDATE_RETURN(ValidateTLSConfig(config.accTlsConfig) == MMC_OK, "Invalid acc_link TLS config",
                             MMC_INVALID_PARAM);

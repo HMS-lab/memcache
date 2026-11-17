@@ -328,6 +328,7 @@ Result NetEngineAcc::Call(uint32_t targetId, int16_t opCode, const char *reqData
     uint32_t seqNo = 0;
     Result result = ctxStore_->PutAndGetSeqNo<NetWaitHandler>(waiter.Get(), seqNo);
     MMC_ASSERT_LOG_AND_RETURN(result == MMC_OK, "result = " << result, result);
+    PendingSeqNoGuard pendingGuard(this, targetId, seqNo);
     MMC_ASSERT_LOG_AND_RETURN(link->RealLink() != nullptr, "link->RealLink() is nullptr", MMC_ERROR);
     /* step6: send message to peer */
 
@@ -348,6 +349,16 @@ Result NetEngineAcc::Call(uint32_t targetId, int16_t opCode, const char *reqData
         ctxStore_->RemoveSeqNo<NetWaitHandler>(seqNo);
         MMC_LOG_WARN("Peer " << targetId << " doesn't response within " << timeoutInSecond << " seconds");
         return result;
+    }
+
+    /* check if notified by link-broken fail (HandleFailedPendingRequests called Notify with MMC_LINK_NOT_FOUND).
+     * HandleFailedPendingRequests already removed the seqNo from ctxStore_ via GetSeqNoAndRemove,
+     * pendingGuard destructor will call RemovePendingSeqNo as a no-op (peerId already erased). */
+    if (result == MMC_OK) {
+        int32_t notifyResult = waiter->GetResult();
+        if (notifyResult == MMC_LINK_NOT_FOUND) {
+            return MMC_LINK_NOT_FOUND;
+        }
     }
 
     /* got response data and deserialize */
@@ -426,6 +437,8 @@ void NetEngineAcc::UnInitialize()
         MMC_LOG_DEBUG("NetEngine [" << options_.name << "] has not been initialized");
         return;
     }
+
+    HandleAllFailedPendingRequests();
 
     /* 等待所有在途 Call 返回后再释放 ctxStore_，避免异步调用者
        （如元数据备份 SendBackupForRank）在 ctxStore_ 释放后继续访问 */
@@ -558,7 +571,7 @@ Result NetEngineAcc::HandleMsgSent(TcpMsgSentResult result, const TcpMsgHeader &
     return MMC_OK;
 }
 
-Result NetEngineAcc::HandleLinkBroken(const TcpLinkPtr &link) const
+Result NetEngineAcc::HandleLinkBroken(const TcpLinkPtr &link)
 {
     MMC_ASSERT_LOG_AND_RETURN(link.Get() != nullptr, "link.Get() is nullptr", MMC_INVALID_PARAM);
 
@@ -579,6 +592,7 @@ Result NetEngineAcc::HandleLinkBroken(const TcpLinkPtr &link) const
     if (linkBrokenHandler_ != nullptr && linkAcc.Get() != nullptr && linkAcc->RealLink() != nullptr) {
         if (linkAcc->RealLink()->Id() == link->Id()) {
             peerLinkMap_->Remove(peerId);
+            HandleFailedPendingRequests(peerId);
             MMC_RETURN_ERROR(linkBrokenHandler_(linkAcc.Get()), "Failed to remove link with id " << peerId);
         } else {
             MMC_LOG_WARN("Old linkId: " << linkAcc->RealLink()->Id() << ", rankId: " << peerId);
@@ -645,6 +659,7 @@ Result NetEngineAcc::ConnectToPeer(uint32_t peerId, const std::string &peerIp, u
 
     /* connect succeeded, atomic swap: remove old, add new */
     if (hasOld) {
+        HandleFailedPendingRequests(peerId);
         peerLinkMap_->Remove(peerId);
     }
     linkAcc = MmcMakeRef<NetLinkAcc>(peerId, realLink);
@@ -711,6 +726,62 @@ Result NetEngineAcc::RegisterDecryptHandler(const std::string &decryptLibPath) c
     server_->RegisterDecryptHandler(decrypter);
 
     return MMC_OK;
+}
+
+void NetEngineAcc::AddPendingSeqNo(uint32_t peerId, uint32_t seqNo)
+{
+    std::lock_guard<std::mutex> guard(pendingMutex_);
+    pendingSeqNos_[peerId].insert(seqNo);
+}
+
+void NetEngineAcc::RemovePendingSeqNo(uint32_t peerId, uint32_t seqNo)
+{
+    std::lock_guard<std::mutex> guard(pendingMutex_);
+    auto it = pendingSeqNos_.find(peerId);
+    if (it != pendingSeqNos_.end()) {
+        it->second.erase(seqNo);
+        if (it->second.empty()) {
+            pendingSeqNos_.erase(it);
+        }
+    }
+}
+
+void NetEngineAcc::HandleFailedPendingRequests(uint32_t peerId)
+{
+    std::unordered_set<uint32_t> seqNos;
+    {
+        std::lock_guard<std::mutex> guard(pendingMutex_);
+        auto it = pendingSeqNos_.find(peerId);
+        if (it == pendingSeqNos_.end()) {
+            return;
+        }
+        seqNos = std::move(it->second);
+        pendingSeqNos_.erase(it);
+    }
+
+    for (uint32_t seqNo : seqNos) {
+        NetWaitHandler *out = nullptr;
+        if (ctxStore_ != nullptr && ctxStore_->GetSeqNoAndRemove<NetWaitHandler>(seqNo, out, false) == MMC_OK) {
+            out->Notify(MMC_LINK_NOT_FOUND, nullptr);
+            out->DecreaseRef();
+        }
+    }
+}
+
+void NetEngineAcc::HandleAllFailedPendingRequests()
+{
+    std::vector<uint32_t> peerIds;
+    {
+        std::lock_guard<std::mutex> guard(pendingMutex_);
+        peerIds.reserve(pendingSeqNos_.size());
+        for (const auto &pair : pendingSeqNos_) {
+            peerIds.push_back(pair.first);
+        }
+    }
+
+    for (uint32_t peerId : peerIds) {
+        HandleFailedPendingRequests(peerId);
+    }
 }
 } // namespace mmc
 } // namespace ock

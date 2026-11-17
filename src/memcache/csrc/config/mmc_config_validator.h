@@ -13,7 +13,11 @@
 #ifndef MMC_CONFIG_VALIDATOR_H
 #define MMC_CONFIG_VALIDATOR_H
 
+#include <algorithm>
+#include <cctype>
+#include <set>
 #include <string>
+#include <vector>
 #include <unistd.h>
 #include <utility>
 #include <sys/stat.h>
@@ -174,6 +178,58 @@ public:
 private:
     std::string mEnumString;
     std::set<std::string> validEnumSet;
+};
+
+class VStrLayeredProtocol : public Validator {
+public:
+    static ValidatorPtr Create(const std::string &name, const std::string &enumStr)
+    {
+        return {new (std::nothrow) VStrLayeredProtocol(name, enumStr)};
+    }
+
+    VStrLayeredProtocol(const std::string &name, std::string enumStr) : Validator(name), mEnumString(std::move(enumStr))
+    {
+        SplitStr(mEnumString, "||", validProtocols);
+    }
+
+    ~VStrLayeredProtocol() override = default;
+
+    bool Initialize() override
+    {
+        SplitStr(mEnumString, "||", validProtocols);
+        if (validProtocols.empty()) {
+            mErrMsg = "Failed to initialize validator for <" + mName + ">, because protocol enum string is not correct";
+            return false;
+        }
+        return true;
+    }
+
+    bool Validate(const std::string &value) override
+    {
+        if (value.empty() || value.front() == ':' || value.back() == ':') {
+            mErrMsg = "Invalid value for <" + mName + ">, protocol layers cannot be empty";
+            return false;
+        }
+
+        std::vector<std::string> layers;
+        SplitStr(value, ":", layers);
+
+        for (const auto &layer : layers) {
+            if (!layer.empty() && validProtocols.find(layer) == validProtocols.end()) {
+                mErrMsg = "Invalid value for <" + mName + ">, protocol layer should be one of " + mEnumString;
+                return false;
+            }
+        }
+        if (std::all_of(layers.begin(), layers.end(), [](const std::string &layer) { return layer.empty(); })) {
+            mErrMsg = "Invalid value for <" + mName + ">, protocol must contain at least one valid layer";
+            return false;
+        }
+        return true;
+    }
+
+private:
+    std::string mEnumString;
+    std::set<std::string> validProtocols;
 };
 
 class VStrNotNull : public Validator {
@@ -394,6 +450,84 @@ private:
 
     int mFlag = 0;
     const std::vector<std::string> forbiddenWords{".."};
+};
+
+// Generic URL port validation accepts any scheme (tcp/http/https/etcd/...) without parsing userinfo, host,
+// or IPv6 brackets. It reads the port digits after the last colon and checks [minPort, maxPort].
+// Paths or parameters may follow the port. Empty values are allowed for disabled options;
+// each configuration option determines whether a value is required.
+class VUrlPort : public Validator {
+public:
+    static constexpr uint32_t kDefaultMinPort = 1025;
+    static constexpr uint32_t kDefaultMaxPort = 65535;
+
+    static ValidatorPtr Create(const std::string &name = "", uint32_t minPort = kDefaultMinPort,
+                               uint32_t maxPort = kDefaultMaxPort)
+    {
+        return {new (std::nothrow) VUrlPort(name, minPort, maxPort)};
+    }
+
+    VUrlPort(const std::string &name, uint32_t minPort, uint32_t maxPort)
+        : Validator(name), mMinPort(minPort), mMaxPort(maxPort)
+    {}
+
+    ~VUrlPort() override = default;
+
+    bool Initialize() override
+    {
+        return true;
+    }
+
+    bool Validate(const std::string &value) override
+    {
+        constexpr const char *kSchemeSuffix = "://";
+        constexpr size_t kSchemeSuffixLen = 3;
+
+        if (value.empty()) {
+            return true;
+        }
+
+        const size_t schemePos = value.find(kSchemeSuffix);
+        if (schemePos == std::string::npos || schemePos == 0) {
+            mErrMsg = "Invalid value (" + value + ") for <" + mName + ">, expected format <scheme>://<host>:<port>.";
+            return false;
+        }
+
+        const std::string hostPort = value.substr(schemePos + kSchemeSuffixLen);
+        const size_t colonPos = hostPort.rfind(':');
+        if (colonPos == std::string::npos || colonPos + 1 >= hostPort.size()) {
+            mErrMsg = "Invalid value (" + value + ") for <" + mName + ">, port is missing.";
+            return false;
+        }
+
+        uint32_t port = 0;
+        size_t digitCount = 0;
+        for (size_t i = colonPos + 1; i < hostPort.size(); ++i) {
+            const char c = hostPort[i];
+            if (c < '0' || c > '9') {
+                break;
+            }
+            port = port * 10U + static_cast<uint32_t>(c - '0');
+            ++digitCount;
+            if (port > mMaxPort) {
+                break;
+            }
+        }
+        if (digitCount == 0) {
+            mErrMsg = "Invalid value (" + value + ") for <" + mName + ">, port must be numeric.";
+            return false;
+        }
+        if (port < mMinPort || port > mMaxPort) {
+            mErrMsg = "Invalid value (" + value + ") for <" + mName + ">, port must be in [" +
+                      std::to_string(mMinPort) + ", " + std::to_string(mMaxPort) + "].";
+            return false;
+        }
+        return true;
+    }
+
+private:
+    uint32_t mMinPort = kDefaultMinPort;
+    uint32_t mMaxPort = kDefaultMaxPort;
 };
 } // namespace mmc
 } // namespace ock

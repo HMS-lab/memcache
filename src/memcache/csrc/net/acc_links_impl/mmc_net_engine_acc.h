@@ -15,6 +15,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
+#include <unordered_map>
 #include <unordered_set>
 
 #include "mmc_net_engine.h"
@@ -52,10 +53,36 @@ private:
     Result HandleNewLink(const TcpConnReq &req, const TcpLinkPtr &link) const;
     Result HandleNeqRequest(const TcpReqContext &context);
     Result HandleMsgSent(TcpMsgSentResult result, const TcpMsgHeader &header, const TcpDataBufPtr &cbCtx);
-    Result HandleLinkBroken(const TcpLinkPtr &link) const;
+    Result HandleLinkBroken(const TcpLinkPtr &link);
     Result HandleAllRequests4Response(const TcpReqContext &context);
 
     Result RegisterDecryptHandler(const std::string &decryptLibPath) const;
+
+    void AddPendingSeqNo(uint32_t peerId, uint32_t seqNo);
+    void RemovePendingSeqNo(uint32_t peerId, uint32_t seqNo);
+    void HandleFailedPendingRequests(uint32_t peerId);
+    void HandleAllFailedPendingRequests();
+
+    /* RAII guard: Add on construct, Remove on destruct, for pending seqNo tracking in Call */
+    class PendingSeqNoGuard {
+    public:
+        PendingSeqNoGuard(NetEngineAcc *engine, uint32_t peerId, uint32_t seqNo)
+            : engine_(engine), peerId_(peerId), seqNo_(seqNo)
+        {
+            engine_->AddPendingSeqNo(peerId_, seqNo_);
+        }
+        ~PendingSeqNoGuard()
+        {
+            engine_->RemovePendingSeqNo(peerId_, seqNo_);
+        }
+        PendingSeqNoGuard(const PendingSeqNoGuard &) = delete;
+        PendingSeqNoGuard &operator=(const PendingSeqNoGuard &) = delete;
+
+    private:
+        NetEngineAcc *engine_;
+        uint32_t peerId_;
+        uint32_t seqNo_;
+    };
 
 private:
     /* hot used variables */
@@ -66,6 +93,10 @@ private:
     /* 纯 client（ignore rank）建连的 link id 集合，与 rank->link 映射空间隔离 */
     mutable std::mutex ignoredRankLinksMutex_;
     mutable std::unordered_set<uint32_t> ignoredRankLinkIds_;
+
+    /* pending seqNo tracking: peerId -> set of in-flight seqNos, for fast-fail on link break */
+    std::mutex pendingMutex_;
+    std::unordered_map<uint32_t, std::unordered_set<uint32_t>> pendingSeqNos_;
 
     /* not hot used variables */
     NetEngineOptions options_{};

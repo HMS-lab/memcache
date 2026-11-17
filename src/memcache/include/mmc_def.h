@@ -145,7 +145,6 @@ typedef struct {
     char configFilePath[PATH_MAX_SIZE];
     char bmIpPortDomain[DISCOVERY_URL_SIZE]; // original (domain) form of config_store_url, for periodic re-resolution
     char tag[MMC_TAG_SIZE];
-    char tagOpInfo[MMC_TAG_OP_INFO_SIZE];
 } mmc_local_service_config_t;
 
 typedef struct {

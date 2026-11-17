@@ -136,7 +136,6 @@ TEST_F(TestLocalConfigUtils, LocalConfigToStringReturnsExpectedFormat)
                                  "  world_size: 8\n"
                                  "  protocol: device_rdma\n"
                                  "  tag: \n"
-                                 "  tag_op_info: \n"
                                  "  hcom_url: tcp://10.0.0.3:7000\n"
                                  "  dram_size: 2GB\n"
                                  "  hbm_size: 4GB\n"

@@ -19,7 +19,7 @@ The C++ language interface is fully functional and based on object-oriented desi
 - `config_store_url`: Configure storage service address.
 - `log_level`: log level, such as `debug`, `info`, `warn`, `error`.
 - `world_size`: Maximum number of ranks.
-- `protocol`: Data transmission protocol, such as `host_rdma`, `host_urma`, `host_tcp`, `device_rdma`, `device_urma`, `device_sdma`.
+- `protocol`: Data transfer protocol token, such as `host_rdma`, `host_urma`, `host_tcp`, `host_shm`, `device_rdma`, `device_urma`, or `device_sdma`. Layered protocols use colons to order layers from outer to inner and support multiple layers, for example `host_shm:device_rdma` and `host_shm:device_rdma:device_urma`.
 - `hcom_url`: HCOM service address.
 - `dram_size`/`hbm_size`: Local service DRAM/HBM capacity.
 - `max_dram_size`/`max_hbm_size`: Total upper limit of DRAM/HBM that can be used by all local processes.

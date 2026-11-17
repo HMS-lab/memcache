@@ -38,7 +38,6 @@ typedef struct {
     uint32_t memberSize;
     std::string dataOpType;
     std::string tag;
-    std::string tagOpInfo;
     uint64_t localDRAMSize;
     uint64_t localMaxDRAMSize;
     uint64_t localHBMSize;

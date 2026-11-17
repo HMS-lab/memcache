@@ -756,7 +756,6 @@ int32_t mmc_set_log_level(int level);
 - `configFilePath`：配置文件路径。
 - `bmIpPortDomain`：BM IP端口的原始域名形式，用于周期性重新解析。
 - `tag`：标签。
-- `tagOpInfo`：标签操作信息。
 
 ### mmc_buffer
 

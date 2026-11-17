@@ -179,32 +179,6 @@ TEST_F(TestMmcConfiguration, MetaLruTypeConfigDefaultsAndConverts)
     EXPECT_EQ(metaConfig.lruType, MMC_META_LRU_TYPE_LRU);
 }
 
-TEST_F(TestMmcConfiguration, MetaNetPoolBaseDefaultsAndRangeValidation)
-{
-    MetaServiceConfig config;
-    config.LoadDefault();
-
-    mmc_meta_service_config_t metaConfig{};
-    config.GetMetaServiceConfig(metaConfig);
-    EXPECT_EQ(metaConfig.netPoolBase, MMC_DEFAULT_META_NET_POOL_BASE);
-
-    config.Set(ConfConstant::OCK_MMC_META_NET_POOL_BASE.first, static_cast<int32_t>(MIN_META_NET_POOL_BASE));
-    EXPECT_TRUE(config.ValidateConf().empty());
-    config.GetMetaServiceConfig(metaConfig);
-    EXPECT_EQ(metaConfig.netPoolBase, static_cast<uint32_t>(MIN_META_NET_POOL_BASE));
-
-    config.Set(ConfConstant::OCK_MMC_META_NET_POOL_BASE.first, static_cast<int32_t>(MAX_META_NET_POOL_BASE));
-    EXPECT_TRUE(config.ValidateConf().empty());
-    config.GetMetaServiceConfig(metaConfig);
-    EXPECT_EQ(metaConfig.netPoolBase, static_cast<uint32_t>(MAX_META_NET_POOL_BASE));
-
-    config.Set(ConfConstant::OCK_MMC_META_NET_POOL_BASE.first, static_cast<int32_t>(MIN_META_NET_POOL_BASE - 1));
-    EXPECT_FALSE(config.ValidateConf().empty());
-
-    config.Set(ConfConstant::OCK_MMC_META_NET_POOL_BASE.first, static_cast<int32_t>(MAX_META_NET_POOL_BASE + 1));
-    EXPECT_FALSE(config.ValidateConf().empty());
-}
-
 TEST_F(TestMmcConfiguration, EvictYieldConfigRangeValidationTest)
 {
     MetaServiceConfig config;
@@ -264,7 +238,11 @@ TEST_F(TestMmcConfiguration, ValidateLocalServiceConfigTest)
     ASSERT_EQ(deviceConfig.localMaxDRAMSize, 1ULL * 1024ULL * 1024ULL * 1024ULL);
     ASSERT_EQ(deviceConfig.localHBMSize, 1ULL * 1024ULL * 1024ULL * 1024ULL);
     ASSERT_EQ(deviceConfig.localMaxHBMSize, 2ULL * 1024ULL * 1024ULL * 1024ULL);
-    ASSERT_EQ(MmcSmemBmHelper::TransSmemBmDataOpType("device_urma"), SMEMB_DATA_OP_DEVICE_URMA);
+    smem_bm_data_op_type opType = SMEMB_DATA_OP_BUTT;
+    std::string tagOpInfo;
+    ASSERT_EQ(MmcSmemBmHelper::ParseSmemBmProtocol("device_urma", opType, tagOpInfo), MMC_OK);
+    ASSERT_EQ(opType, SMEMB_DATA_OP_DEVICE_URMA);
+    ASSERT_EQ(tagOpInfo, "");
 
     // 测试device_sdma协议，1GB向上对齐
     SafeCopy("device_sdma", deviceConfig.dataOpType, PROTOCOL_SIZE);
@@ -340,6 +318,60 @@ TEST_F(TestMmcConfiguration, ValidateLocalServiceConfigTest)
     ASSERT_EQ(ret, MMC_OK);
     ASSERT_EQ(zeroConfig.localDRAMSize, 2ULL * 1024 * 1024); // 2MB
     ASSERT_EQ(zeroConfig.localHBMSize, 0);                   // 保持为0
+}
+
+TEST_F(TestMmcConfiguration, SmemBmProtocolAndRoleFlagsTest)
+{
+    smem_bm_data_op_type protocolOpType = SMEMB_DATA_OP_BUTT;
+    std::string protocolTagOpInfo;
+    ASSERT_EQ(
+        MmcSmemBmHelper::ParseSmemBmProtocol("host_shm:device_rdma:device_urma", protocolOpType, protocolTagOpInfo),
+        MMC_OK);
+    EXPECT_EQ(protocolOpType, SMEMB_DATA_OP_HOST_SHM | SMEMB_DATA_OP_DEVICE_RDMA | SMEMB_DATA_OP_DEVICE_URMA);
+    EXPECT_EQ(protocolTagOpInfo, "host_shm:device_rdma:device_urma");
+
+    ASSERT_EQ(MmcSmemBmHelper::ParseSmemBmProtocol("device_rdma", protocolOpType, protocolTagOpInfo), MMC_OK);
+    EXPECT_EQ(protocolOpType, SMEMB_DATA_OP_DEVICE_RDMA);
+    EXPECT_EQ(protocolTagOpInfo, "");
+
+    ASSERT_EQ(MmcSmemBmHelper::ParseSmemBmProtocol("host_shm::device_rdma", protocolOpType, protocolTagOpInfo), MMC_OK);
+    EXPECT_EQ(protocolOpType, SMEMB_DATA_OP_HOST_SHM | SMEMB_DATA_OP_DEVICE_RDMA);
+    EXPECT_EQ(protocolTagOpInfo, "host_shm::device_rdma");
+
+    EXPECT_EQ(MmcSmemBmHelper::ParseSmemBmProtocol("::", protocolOpType, protocolTagOpInfo), MMC_INVALID_PARAM);
+
+    auto protocolValidator = VStrLayeredProtocol::Create("protocol", LOCAL_SERVER_PROTOCAL_ENUM_STR);
+    ASSERT_TRUE(protocolValidator->Initialize());
+    EXPECT_TRUE(protocolValidator->Validate("host_shm::device_rdma"));
+    EXPECT_FALSE(protocolValidator->Validate("HOST_SHM::device_rdma"));
+    EXPECT_FALSE(protocolValidator->Validate("::"));
+
+    uint32_t flags = 0;
+    EXPECT_EQ(MmcSmemBmHelper::ResolveSmemBmFlags("host_shm:device_rdma", 2U * 1024U * 1024U, 0, flags), MMC_OK);
+    EXPECT_EQ(flags, SMEM_BM_FLAG_MULTI_NPU_PROVIDER);
+
+    flags = 0;
+    EXPECT_EQ(MmcSmemBmHelper::ResolveSmemBmFlags("host_shm:device_rdma:device_urma", 0, 0, flags), MMC_OK);
+    EXPECT_EQ(flags, SMEM_BM_FLAG_CREATE_FOR_PROXY);
+
+    flags = SMEM_BM_FLAG_MULTI_NPU_PROVIDER | SMEM_BM_FLAG_CREATE_FOR_PROXY;
+    EXPECT_EQ(MmcSmemBmHelper::ResolveSmemBmFlags("host_shm:device_rdma", 2U * 1024U * 1024U, 0, flags),
+              MMC_INVALID_PARAM);
+
+    flags = SMEM_BM_FLAG_MULTI_NPU_PROVIDER;
+    EXPECT_EQ(MmcSmemBmHelper::ResolveSmemBmFlags("host_shm:device_rdma", 0, 0, flags), MMC_INVALID_PARAM);
+
+    mmc_local_service_config_t config{};
+    config.logLevel = INFO_LEVEL;
+    config.accTlsConfig.tlsEnable = false;
+    config.hcomTlsConfig.tlsEnable = false;
+    config.configStoreTlsConfig.tlsEnable = false;
+    SafeCopy("host_shm:device_rdma", config.dataOpType, PROTOCOL_SIZE);
+    config.localDRAMSize = 2U * 1024U * 1024U;
+    config.localMaxDRAMSize = 2U * 1024U * 1024U;
+    config.localHBMSize = 2U * 1024U * 1024U;
+    config.localMaxHBMSize = 2U * 1024U * 1024U;
+    EXPECT_EQ(ClientConfig::ValidateLocalServiceConfig(config), MMC_INVALID_PARAM);
 }
 
 TEST_F(TestMmcConfiguration, StorageEnabledRejectsZeroDram)
