@@ -66,6 +66,7 @@
 #include <vector>
 
 #include "bench_async_transport.h"
+#include "bench_process_barrier.h"
 #include "mmc_blob_allocator.h"
 #include "mmc_blob_state.h"
 #include "mmc_def.h"
@@ -519,28 +520,47 @@ void PrintAggReport(const std::vector<ProcessResult> &results, const BenchConfig
     std::cout << "\nBenchmark report: queue depth/thread=" << cfg.queueDepth
               << ", completion mode=" << (cfg.waitCompletions ? "wait" : "poll")
               << ", maximum logical concurrency=" << static_cast<uint64_t>(cfg.processCount) * cfg.threadCount * cfg.queueDepth << "\n";
-    auto print = [](const LatencyHistogram &h) {
-        std::cout << " samples=" << h.count << " avg=" << (h.count ? h.totalUs / h.count : 0)
-                  << " P50=" << h.Percentile(kPercentileP50, kPercentileDivisor)
-                  << " P95=" << h.Percentile(kPercentileP95, kPercentileDivisor)
-                  << " P99=" << h.Percentile(kPercentileP99, kPercentileDivisor)
-                  << " P999=" << h.Percentile(kPercentileP999, kPercentileP999Divisor)
-                  << " min=" << h.minUs << " max=" << h.maxUs << "\n";
+    constexpr int operationColumnWidth = 14;
+    constexpr int valueColumnWidth = 12;
+    constexpr int metricColumnCount = 8;
+    constexpr int latencyPrecision = 2;
+    auto operationName = [](OpType type) {
+        return type == kOpAlloc ? "put-alloc" : type == kOpUpdate ? "put-update" : "get";
     };
-    std::cout << "Client-observed RPC round-trip latency (us)\n";
-    for (auto type : {kOpPut, kOpAlloc, kOpUpdate, kOpGet}) {
-        std::cout << OpTypeName(type) << " success=" << total.successCount[type]
-                  << " fail=" << total.failureCount[type];
-        if (type == kOpPut) std::cout << " latency=—\n";
-        else {
-            std::cout << " transport failures=" << total.transportFailures[type] << " timeouts=" << total.timeouts[type];
-            print(total.histogram[type]);
+    auto printTable = [&](const char *title, bool submission) {
+        const auto savedFlags = std::cout.flags();
+        const auto savedPrecision = std::cout.precision();
+        std::cout << "\n" << title << "\n"
+                  << std::left << std::setw(operationColumnWidth) << "Operation" << std::right;
+        for (const char *heading : {"Samples", "Avg (us)", "P50 (us)", "P95 (us)", "P99 (us)", "P999 (us)",
+                                    "Min (us)", "Max (us)"}) {
+            std::cout << std::setw(valueColumnWidth) << heading;
         }
-    }
-    std::cout << "Submission duration (us; overlaps RPC latency)\n";
+        std::cout << "\n" << std::string(operationColumnWidth + metricColumnCount * valueColumnWidth, '-') << "\n";
+        std::cout << std::fixed << std::setprecision(latencyPrecision);
+        for (auto type : {kOpAlloc, kOpUpdate, kOpGet}) {
+            const auto &histogram = submission ? total.submission[type] : total.histogram[type];
+            std::cout << std::left << std::setw(operationColumnWidth) << operationName(type)
+                      << std::right << std::setw(valueColumnWidth) << histogram.count
+                      << std::setw(valueColumnWidth) << (histogram.count ? histogram.totalUs / histogram.count : 0)
+                      << std::setw(valueColumnWidth) << histogram.Percentile(kPercentileP50, kPercentileDivisor)
+                      << std::setw(valueColumnWidth) << histogram.Percentile(kPercentileP95, kPercentileDivisor)
+                      << std::setw(valueColumnWidth) << histogram.Percentile(kPercentileP99, kPercentileDivisor)
+                      << std::setw(valueColumnWidth) << histogram.Percentile(kPercentileP999, kPercentileP999Divisor)
+                      << std::setw(valueColumnWidth) << histogram.minUs
+                      << std::setw(valueColumnWidth) << histogram.maxUs << "\n";
+        }
+        std::cout.flags(savedFlags);
+        std::cout.precision(savedPrecision);
+    };
+    printTable("Client-observed RPC round-trip latency (us = microseconds)", false);
+    printTable("Submission duration (us = microseconds; overlaps RPC latency)", true);
+    std::cout << "\nLogical Put: success=" << total.successCount[kOpPut] << " fail=" << total.failureCount[kOpPut]
+              << "\nRPC outcomes:\n";
     for (auto type : {kOpAlloc, kOpUpdate, kOpGet}) {
-        std::cout << OpTypeName(type);
-        print(total.submission[type]);
+        std::cout << "  " << operationName(type) << ": success=" << total.successCount[type]
+                  << " fail=" << total.failureCount[type] << " transport failures=" << total.transportFailures[type]
+                  << " timeouts=" << total.timeouts[type] << "\n";
     }
     const uint64_t count = total.successCount[kOpPut] + total.failureCount[kOpPut] +
         total.successCount[kOpGet] + total.failureCount[kOpGet];
@@ -557,7 +577,8 @@ Result RegisterMockBm(MetaNetClient &client, uint32_t rank, uint64_t gva, uint64
     req.capacity_ = {capacity};
     req.storageEnabled_ = false;
     Response resp;
-    return client.SyncCall(req, resp, kRpcTimeoutMs);
+    Result ret = client.SyncCall(req, resp, kRpcTimeoutMs);
+    return ret == MMC_OK ? resp.ret_ : ret;
 }
 
 void RegisterMockBackupHandler(MetaNetClient &client)
@@ -589,12 +610,15 @@ Result DoPut(MetaNetClient &client, const std::string &key, uint32_t rank, uint6
     AllocResponse allocResp;
     if (client.SyncCall(allocReq, allocResp, kRpcTimeoutMs) != MMC_OK)
         return MMC_ERROR;
-    if (allocResp.result_ != MMC_OK || allocResp.blobs_.empty())
+    if (allocResp.result_ != MMC_OK)
         return allocResp.result_;
+    if (allocResp.blobs_.empty())
+        return MMC_ERROR;
     auto &blob = allocResp.blobs_[0];
     UpdateRequest updateReq(MMC_WRITE_OK, key, blob.rank_, blob.mediaType_, operateId);
     Response updateResp;
-    return client.SyncCall(updateReq, updateResp, kRpcTimeoutMs);
+    Result ret = client.SyncCall(updateReq, updateResp, kRpcTimeoutMs);
+    return ret == MMC_OK ? updateResp.ret_ : ret;
 }
 
 template<typename ResponseType>
@@ -876,7 +900,7 @@ int RunMetaService(const std::string &metaUrl, const std::string &bmUrl, const s
 }
 
 int RunClient(const BenchConfig &cfg, int clientIndex, ProcessResult *resultSlot, const std::string &metaUrl,
-              const std::string &logFile)
+              const std::string &logFile, int barrierFd)
 {
     RedirectLogsToFile(logFile);
 
@@ -916,7 +940,11 @@ int RunClient(const BenchConfig &cfg, int clientIndex, ProcessResult *resultSlot
     int warmupPerClient = warmupEnd - warmupStart;
     for (int i = 0; i < warmupPerClient; ++i) {
         std::string key = MakeKey(warmupStart + i);
-        DoPut(*client.Get(), key, rank, cfg.blobSize);
+        Result warmupRet = DoPut(*client.Get(), key, rank, cfg.blobSize);
+        if (warmupRet != MMC_OK) {
+            TermLog("[client %d] Warmup Put failed for %s: %d\n", clientIndex, key.c_str(), warmupRet);
+            return 1;
+        }
     }
 
     std::vector<ThreadStats> threadStats(static_cast<size_t>(cfg.threadCount));
@@ -932,6 +960,11 @@ int RunClient(const BenchConfig &cfg, int clientIndex, ProcessResult *resultSlot
     TermLog("[client %d] Queue depth/thread=%d, mode=%s, maximum logical concurrency=%llu\n", clientIndex,
         cfg.queueDepth, cfg.waitCompletions ? "wait" : "poll",
         static_cast<unsigned long long>(cfg.processCount) * cfg.threadCount * cfg.queueDepth);
+    // No process may read the shared key range until every process has populated its partition.
+    if (!bench::WaitForBarrier(barrierFd, bench::BarrierMessage::READY, bench::BarrierMessage::START)) {
+        TermLog("[client %d] Startup barrier aborted\n", clientIndex);
+        return 1;
+    }
     double startUs = NowUs();
     for (int t = 0; t < cfg.threadCount; ++t) {
         workers.emplace_back(Worker, std::ref(transport), std::ref(cfg),
@@ -965,6 +998,12 @@ int RunClient(const BenchConfig &cfg, int clientIndex, ProcessResult *resultSlot
     TermLog("[client %d] Done: %llu succ, %llu fail, %.2fs\n", clientIndex, static_cast<unsigned long long>(totalSucc),
             static_cast<unsigned long long>(totalFail), durationSec);
 
+    // The duration above excludes this wait. Keep rank resources and callbacks alive for slower clients.
+    if (transport.Failed() ||
+        !bench::WaitForBarrier(barrierFd, bench::BarrierMessage::DRAINED, bench::BarrierMessage::TEARDOWN)) {
+        TermLog("[client %d] Teardown barrier aborted\n", clientIndex);
+        return 1;
+    }
     client->Stop();
     return transport.Failed() ? 1 : 0;
 }
@@ -1156,24 +1195,56 @@ int main(int argc, char *argv[])
 
     std::cout << "\n[2/3] Forking " << cfg.processCount << " client processes..." << std::endl;
     std::vector<pid_t> clientPids;
+    std::vector<int> barrierFds;
     for (int i = 0; i < cfg.processCount; ++i) {
+        int controlSocket[bench::kBarrierSocketCount];
+        if (socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, controlSocket) != 0) {
+            std::cerr << "Failed to create client barrier channel: " << strerror(errno) << std::endl;
+            break;
+        }
         pid_t pid = fork();
         if (pid == 0) {
-            int ret = RunClient(cfg, i, &sharedResults[i], metaUrl, cfg.logFile);
+            close(controlSocket[bench::kBarrierParentEnd]);
+            for (int barrierFd : barrierFds) {
+                close(barrierFd);
+            }
+            int ret = RunClient(cfg, i, &sharedResults[i], metaUrl, cfg.logFile,
+                                controlSocket[bench::kBarrierClientEnd]);
+            close(controlSocket[bench::kBarrierClientEnd]);
             _exit(ret);
         }
+        close(controlSocket[bench::kBarrierClientEnd]);
         if (pid < 0) {
+            close(controlSocket[bench::kBarrierParentEnd]);
             std::cerr << "Failed to fork client " << i << "!" << std::endl;
+            break;
         } else {
             clientPids.push_back(pid);
+            barrierFds.push_back(controlSocket[bench::kBarrierParentEnd]);
         }
     }
 
     std::cout << "\n[3/3] Waiting for " << clientPids.size() << " clients to finish..." << std::endl;
     bool clientsFailed = clientPids.size() != static_cast<size_t>(cfg.processCount);
+    if (!clientsFailed) {
+        clientsFailed = !bench::CoordinateClients(barrierFds);
+    }
+    if (clientsFailed) {
+        std::cerr << "Client coordination failed; aborting benchmark." << std::endl;
+        for (pid_t pid : clientPids) {
+            kill(pid, SIGTERM);
+        }
+    }
+    for (int barrierFd : barrierFds) {
+        close(barrierFd);
+    }
     for (pid_t pid : clientPids) {
         int status = 0;
-        if (waitpid(pid, &status, 0) < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) clientsFailed = true;
+        pid_t waited;
+        do {
+            waited = waitpid(pid, &status, 0);
+        } while (waited < 0 && errno == EINTR);
+        if (waited < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) clientsFailed = true;
     }
 
     metricsSampler.Stop();
