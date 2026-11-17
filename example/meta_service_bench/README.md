@@ -4,6 +4,8 @@ This tool runs MetaService and simulated local-service clients in separate child
 
 Each client process retains its `MetaNetClient` connection for registration, warmup, and server callbacks. A separate MemFabric connection submits measured requests asynchronously. Its handshake uses an invalid rank so it does not replace the registered connection. Request messages carry the registered rank where required.
 
+All processes finish registration, validated warmup, and async connection setup before the coordinator releases the startup barrier. Once a process drains its workload, it stops its timer and waits at the teardown barrier with its clients connected. Clients disconnect only after every process has drained its requests, including dependent Updates. Both barriers are outside workload measurement. Setup errors, failed warmup, or a client exiting before a barrier completes abort the run and release waiting peers.
+
 ## Build and verify
 
 From the repository root, use the supported build entrypoint:
@@ -11,6 +13,7 @@ From the repository root, use the supported build entrypoint:
 ```bash
 bash script/build_and_pack_run.sh --build_mode DEBUG --incremental --build_cpp_example ON
 ./build/example/meta_service_bench/bench_meta_service_async_test
+./build/example/meta_service_bench/bench_meta_service_barrier_test
 ```
 
 An activated Python 3.11 virtual environment is selected automatically:
@@ -66,7 +69,7 @@ Each RPC captures steady-clock timestamps:
 
 RPC timing includes submission internals, transport queues and scheduling, network time, and server queues and processing. It excludes benchmark request construction, response copying/deserialization, completion-queue handling, and work between Alloc and Update. Client overhead still affects achieved throughput.
 
-The main report prints Put counts, then Alloc and Update detail rows, followed by Get. Put has no latency statistic. Detail rows combine single and batch RPCs. A second table reports submission duration for Alloc, Update, and Get. Each timing distribution includes its sample count, average, P50/P95/P99/P999, minimum, and maximum in microseconds. Percentiles use merged power-of-two histogram buckets and are approximate upper bounds.
+The report prints two aligned latency tables, each with exactly three rows: `put-alloc`, `put-update`, and `get`. The first table shows RPC round-trip latency and the second shows submission duration. Both contain Samples, Avg (us), P50 (us), P95 (us), P99 (us), P999 (us), Min (us), and Max (us); `us` means microseconds. Values have two decimal places. Rows combine single and batch RPCs. Logical Put counts and per-RPC outcomes are printed separately; there is no combined Put latency. Percentiles use merged power-of-two histogram buckets and are approximate upper bounds.
 
 Success requires valid response structure and successful application statuses, including all requested entries for batches. Send failures and 30-second RPC timeouts count as failures but contribute no round-trip samples. Submission calls that returned contribute submission samples. Late and duplicate completions are discarded. A broken workload connection aborts the run; requests are not automatically retried.
 
