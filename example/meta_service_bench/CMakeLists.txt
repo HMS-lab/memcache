@@ -105,3 +105,17 @@ else ()
             RUNTIME DESTINATION ${TARGET_INSTALL_DIR}/memcache/bin
             PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
 endif ()
+
+# Built alongside the example; not installed in the runtime package.
+add_executable(bench_meta_service_async_test bench_async_test.cpp)
+get_target_property(BENCH_INCLUDE_DIRS bench_meta_service INCLUDE_DIRECTORIES)
+if (BENCH_INCLUDE_DIRS)
+    target_include_directories(bench_meta_service_async_test PRIVATE ${BENCH_INCLUDE_DIRS})
+endif ()
+get_target_property(BENCH_LINK_LIBS bench_meta_service LINK_LIBRARIES)
+get_target_property(BENCH_LINK_DIRS bench_meta_service LINK_DIRECTORIES)
+target_link_libraries(bench_meta_service_async_test PRIVATE ${BENCH_LINK_LIBS})
+if (BENCH_LINK_DIRS)
+    target_link_directories(bench_meta_service_async_test PRIVATE ${BENCH_LINK_DIRS})
+endif ()
+target_compile_options(bench_meta_service_async_test PRIVATE -W -fpermissive -Wno-float-equal)
