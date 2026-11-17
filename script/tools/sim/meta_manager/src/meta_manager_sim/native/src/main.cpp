@@ -42,7 +42,6 @@ int main()
                 } else if (!manager) {
                     throw std::runtime_error("Initialize first");
                 } else if (operation == "read") {
-                    const auto model = request.at("model").get<std::string>();
                     // Each read is a [key, size] pair supplied by Python
                     for (const auto &read : request.at("reads")) {
                         if (!read.is_array() || read.size() != kReadFieldCount || !read[kReadKeyIndex].is_string() ||
@@ -51,7 +50,7 @@ int main()
                         }
                         key = read[kReadKeyIndex].get<std::string>();
                         size = read[kReadSizeIndex].get<uint64_t>();
-                        manager->Access(key, size, model);
+                        manager->Access(key, size);
                         ++readIndex;
                     }
                     reply = manager->Progress();

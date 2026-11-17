@@ -7,6 +7,7 @@ project(meta_manager_sim LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 find_package(Python3 COMPONENTS Interpreter)
 find_package(Threads)
 
@@ -23,8 +24,7 @@ get_filename_component(
 set(MEMCACHE_SRC "${REPO_ROOT}/src/memcache/csrc")
 
 # Note: sharded_lru.cpp includes lru.cpp and instantiates the container factory
-add_executable(
-    meta_manager_sim_native
+add_executable(meta_manager_sim_native
     src/main.cpp
     src/manager_adapter.cpp
     "${MEMCACHE_SRC}/meta_service/mmc_meta_manager.cpp"
@@ -39,8 +39,7 @@ add_executable(
     "${MEMCACHE_SRC}/common/mmc_last_error.cpp"
 )
 
-target_include_directories(
-    meta_manager_sim_native PRIVATE
+target_include_directories(meta_manager_sim_native PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src/standalone"
     "${JSON_HEADERS}"
     "${REPO_ROOT}/src/memcache/include"
@@ -55,12 +54,14 @@ target_include_directories(
     "${MEMCACHE_SRC}/under_api/ubs_io"
 )
 
-target_link_libraries(
-    meta_manager_sim_native PRIVATE Threads::Threads ${CMAKE_DL_LIBS}
+target_link_libraries(meta_manager_sim_native PRIVATE
+    OpenSSL::Crypto
+    Threads::Threads
+    ${CMAKE_DL_LIBS}
 )
 target_compile_options(meta_manager_sim_native PRIVATE -g)
 
-set_target_properties(
-    meta_manager_sim_native PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+set_target_properties(meta_manager_sim_native PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY
+    "${CMAKE_BINARY_DIR}/bin"
 )

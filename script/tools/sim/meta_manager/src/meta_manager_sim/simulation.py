@@ -3,7 +3,6 @@
 
 from collections.abc import Iterable
 from dataclasses import asdict
-from hashlib import sha256
 from typing import cast
 
 from pandas import DataFrame
@@ -54,15 +53,8 @@ def _request_reads(
     # Record starting RSS before consuming the workload
     _sample(cast(dict[str, object], snapshot_init["progress"]))
 
-    for reads_completed, (key, size) in enumerate(reads, start=1):
-        # Recreate the key's native format for more accurate measurements
-        model, _, block_id = key.rpartition(":")
-        prefix = f"{model.replace('-', '_')}_{block_id}_tp_0_pp_0"
-        native_key = f"{prefix}_{sha256(prefix.encode('utf-8')).hexdigest()}"
-
-        progress = process.request(
-            "read", reads=[(native_key, size)], model=model
-        )
+    for reads_completed, read in enumerate(reads, start=1):
+        progress = process.request("read", reads=[read])
         if sample_interval and reads_completed % sample_interval == 0:
             _sample(progress)
 

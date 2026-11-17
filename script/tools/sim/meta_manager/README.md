@@ -4,7 +4,7 @@ Sequential block read simulator against the native C++ MetaManager.
 
 ## Setup
 
-Requires Linux, Python 3.10+, C++17 compiler and Make/Ninja.
+Requires Linux, Python 3.10+, C++17 compiler, Make/Ninja and OpenSSL development headers/libraries (`libssl-dev` on Debian/Ubuntu).
 
 ```bash
 python3 -m venv .venv

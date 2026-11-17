@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "mmc_msg_client_meta.h"
+#include "native_key.h"
 #include "ptracer.h"
 
 extern "C" {
@@ -134,20 +135,21 @@ void Manager::Close()
 
 // Sequential block access and lease completion
 
-void Manager::Access(const std::string &key, uint64_t size, const std::string &model)
+void Manager::Access(const std::string &key, uint64_t size)
 {
     if (key.empty() || size == 0 || size > UINT64_MAX - kPoolBase) {
         throw std::runtime_error("Invalid key/size");
     }
 
+    const auto [model, nativeKey] = TranslateKey(key);
     MmcMemMetaDesc descriptor;
     auto id = NextId();
     auto before = Clock::now();
-    auto result = manager_->Get(key, id, nullptr, descriptor);
+    auto result = manager_->Get(nativeKey, id, nullptr, descriptor);
     RecordTiming("lookup", before);
 
     if (result == MMC_OK) {
-        CompleteLease(key, size, id, descriptor, false, before);
+        CompleteLease(nativeKey, size, id, descriptor, false, before);
         RecordAccess(model, size, true, 0);
         return;
     }
@@ -158,12 +160,12 @@ void Manager::Access(const std::string &key, uint64_t size, const std::string &m
     id = NextId();
     before = Clock::now();
     // Note: No preferred ranks lets native random placement use every pool
-    result = manager_->Alloc(key, {size, kBlobCopies, MEDIA_DRAM, {}, ALLOC_RANDOM}, id, 0, descriptor);
+    result = manager_->Alloc(nativeKey, {size, kBlobCopies, MEDIA_DRAM, {}, ALLOC_RANDOM}, id, 0, descriptor);
     RecordTiming("alloc", before);
 
     uint64_t reserved = 0;
     if (result == MMC_OK) {
-        CompleteLease(key, size, id, descriptor, true, before);
+        CompleteLease(nativeKey, size, id, descriptor, true, before);
         reserved = descriptor.blobs_.front().allocSize_;
     } else if (result != MMC_ERROR) {
         Check(result, "Alloc");

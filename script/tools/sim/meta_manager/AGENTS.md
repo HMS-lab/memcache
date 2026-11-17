@@ -25,12 +25,13 @@ src/meta_manager_sim/
   workloads/random/             Seeded generator and random workload adapter
   workloads/sequential/         Consecutive keys with one fixed block size
   workloads/trace/              JSONL reader and trace workload adapter
-  simulation.py                 Sequential replay, RSS samples and tables
+  simulation.py                 Workload replay, RSS samples and tables
   metrics/                      RSS reading, summaries and plot export
   native/
     build.py                    Incremental standalone CMake build
     native_process.py           Process lifecycle, JSONL IPC and Heaptrack
     src/                        Command loop, manager adapter and local shim
+      native_key.h              Native key formatting and SHA-256
 examples/                       Bash examples and bundled trace input
 tests/                          Pytest unit and native integration tests
 pyproject.toml                  Runtime dependencies and tool settings
@@ -48,10 +49,12 @@ from `cli/arguments.py`; programmatic defaults in `config.py` can differ.
   conversation-line component. Seed random workload generation.
 - Sequential workloads read `sequential:0`, `sequential:1`, etc. once each,
   using the same configured byte size for every block.
-- Convert workload keys to the native `MODEL_BLOCK_tp_0_pp_0_HASH` format
-  before sending them. Normalize model-name hyphens to underscores, then
-  compute SHA-256 of `MODEL_BLOCK_tp_0_pp_0`. Send the original model
-  separately for statistics.
+- Send workload keys unchanged from Python. The C++ adapter splits at the
+  last colon, derives the model for statistics and translates the key to
+  `MODEL_BLOCK_tp_0_pp_0_HASH` for all MetaManager calls and lease completion.
+  Normalize model-name hyphens to underscores, then compute SHA-256 of
+  `MODEL_BLOCK_tp_0_pp_0` using OpenSSL. Keep native normalization and hashing
+  unchanged; unprefixed workload keys use an empty statistics prefix.
 - MetaManager owns placement, alignment, residency and eviction. Resolve reads
   through native `Get`; a hit completes its read lease, and a miss attempts one
   `Alloc`. Use one DRAM backing blob and native random placement without
@@ -65,7 +68,8 @@ from `cli/arguments.py`; programmatic defaults in `config.py` can differ.
   cached keys plus completed removal callbacks in this one-blob model.
 - Keep the Python/C++ JSONL fields synchronized. `init` takes `config` and
   `detailed_stats`, returning flat `pid`, `progress`, `pools` and `details`
-  fields. `read` takes `reads=[(key, size)]` and `model`, returning counters.
+  fields. `read` takes `reads=[(key, size)]`, returning counters. Model parsing
+  belongs to C++, so do not add a separate model IPC field.
   `snapshot` returns final state, and `stop` shuts down the manager. There is
   no version field or simulator batch-size setting.
 - Measure RSS from the actual C++ PID, including under Heaptrack. RSS covers
@@ -136,7 +140,8 @@ python -c 'from meta_manager_sim.native.build import build_native; print(build_n
 
 Use this local standalone target, not the repository's full service build.
 The simulator requires the surrounding MemCache checkout, Linux procfs, a
-C++17 compiler and Make/Ninja; it needs no running MetaService or NPU stack.
+C++17 compiler, Make/Ninja and OpenSSL development headers/libraries
+(`libssl-dev` on Debian/Ubuntu); it needs no running MetaService or NPU stack.
 
 ## Formatting
 
@@ -190,7 +195,8 @@ Keep coverage focused:
   display formatting and the actual coordinates exported in plots
 - `test_simulation.py`: real hits/misses, allocation failures, prefix/size
   breakdowns, native timings, sampling, unequal pools, both eviction policies,
-  empty workloads and cleanup after an input failure
+  empty workloads and cleanup after an input failure; a small C++ harness
+  checks native key conversion against the previous Python format
 - `test_examples.py`: all three Bash examples, trace line selection and plot
   export; all three entrypoints support help without build tools
 - `test_profile.py`: optional real Heaptrack capture and native-PID sampling

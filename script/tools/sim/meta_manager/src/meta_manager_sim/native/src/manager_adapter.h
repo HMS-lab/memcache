@@ -23,7 +23,7 @@ public:
     explicit Manager(const Json &config, bool detailedStats);
     ~Manager();
 
-    void Access(const std::string &key, uint64_t size, const std::string &model);
+    void Access(const std::string &key, uint64_t size);
 
     Json Progress() const;
     Json Snapshot();

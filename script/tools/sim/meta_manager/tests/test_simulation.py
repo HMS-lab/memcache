@@ -2,12 +2,14 @@
 # Licensed under Mulan PSL v2. See the repository LICENSE file.
 
 import os
+import subprocess
 from collections.abc import Iterator
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
 from pandas import DataFrame, isna
-from pytest import CaptureFixture, MonkeyPatch
+from pytest import CaptureFixture, MonkeyPatch, TempPathFactory
 
 import meta_manager_sim.simulation as simulation
 from meta_manager_sim.config import MetaManagerConfig, RunConfig
@@ -16,6 +18,51 @@ from meta_manager_sim.simulation import _simulate_reads
 
 pytestmark = pytest.mark.native
 BLOCK_SIZE = 4096
+ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture(scope="module")
+def native_key_tool(tmp_path_factory: TempPathFactory) -> Path:
+    executable = tmp_path_factory.mktemp("native-key") / "native_key_test"
+    subprocess.run(
+        [
+            "c++",
+            "-std=c++17",
+            "-I",
+            str(ROOT / "src/meta_manager_sim/native/src"),
+            str(ROOT / "tests/native_key_test.cpp"),
+            "-lcrypto",
+            "-o",
+            str(executable),
+        ],
+        check=True,
+        timeout=30,
+    )
+    return executable
+
+
+@pytest.mark.parametrize(
+    "key,model,prefix",
+    [
+        ("example-model:12", "example-model", "example_model_12_tp_0_pp_0"),
+        ("example_model:12", "example_model", "example_model_12_tp_0_pp_0"),
+        ("org:model:1", "org:model", "org:model_1_tp_0_pp_0"),
+        ("bare", "", "_bare_tp_0_pp_0"),
+        ("módèl-模型:42", "módèl-模型", "módèl_模型_42_tp_0_pp_0"),
+    ],
+)
+def test_native_key_matches_python_format(
+    native_key_tool: Path, key: str, model: str, prefix: str
+) -> None:
+    result = subprocess.run(
+        [native_key_tool, key],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    )
+    expected = f"{prefix}_{sha256(prefix.encode('utf-8')).hexdigest()}"
+    assert result.stdout.splitlines() == [model, expected]
 
 
 @pytest.fixture(scope="module")
