@@ -10,7 +10,7 @@
 # See the Mulan PSL v2 for more details.
 
 set -e
-readonly ROOT_PATH=$(dirname $(readlink -f "$0"))
+readonly ROOT_PATH=$(dirname "$(readlink -f "$0")")
 CURRENT_DIR=$(pwd)
 
 BUILD_MODE="RELEASE"
@@ -26,6 +26,7 @@ show_help() {
     echo "Options:"
     echo "  --build_mode <mode>     Set build mode (RELEASE/DEBUG/ASAN), default: RELEASE"
     echo "  --build_test <ON/OFF>   Enable/disable package test utilities, default: OFF"
+    echo "  --python <executable>   Python interpreter; defaults to active venv, PYTHON_HOME, or detected Python"
     echo "  --incremental           Enable incremental build (skip clean), default: OFF"
     echo "  --build_ubsio <ON/OFF>  Enable/disable build and package ubs-io (SSD backend), default: ON"
     echo "  --build_cpp_example <ON/OFF> Enable/disable in-tree C++ examples, default: OFF"
@@ -46,6 +47,14 @@ while [[ "$#" -gt 0 ]]; do
             ;;
         --build_test)
             BUILD_TEST="$2"
+            shift 2
+            ;;
+        --python)
+            if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+                echo "--python requires an executable path or command" >&2
+                exit 1
+            fi
+            export PYTHON_EXECUTABLE="$2"
             shift 2
             ;;
         --incremental)

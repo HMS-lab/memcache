@@ -19,7 +19,7 @@ export BUILD_UBSIO=${7:-ON}
 export BUILD_CPP_EXAMPLE=${8:-OFF}
 export BUILD_PYTHON_WHL_TYPE=${9:-release}
 
-readonly SCRIPT_FULL_PATH=$(dirname $(readlink -f "$0"))
+readonly SCRIPT_FULL_PATH=$(dirname "$(readlink -f "$0")")
 readonly PROJECT_FULL_PATH=$(dirname "$SCRIPT_FULL_PATH")
 readonly MMC_BUILD_JOBS="${MMC_BUILD_JOBS:-32}"
 
@@ -42,11 +42,13 @@ if [ "${BUILD_TESTS}" == "ON" ]; then
 fi
 
 set -e
-readonly ROOT_PATH=$(dirname $(readlink -f "$0"))
+readonly ROOT_PATH=$(dirname "$(readlink -f "$0")")
 CURRENT_DIR=$(pwd)
 
-cd ${ROOT_PATH}/..
+cd "${ROOT_PATH}/.."
 PROJ_DIR=$(pwd)
+
+source "${ROOT_PATH}/select_python.sh"
 
 if [ "${INCREMENTAL}" != "ON" ]; then
     rm -rf ./build ./output
@@ -79,27 +81,6 @@ GIT_COMMIT=`git rev-parse HEAD` || true
 cp -f "${PROJ_DIR}/output/VERSION" "${PROJ_DIR}/src/memcache/python/memcache_hybrid/"
 rm -f "${PROJ_DIR}/output/VERSION"
 
-readonly BACK_PATH_EVN=$PATH
-
-# 如果 PYTHON_HOME 不存在，则设置默认值
-if [ -z "$PYTHON_HOME" ]; then
-    # 定义要检查的目录路径
-    CHECK_DIR="/usr/local/python3.11"
-    # 判断目录是否存在
-    if [ -d "$CHECK_DIR" ]; then
-        export PYTHON_HOME="$CHECK_DIR"
-    else
-        export PYTHON_HOME="/usr/local"
-    fi
-    echo "Not set PYTHON_HOME, and use $PYTHON_HOME"
-fi
-
-export PYTHON_HOME="${PYTHON_HOME%/}" # remove the last char "/"
-
-export LD_LIBRARY_PATH=$PYTHON_HOME/lib:$LD_LIBRARY_PATH
-export PATH=$PYTHON_HOME/bin:$BACK_PATH_EVN
-export CMAKE_PREFIX_PATH="${PYTHON_HOME}${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}"
-
 if command -v ninja &> /dev/null; then
     export GENERATOR="Ninja"
     export MAKE_CMD=ninja
@@ -110,6 +91,13 @@ fi
 
 cmake \
     -G "$GENERATOR" \
+    -DPYTHON_EXECUTABLE="$PYTHON_EXECUTABLE" \
+    -DPYTHON_INCLUDE_DIR="$MMC_PYTHON_INCLUDE_DIR" \
+    -DPYTHON_LIBRARY="$MMC_PYTHON_LIBRARY" \
+    -DPython_EXECUTABLE="$PYTHON_EXECUTABLE" \
+    -DPython_INCLUDE_DIR="$MMC_PYTHON_INCLUDE_DIR" \
+    -DPython_LIBRARY="$MMC_PYTHON_LIBRARY" \
+    -DPYBIND11_FINDPYTHON=ON \
     -DCMAKE_BUILD_TYPE="${BUILD_MODE}" \
     -DBUILD_TESTS="${BUILD_TESTS}" \
     -DBUILD_OPEN_ABI="${BUILD_OPEN_ABI}" \
@@ -139,7 +127,7 @@ export LD_LIBRARY_PATH="${PROJ_DIR}/src/memcache/python/memcache_hybrid/lib":$LD
 if [ "${BUILD_UBSIO:-OFF}" == "ON" ]; then
     export LD_LIBRARY_PATH="${PROJ_DIR}/output/3rdparty/ubsio/lib":$LD_LIBRARY_PATH # fix `auditwheel repair` failed
 fi
-python3 setup.py bdist_wheel
+"$PYTHON_EXECUTABLE" setup.py bdist_wheel
 
 mkdir -p "${PROJ_DIR}/output/memcache/wheel"
 cp "${PROJ_DIR}"/src/memcache/python/dist/*.whl "${PROJ_DIR}/output/memcache/wheel"
@@ -147,4 +135,4 @@ rm -rf "${PROJ_DIR}"/src/memcache/python/dist
 rm -rf "${PROJ_DIR}/src/memcache/python/memcache_hybrid/VERSION"
 rm -rf "${PROJ_DIR}/src/memcache/python/memcache_hybrid/config"
 
-cd ${CURRENT_DIR}
+cd "${CURRENT_DIR}"

@@ -166,32 +166,29 @@ endif ()
 message(STATUS "install dir ${TARGET_INSTALL_DIR}")
 
 if ((BUILD_PYTHON STREQUAL "ON") OR (BUILD_TESTS STREQUAL "ON"))
-    # 获取Python头文件路径
-    find_program(PYTHON_EXECUTABLE NAMES python3 python)
-    if (NOT PYTHON_EXECUTABLE)
-        message(FATAL_ERROR "Python not found")
+    # Use one interpreter and its matching development artifacts for all targets.
+    if (PYTHON_EXECUTABLE AND NOT Python_EXECUTABLE)
+        set(Python_EXECUTABLE "${PYTHON_EXECUTABLE}" CACHE FILEPATH "Build Python interpreter" FORCE)
     endif ()
+    find_package(Python 3.8 REQUIRED COMPONENTS Interpreter Development)
+    set(PYBIND11_FINDPYTHON ON CACHE BOOL "Use the selected Python for pybind11" FORCE)
+    set(PYTHON_EXECUTABLE "${Python_EXECUTABLE}")
+    set(PYTHON_INCLUDE_DIR "${Python_INCLUDE_DIRS}")
+    set(PYTHON_LIBRARY "${Python_LIBRARIES}")
 
     execute_process(
-            COMMAND ${PYTHON_EXECUTABLE} -c
-            "import sysconfig; print(sysconfig.get_path('include'))"
-            OUTPUT_VARIABLE PYTHON_INCLUDE_DIR
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-
-    execute_process(
-            COMMAND ${PYTHON_EXECUTABLE} -c
-            "import sys; import os; import pybind11; print(os.path.dirname(pybind11.__file__))"
+            COMMAND "${Python_EXECUTABLE}" -c
+            "import os, pybind11; print(os.path.dirname(pybind11.__file__))"
+            RESULT_VARIABLE PYTHON_PYBIND11_RESULT
             OUTPUT_VARIABLE PYTHON_PYBIND11_HOME
             OUTPUT_STRIP_TRAILING_WHITESPACE
     )
-
     set(pybind11_cmake_dir "${PYTHON_PYBIND11_HOME}/share/cmake/pybind11")
-
-    # 检查路径是否存在且是目录
-    if (NOT EXISTS "${pybind11_cmake_dir}" OR NOT IS_DIRECTORY "${pybind11_cmake_dir}")
-        message(SEND_ERROR "Can not find pybind11 directory: ${pybind11_cmake_dir}\nPlease 'pip3 install pybind11 or pybind11-dev'")
+    if (NOT PYTHON_PYBIND11_RESULT EQUAL 0 OR NOT IS_DIRECTORY "${pybind11_cmake_dir}")
+        message(FATAL_ERROR "Install pybind11 for the selected interpreter: ${Python_EXECUTABLE} -m pip install pybind11")
     endif ()
+    set(pybind11_DIR "${pybind11_cmake_dir}" CACHE PATH "Selected interpreter's pybind11" FORCE)
+    message(STATUS "Build Python: ${Python_EXECUTABLE} (${Python_VERSION}); library: ${Python_LIBRARIES}")
 endif ()
 
 # 判断环境变量 CMAKE_PREFIX_PATH 是否存在

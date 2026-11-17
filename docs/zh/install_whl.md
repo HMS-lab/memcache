@@ -165,3 +165,7 @@ python3 test_mmc_demo.py
 ```bash
 pip uninstall memcache_hybrid
 ```
+
+## Build a Wheel from Source
+
+The supported source build creates both a wheel and a run package. Use an active virtual environment or pass `--python /absolute/path/to/python3.11` to `bash script/build_and_pack_run.sh`. The same interpreter is used for C++ bindings and wheel packaging. Install pybind11 in that environment and the matching base Python development headers and shared library. See [the source build instructions](./install_run.md#build-the-run-package) for a complete example.

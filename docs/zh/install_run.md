@@ -46,9 +46,20 @@ Run the following command:
 bash script/build_and_pack_run.sh --build_mode RELEASE --build_test OFF
 ```
 
-- `build_and_pack_run.sh` accepts two parameters: `--build_mode <build_mode>` and `--build_test <build_test>`.
+- `build_and_pack_run.sh` accepts `--build_mode`, `--build_test`, `--incremental`, `--build_cpp_example`, and `--python`, among other options; see `--help`.
 - `build_mode`: Build type. Options are `RELEASE`, `DEBUG`, or `ASAN`; the default is `RELEASE`.
 - `build_test`: Whether to package test tools. Options are `ON` or `OFF`; the default is `OFF`.
+
+To choose Python explicitly, add `--python /absolute/path/to/python3.11`. Otherwise, selection uses `PYTHON_EXECUTABLE`, an active `VIRTUAL_ENV`, `PYTHON_HOME`, `/usr/local/python3.11/bin/python3`, then `python3` on PATH, in that order. An explicit `--python` overrides these defaults. Interpreter selection also applies to wheel packaging and all in-tree C++ examples. The selected Python must have pybind11, development headers, and a shared library installed; a venv uses its base installation's development files.
+
+```bash
+python3.11 -m venv .venv311
+source .venv311/bin/activate
+python -m pip install pybind11
+bash script/build_and_pack_run.sh --build_mode DEBUG --incremental --build_cpp_example ON
+```
+
+Incremental builds refresh the interpreter, headers, and library together. Other installed Python versions are unaffected.
 
 After a successful build, the run package is placed in `output/`, and the wheel package is placed in `output/memcache/wheel/`.
 
