@@ -16,6 +16,7 @@
 #include <unistd.h>
 
 #include <chrono>
+#include <future>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -25,6 +26,7 @@
 #include <vector>
 
 #include "gtest/gtest.h"
+#include "mmc_meta_net_client.h"
 #include "nlohmann/json.hpp"
 #include "mock_mmc_http_client.h"
 
@@ -223,7 +225,7 @@ void MmcMetaServiceHttpTest::MountSegments()
     initInfos.push_back(MmcLocalMemlInitInfo{kHttpInitInfoRankId, kHttpSegmentCapacityBytes});
 
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
-    ASSERT_EQ(metaManager_->Mount(locations, initInfos, blobMap, false), MMC_OK);
+    ASSERT_EQ(metaManager_->Mount(locations, initInfos, blobMap, StorageOptions{}), MMC_OK);
 }
 
 void MmcMetaServiceHttpTest::PrepareAllocatedKey()
@@ -710,7 +712,10 @@ TEST_F(MmcMetaServiceHttpTest, AllocAndBatchAllocDoNotRequireSeparatedStorageLoo
     // Fixture 已在 HBM 中预分配一个 32 KiB blob；这里改用空闲的 DRAM，避免两次新增分配耗尽 64 KiB HBM。
     const AllocOptions options(SIZE_32K, kHttpExpectedBlobCount, MEDIA_DRAM, {kHttpRankId},
                                ALLOC_FLAGS_GVA_MALLOC_MASK);
-    metaManager_->SetSsdMetadataMode(MMC_SSD_METADATA_SEPARATED);
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> storageBlobs;
+    ASSERT_EQ(metaManager_->Mount({{kHttpRankId, MEDIA_DRAM}}, {{kHttpInitInfoRankId, kHttpSegmentCapacityBytes}},
+                                  storageBlobs, StorageOptions{true, true}),
+              MMC_OK);
 
     AllocRequest allocRequest(allocKey, options, GenerateOperateId(kHttpRankId), kHttpRankId);
     AllocResponse allocResponse;
@@ -1220,4 +1225,76 @@ TEST_F(MmcMetaServiceHttpTest, MemoryEvict_LazyFlagOnSsdOnlyKey_ReportsEvicted)
     auto queryJson = nlohmann::json::parse(queryResponse->body);
     EXPECT_FALSE(queryJson.at("success").get<bool>());
     EXPECT_EQ(queryJson.at("error_message"), "Key not found");
+}
+
+TEST_F(MmcMetaServiceHttpTest, RegistrationRpcLatchesSeparationAndRejectsConflictingRank)
+{
+    constexpr uint32_t clientThreadCount = 2;
+    constexpr uint32_t conflictingRankOffset = 1;
+    constexpr int32_t timeoutMs = 30000;
+    auto client = MmcMakeRef<MetaNetClient>(metaServiceConfig_.discoveryURL, "metadataRegistrationTest");
+    NetEngineOptions options;
+    options.name = "metadataRegistrationTest";
+    options.threadCount = clientThreadCount;
+    options.rankId = kHttpRankId;
+    options.startListener = false;
+    options.tlsOption.tlsEnable = false;
+    ASSERT_EQ(client->Start(options), MMC_OK);
+    ASSERT_EQ(client->Connect(metaServiceConfig_.discoveryURL), MMC_OK);
+    BmRegisterRequest request;
+    request.rank_ = kHttpRankId;
+    request.mediaType_ = {MEDIA_DRAM};
+    request.addr_ = {kHttpInitInfoRankId};
+    request.capacity_ = {kHttpSegmentCapacityBytes};
+    request.ssdMetadataSeparated_ = false;
+    Response response;
+    ASSERT_EQ(client->SyncCall(request, response, timeoutMs), MMC_OK);
+    ASSERT_EQ(response.ret_, MMC_OK);
+    EXPECT_EQ(metaManager_->ValidateSsdMetadataSeparation(false), MMC_OK);
+    EXPECT_EQ(metaManager_->ValidateSsdMetadataSeparation(true), MMC_OK);
+    request.storageEnabled_ = true;
+    request.ssdMetadataSeparated_ = true;
+    ASSERT_EQ(client->SyncCall(request, response, timeoutMs), MMC_OK);
+    ASSERT_EQ(response.ret_, MMC_OK);
+    EXPECT_EQ(metaManager_->ValidateSsdMetadataSeparation(false), MMC_INVALID_PARAM);
+    EXPECT_TRUE(metaManager_->IsSsdMetadataSeparated());
+    ASSERT_EQ(client->SyncCall(request, response, timeoutMs), MMC_OK);
+    EXPECT_EQ(response.ret_, MMC_OK);
+    request.rank_ = kHttpRankId + conflictingRankOffset;
+    request.ssdMetadataSeparated_ = false;
+    ASSERT_EQ(client->SyncCall(request, response, timeoutMs), MMC_OK);
+    EXPECT_EQ(response.ret_, MMC_INVALID_PARAM);
+    EXPECT_FALSE(metaManager_->IsSsdAvailable(request.rank_));
+    EXPECT_EQ(metaManager_->ValidateSsdMetadataSeparation(false), MMC_INVALID_PARAM);
+    EXPECT_TRUE(metaManager_->IsSsdMetadataSeparated());
+    client->Stop();
+}
+
+TEST_F(MmcMetaServiceHttpTest, ConcurrentConflictingStorageRegistrationsAcceptOneSeparation)
+{
+    constexpr uint32_t localRank = 3;
+    constexpr uint32_t sharedRank = 5;
+    constexpr uint64_t memoryGva = 4096;
+    ASSERT_EQ(metaManager_->ValidateSsdMetadataSeparation(false), MMC_OK);
+    ASSERT_EQ(metaManager_->ValidateSsdMetadataSeparation(true), MMC_OK);
+    std::promise<void> ready;
+    auto gate = ready.get_future().share();
+    auto registerStorage = [&](uint32_t rank, bool separated) {
+        gate.wait();
+        std::vector<std::pair<std::string, MmcMemBlobDesc>> blobs;
+        return metaService_->BmRegister(rank, {MEDIA_DRAM}, {memoryGva}, {SIZE_32K}, blobs,
+                                        StorageOptions{true, separated});
+    };
+    auto local = std::async(std::launch::async, registerStorage, localRank, false);
+    auto shared = std::async(std::launch::async, registerStorage, sharedRank, true);
+    ready.set_value();
+    const auto localResult = local.get();
+    const auto sharedResult = shared.get();
+    EXPECT_TRUE((localResult == MMC_OK && sharedResult == MMC_INVALID_PARAM) ||
+                (sharedResult == MMC_OK && localResult == MMC_INVALID_PARAM));
+    const bool separated = sharedResult == MMC_OK;
+    EXPECT_EQ(metaManager_->IsSsdMetadataSeparated(), separated);
+    EXPECT_EQ(metaManager_->ValidateSsdMetadataSeparation(!separated), MMC_INVALID_PARAM);
+    EXPECT_EQ(metaManager_->IsSsdAvailable(localRank), localResult == MMC_OK);
+    EXPECT_EQ(metaManager_->IsSsdAvailable(sharedRank), sharedResult == MMC_OK);
 }

@@ -223,7 +223,7 @@ TEST_F(TestMmcMetaManager, BatchQuerySsdEvictionWakesPendingAndPreservesOtherKey
     auto mgr = proxy->GetMetaManager();
     std::vector<std::pair<std::string, MmcMemBlobDesc>> mountedBlobs;
     ASSERT_EQ(mgr->Mount({{rank, MEDIA_DRAM}, {rank, MEDIA_SSD}}, {{baseGva, capacity}, {baseGva, capacity}},
-                         mountedBlobs, true),
+                         mountedBlobs, StorageOptions{true}),
               MMC_OK);
 
     const std::vector<std::string> keys{"evicted_pending", "successful_pending", "readable_dram"};
@@ -308,7 +308,7 @@ TEST_F(TestMmcMetaManager, QueuedRewarmSsdEvictionPreservesReadableDram)
     ASSERT_EQ(mgr->Start(), MMC_OK);
     std::vector<std::pair<std::string, MmcMemBlobDesc>> mountedBlobs;
     ASSERT_EQ(mgr->Mount({{rank, MEDIA_DRAM}, {rank, MEDIA_SSD}}, {{baseGva, capacity}, {baseGva, capacity}},
-                         mountedBlobs, true),
+                         mountedBlobs, StorageOptions{true}),
               MMC_OK);
     const std::string key = "ssd_evicted_dram_readable";
     auto object = MmcMakeRef<MmcMemObjMeta>();
@@ -395,14 +395,61 @@ TEST_F(TestMmcMetaManager, SsdAvailabilityFollowsStorageRegistration)
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
     std::vector<MmcLocation> locs{loc};
     std::vector<MmcLocalMemlInitInfo> locInfos{locInfo};
-    ASSERT_EQ(metaMng->Mount(locs, locInfos, blobMap, true), MMC_OK);
+    ASSERT_EQ(metaMng->Mount(locs, locInfos, blobMap, StorageOptions{true}), MMC_OK);
     EXPECT_TRUE(metaMng->IsSsdAvailable(loc.rank_));
-    metaMng->SetSsdMetadataMode(MMC_SSD_METADATA_SEPARATED);
-    // 存储能力来自 LocalService 注册，不随 SSD 元数据管理模式变化。
-    EXPECT_TRUE(metaMng->IsSsdAvailable(loc.rank_));
+    EXPECT_EQ(metaMng->IsSsdMetadataSeparated(), false);
 
     ASSERT_EQ(metaMng->Unmount(loc), MMC_OK);
     EXPECT_FALSE(metaMng->IsSsdAvailable(loc.rank_));
+}
+
+TEST_F(TestMmcMetaManager, StorageSeparationIsResolvedBySuccessfulStorageMount)
+{
+    constexpr uint64_t defaultTtl = 2000;
+    constexpr uint16_t highWatermark = 70;
+    constexpr uint16_t lowWatermark = 60;
+    constexpr uint32_t firstRank = 3;
+    constexpr uint64_t memoryGva = 4096;
+    for (bool separated : {false, true}) {
+        auto manager = MmcMakeRef<MmcMetaManager>(defaultTtl, highWatermark, lowWatermark);
+        ASSERT_EQ(manager->Start(), MMC_OK);
+        std::vector<std::pair<std::string, MmcMemBlobDesc>> blobs;
+        std::vector<MmcLocation> locations{{firstRank, MEDIA_DRAM}};
+        std::vector<MmcLocalMemlInitInfo> infos{{memoryGva, SIZE_32K}};
+        ASSERT_EQ(manager->Mount({}, {}, blobs, StorageOptions{true, separated}), MMC_OK);
+        EXPECT_EQ(manager->ValidateSsdMetadataSeparation(false), MMC_OK);
+        EXPECT_EQ(manager->ValidateSsdMetadataSeparation(true), MMC_OK);
+        EXPECT_FALSE(manager->IsSsdMetadataSeparated());
+        ASSERT_EQ(manager->Mount(locations, infos, blobs, StorageOptions{false, separated}), MMC_OK);
+        EXPECT_EQ(manager->ValidateSsdMetadataSeparation(false), MMC_OK);
+        EXPECT_EQ(manager->ValidateSsdMetadataSeparation(true), MMC_OK);
+        EXPECT_EQ(manager->Mount(locations, {}, blobs, StorageOptions{true, separated}), MMC_INVALID_PARAM);
+        EXPECT_EQ(manager->ValidateSsdMetadataSeparation(false), MMC_OK);
+        EXPECT_EQ(manager->ValidateSsdMetadataSeparation(true), MMC_OK);
+        MmcMemBlobDesc rebuildingBlob;
+        rebuildingBlob.rank_ = firstRank;
+        rebuildingBlob.mediaType_ = MEDIA_DRAM;
+        rebuildingBlob.gva_ = memoryGva;
+        rebuildingBlob.size_ = memoryGva;
+        blobs.emplace_back("failed-storage-registration", rebuildingBlob);
+        // The already-started memory allocator rejects a rebuild batch.
+        EXPECT_EQ(manager->Mount(locations, infos, blobs, StorageOptions{true, separated}), MMC_ERROR);
+        EXPECT_EQ(manager->ValidateSsdMetadataSeparation(false), MMC_OK);
+        EXPECT_EQ(manager->ValidateSsdMetadataSeparation(true), MMC_OK);
+        EXPECT_FALSE(manager->IsSsdAvailable(firstRank));
+        blobs.clear();
+        ASSERT_EQ(manager->Mount(locations, infos, blobs, StorageOptions{true, separated}), MMC_OK);
+        EXPECT_EQ(manager->ValidateSsdMetadataSeparation(!separated), MMC_INVALID_PARAM);
+        EXPECT_EQ(manager->IsSsdMetadataSeparated(), separated);
+        ASSERT_EQ(manager->Mount(locations, infos, blobs, StorageOptions{true, separated}), MMC_OK);
+        EXPECT_EQ(manager->ValidateSsdMetadataSeparation(separated), MMC_OK);
+        EXPECT_EQ(manager->ValidateSsdMetadataSeparation(!separated), MMC_INVALID_PARAM);
+        EXPECT_EQ(manager->IsSsdMetadataSeparated(), separated);
+        ASSERT_EQ(manager->Unmount(locations.front()), MMC_OK);
+        EXPECT_EQ(manager->ValidateSsdMetadataSeparation(!separated), MMC_INVALID_PARAM);
+        EXPECT_EQ(manager->IsSsdMetadataSeparated(), separated);
+        manager->Stop();
+    }
 }
 
 TEST_F(TestMmcMetaManager, GetRandomStorageRankUsesStorageRegistration)
@@ -423,17 +470,16 @@ TEST_F(TestMmcMetaManager, GetRandomStorageRankUsesStorageRegistration)
     MmcLocation allocatorOnlyLoc{allocatorOnlyRank, MEDIA_DRAM};
     uint32_t storageRank = UINT32_MAX;
     EXPECT_EQ(metaMng->GetRandomStorageRank(unregisteredRank, storageRank), MMC_INVALID_PARAM);
-    metaMng->SetSsdMetadataMode(MMC_SSD_METADATA_SEPARATED);
-    EXPECT_EQ(metaMng->GetRandomStorageRank(unregisteredRank, storageRank), MMC_SSD_NOT_AVAILABLE);
+    EXPECT_EQ(metaMng->GetRandomStorageRank(unregisteredRank, storageRank), MMC_INVALID_PARAM);
 
     std::vector<MmcLocation> allocatorOnlyLocs{allocatorOnlyLoc};
     std::vector<MmcLocalMemlInitInfo> allocatorOnlyInfos{locInfo};
-    ASSERT_EQ(metaMng->Mount(allocatorOnlyLocs, allocatorOnlyInfos, blobMap, false), MMC_OK);
-    EXPECT_EQ(metaMng->GetRandomStorageRank(allocatorOnlyRank, storageRank), MMC_SSD_NOT_AVAILABLE);
+    ASSERT_EQ(metaMng->Mount(allocatorOnlyLocs, allocatorOnlyInfos, blobMap, StorageOptions{}), MMC_OK);
+    EXPECT_EQ(metaMng->GetRandomStorageRank(allocatorOnlyRank, storageRank), MMC_INVALID_PARAM);
 
     std::vector<MmcLocation> requestLocs{requestLoc};
     std::vector<MmcLocalMemlInitInfo> requestInfos{locInfo};
-    ASSERT_EQ(metaMng->Mount(requestLocs, requestInfos, blobMap, true), MMC_OK);
+    ASSERT_EQ(metaMng->Mount(requestLocs, requestInfos, blobMap, StorageOptions{true, true}), MMC_OK);
     storageRank = UINT32_MAX;
     ASSERT_EQ(metaMng->GetRandomStorageRank(requestRank, storageRank), MMC_OK);
     EXPECT_EQ(storageRank, requestRank);
@@ -444,7 +490,7 @@ TEST_F(TestMmcMetaManager, GetRandomStorageRankUsesStorageRegistration)
 
     std::vector<MmcLocation> anotherStorageLocs{anotherStorageLoc};
     std::vector<MmcLocalMemlInitInfo> anotherStorageInfos{locInfo};
-    ASSERT_EQ(metaMng->Mount(anotherStorageLocs, anotherStorageInfos, blobMap, true), MMC_OK);
+    ASSERT_EQ(metaMng->Mount(anotherStorageLocs, anotherStorageInfos, blobMap, StorageOptions{true, true}), MMC_OK);
     storageRank = UINT32_MAX;
     ASSERT_EQ(metaMng->GetRandomStorageRank(anotherStorageRank, storageRank), MMC_OK);
     EXPECT_EQ(storageRank, anotherStorageRank);

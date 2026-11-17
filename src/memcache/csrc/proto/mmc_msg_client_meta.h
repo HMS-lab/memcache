@@ -16,7 +16,6 @@
 #include "mmc_mem_blob.h"
 #include "mmc_msg_base.h"
 #include "mmc_msg_packer.h"
-#include "mmc_storage_mode.h"
 #include "mmc_client_metric_snapshot.h"
 
 namespace ock {
@@ -548,53 +547,6 @@ struct Response : MsgBase {
     }
 };
 
-struct GetExternalConfigRequest : MsgBase {
-    GetExternalConfigRequest() : MsgBase{0, ML_GET_EXTERNAL_CONFIG_REQ, 0} {}
-
-    Result Serialize(NetMsgPacker &packer) const override
-    {
-        packer.Serialize(msgVer);
-        packer.Serialize(msgId);
-        packer.Serialize(destRankId);
-        return MMC_OK;
-    }
-
-    Result Deserialize(NetMsgUnpacker &packer) override
-    {
-        packer.Deserialize(msgVer);
-        packer.Deserialize(msgId);
-        packer.Deserialize(destRankId);
-        return MMC_OK;
-    }
-};
-
-struct GetExternalConfigResponse : MsgBase {
-    Result ret_{MMC_OK};
-    uint32_t ssdMetadataMode_{MMC_SSD_METADATA_AGGREGATED};
-
-    GetExternalConfigResponse() : MsgBase{0, ML_GET_EXTERNAL_CONFIG_RESP, 0} {}
-
-    Result Serialize(NetMsgPacker &packer) const override
-    {
-        packer.Serialize(msgVer);
-        packer.Serialize(msgId);
-        packer.Serialize(destRankId);
-        packer.Serialize(ret_);
-        packer.Serialize(ssdMetadataMode_);
-        return MMC_OK;
-    }
-
-    Result Deserialize(NetMsgUnpacker &packer) override
-    {
-        packer.Deserialize(msgVer);
-        packer.Deserialize(msgId);
-        packer.Deserialize(destRankId);
-        packer.Deserialize(ret_);
-        packer.Deserialize(ssdMetadataMode_);
-        return MMC_OK;
-    }
-};
-
 struct BatchUpdateResponse : MsgBase {
     std::vector<Result> results_;
 
@@ -632,6 +584,7 @@ struct BmRegisterRequest : MsgBase {
     std::vector<uint64_t> capacity_{};
     std::vector<std::pair<std::string, MmcMemBlobDesc>> blobList_;
     bool storageEnabled_{false};
+    bool ssdMetadataSeparated_{false};
 
     BmRegisterRequest() : MsgBase{0, ML_BM_REGISTER_REQ, 0} {}
 
@@ -648,6 +601,7 @@ struct BmRegisterRequest : MsgBase {
         packer.Serialize(capacity_);
         packer.Serialize(blobList_);
         packer.Serialize(storageEnabled_);
+        packer.Serialize(ssdMetadataSeparated_);
         return MMC_OK;
     }
 
@@ -664,6 +618,7 @@ struct BmRegisterRequest : MsgBase {
         MMC_RETURN_ERROR(packer.Deserialize(capacity_), "deserialize capacity failed");
         MMC_RETURN_ERROR(packer.Deserialize(blobList_), "deserialize blobList failed");
         MMC_RETURN_ERROR(packer.Deserialize(storageEnabled_), "deserialize storageEnabled failed");
+        MMC_RETURN_ERROR(packer.Deserialize(ssdMetadataSeparated_), "deserialize ssdMetadataSeparated failed");
         return MMC_OK;
     }
 };

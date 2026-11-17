@@ -144,13 +144,13 @@ public:
     }
 
     Result Mount(const std::vector<MmcLocation> &loc, const std::vector<MmcLocalMemlInitInfo> &localMemInitInfo,
-                 std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList, bool storageEnabled,
+                 std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList, const StorageOptions &storageOptions,
                  bool enableMaxValueMode = false)
     {
         const uint32_t rank = loc.empty() ? UINT32_MAX : loc[0].rank_;
         MmcMetaMetricManager &metricManager = MmcMetaMetricManager::GetInstance();
         metricManager.IncrementRequestCounter(RestMetricType::MOUNT, rank);
-        Result ret = metaMangerPtr_->Mount(loc, localMemInitInfo, blobList, storageEnabled, enableMaxValueMode);
+        Result ret = metaMangerPtr_->Mount(loc, localMemInitInfo, blobList, storageOptions, enableMaxValueMode);
         IncrementResultCounter(metricManager, RestMetricType::MOUNT, ret, rank);
         return ret;
     }

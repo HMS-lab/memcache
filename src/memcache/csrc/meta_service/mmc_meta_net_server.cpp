@@ -57,8 +57,6 @@ Result ock::mmc::MetaNetServer::Start(NetEngineOptions &options)
                                       std::bind(&MetaNetServer::HandleAlloc, this, std::placeholders::_1));
     server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::ML_BM_REGISTER_REQ,
                                       std::bind(&MetaNetServer::HandleBmRegister, this, std::placeholders::_1));
-    server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::ML_GET_EXTERNAL_CONFIG_REQ,
-                                      std::bind(&MetaNetServer::HandleGetExternalConfig, this, std::placeholders::_1));
     server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::ML_PING_REQ,
                                       std::bind(&MetaNetServer::HandlePing, this, std::placeholders::_1));
     server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::ML_UPDATE_REQ,
@@ -129,24 +127,14 @@ Result MetaNetServer::HandleBmRegister(const NetContextPtr &context)
         return getResult;
     }
     TP_TRACE_BEGIN(TP_MMC_META_BM_REGISTER);
+    const StorageOptions storageOptions{req.storageEnabled_, req.ssdMetadataSeparated_};
     auto result = metaService_->BmRegister(req.rank_, req.mediaType_, req.addr_, req.capacity_, req.blobList_,
-                                           req.storageEnabled_, req.backendId_, req.role_);
+                                           storageOptions, req.backendId_, req.role_);
     TP_TRACE_END(TP_MMC_META_BM_REGISTER, result);
     MMC_LOG_TRACE("HandleBmRegister rank: " << req.rank_ << ", storageEnabled: " << req.storageEnabled_
                                             << ", rebuild blob size: " << req.blobList_.size() << ", ret: " << result);
     Response resp;
     resp.ret_ = result;
-    return context->Reply(req.msgId, resp);
-}
-
-Result MetaNetServer::HandleGetExternalConfig(const NetContextPtr &context)
-{
-    MMC_ASSERT_LOG_AND_RETURN(metaService_ != nullptr, "metaService_ is nullptr", MMC_ERROR);
-    MMC_ASSERT_LOG_AND_RETURN(context != nullptr, "context is nullptr", MMC_ERROR);
-    GetExternalConfigRequest req;
-    context->GetRequest<GetExternalConfigRequest>(req);
-    GetExternalConfigResponse resp;
-    resp.ssdMetadataMode_ = metaService_->Options().ssdMetadataMode;
     return context->Reply(req.msgId, resp);
 }
 

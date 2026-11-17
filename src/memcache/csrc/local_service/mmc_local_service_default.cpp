@@ -19,7 +19,6 @@
 
 #include "smem_bm_api.h"
 #include "mmc_meta_net_client.h"
-#include "mmc_storage_mode.h"
 #include "mmc_msg_client_meta.h"
 #include "mmc_ptracer.h"
 #include "mmc_functions.h"
@@ -34,11 +33,6 @@ constexpr int CLIENT_THREAD_COUNT = 2;
 constexpr size_t kSsdRebuildQueryBatchSize = 1024;
 
 namespace {
-bool IsSsdMetadataSeparated(uint32_t mode)
-{
-    return mode == MMC_SSD_METADATA_SEPARATED;
-}
-
 bool IsEtcdStoreUrl(const char *storeUrl)
 {
     return storeUrl != nullptr && (std::string(storeUrl).find("etcd://") == 0);
@@ -140,14 +134,6 @@ Result MmcLocalServiceDefault::Start(const mmc_local_service_config_t &config)
             DestroyBm();
             return MMC_ERROR;
         }
-    }
-
-    Result configRet = GetExternalConfig();
-    if (configRet != MMC_OK) {
-        MMC_LOG_ERROR("Failed to query initialization config from MetaService, ret=" << configRet);
-        metaNetClient_->Stop();
-        DestroyBm();
-        return configRet;
     }
 
     if (options_.storageEnabled) {
@@ -337,29 +323,6 @@ Result MmcLocalServiceDefault::InitBm()
     return ret;
 }
 
-Result MmcLocalServiceDefault::GetExternalConfig()
-{
-    GetExternalConfigRequest request;
-    GetExternalConfigResponse response;
-    Result ret = SyncCallMeta(request, response, TIMEOUT_THIRTY);
-    if (ret != MMC_OK) {
-        MMC_LOG_ERROR("Get external config RPC failed, rank=" << options_.rankId << ", ret=" << ret);
-        return ret;
-    }
-    if (response.ret_ != MMC_OK) {
-        MMC_LOG_ERROR("Get external config failed on MetaService, rank=" << options_.rankId
-                                                                         << ", ret=" << response.ret_);
-        return response.ret_;
-    }
-    if (response.ssdMetadataMode_ > MMC_SSD_METADATA_SEPARATED) {
-        MMC_LOG_ERROR("Invalid SSD metadata mode returned by MetaService: " << response.ssdMetadataMode_);
-        return MMC_INVALID_PARAM;
-    }
-    ssdMetadataMode_ = static_cast<SsdMetadataMode>(response.ssdMetadataMode_);
-    MMC_LOG_TRACE("Resolved SSD metadata mode from MetaService: " << response.ssdMetadataMode_);
-    return MMC_OK;
-}
-
 Result MmcLocalServiceDefault::UnregisterBm()
 {
     MMC_RETURN_ERROR(bmProxyPtr_ == nullptr, "bm proxy has not been initialized.");
@@ -477,7 +440,7 @@ Result MmcLocalServiceDefault::ReconnectBm()
 {
     MMC_RETURN_ERROR(bmProxyPtr_ == nullptr, "bm proxy has not been initialized.");
     std::unique_lock<std::mutex> lockGuard(blobMutex_);
-    if (ubsIoProxyPtr_ == nullptr || IsSsdMetadataSeparated(ssdMetadataMode_)) {
+    if (ubsIoProxyPtr_ == nullptr || ubsIoProxyPtr_->IsSsdMetadataSeparated()) {
         return RebuildBm();
     }
 
@@ -521,6 +484,7 @@ void MmcLocalServiceDefault::RegisterBaseInfo(BmRegisterRequest &req)
     req.backendId_ = ResolveBackendId();
     req.role_ = options_.role;
     req.storageEnabled_ = options_.storageEnabled;
+    req.ssdMetadataSeparated_ = ubsIoProxyPtr_ != nullptr && ubsIoProxyPtr_->IsSsdMetadataSeparated();
     for (MediaType type = MEDIA_HBM; type != MEDIA_NONE;) {
         uint64_t gva = bmProxyPtr_->GetGva(type);
         uint64_t capacity = bmProxyPtr_->GetCapacity(type);
@@ -546,21 +510,18 @@ Result MmcLocalServiceDefault::InitUbsIo(int32_t deviceId, const std::string &co
                               "metaNetClient_ not ready when registering UBS IO callback", MMC_NOT_INITIALIZED);
     ubsIoProxyPtr_ = ubsIoProxy;
 
-    // 只有 aggregated 模式才用 SSD 生命周期事件更新集中式元数据；separated 模式由 UBSIO 管理，
-    // MetaService 本来就不保存 SSD 条目，因此无需更新或删除。
-    if (!IsSsdMetadataSeparated(ssdMetadataMode_)) {
-        ubsIoProxy->SetMetaEventCallback([this](int type, const std::vector<std::string> &keys) {
-            ubsioEventPool_->Enqueue([this, type, keys]() { HandleUbsIoMetaEvents(type, keys); });
-        });
-    }
+    ubsIoProxy->SetMetaEventCallback([this](int type, const std::vector<std::string> &keys) {
+        ubsioEventPool_->Enqueue([this, type, keys]() { HandleUbsIoMetaEvents(type, keys); });
+    });
 
     auto ret = ubsIoProxy->InitUbsIo(deviceId, confPath);
     if (ret != MMC_OK) {
         ubsIoProxy->SetMetaEventCallback(nullptr);
+        ubsIoProxyPtr_ = nullptr;
         return ret;
     }
 
-    if (!IsSsdMetadataSeparated(ssdMetadataMode_)) {
+    if (!ubsIoProxyPtr_->IsSsdMetadataSeparated()) {
         ret = RecoverBlob(ubsIoProxy);
         if (ret != MMC_OK) {
             MMC_LOG_ERROR("Failed to recover blobMap from ubs, name=" << name_ << ", ret=" << ret);
@@ -684,7 +645,7 @@ std::vector<size_t> MmcLocalServiceDefault::ProcessBackupMetadata(const std::vec
     std::lock_guard<std::mutex> guard(blobMutex_);
     size_t unexpectedOps = 0;
     for (size_t i = 0; i < length; i++) {
-        if (IsSsdMetadataSeparated(ssdMetadataMode_) && blobs[i].mediaType_ == MEDIA_SSD) {
+        if (blobs[i].mediaType_ == MEDIA_SSD && ubsIoProxyPtr_ != nullptr && ubsIoProxyPtr_->IsSsdMetadataSeparated()) {
             keyResults[i] = MMC_OK;
             continue;
         }
@@ -754,7 +715,7 @@ size_t MmcLocalServiceDefault::ExecuteFlushBatch(BatchIoParams &params, const st
     size_t successCnt = 0;
     for (size_t i = 0; i < params.keys.size(); ++i) {
         if (batchRet == MMC_OK && batchResults[i] == 0) {
-            if (IsSsdMetadataSeparated(ssdMetadataMode_)) {
+            if (ubsIoProxyPtr_->IsSsdMetadataSeparated()) {
                 keyResults[params.validIdx[i]] = MMC_OK;
                 ++successCnt;
                 continue;

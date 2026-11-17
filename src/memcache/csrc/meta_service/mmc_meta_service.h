@@ -56,17 +56,17 @@ public:
     //   bm            各介质内存池起始地址（base mem），长度与 mediaType 一致
     //   capacity      各介质内存池容量，长度与 mediaType 一致
     //   blobList      已存在的内存块列表（注册时随附，供元数据恢复）
-    //   storageEnabled 是否启用 SSD 存储池
+    //   storageOptions 是否启用 SSD 存储池及其元数据分离模式
     //   backendId     节点的 backendId，通常取节点连接 IP/域名；理想情况下同机器的多个
     //                 LocalService share 同一 backendId。用途：1) 节点亲和分配按 backendId 维度
     //                 选择目标；2) kvevent key存入删除事件/广播。
-    //   enableMaxValueMode 是否启用padding模式，用于解决外部碎片问题
     //   role          节点角色："writer"（写者，如 P，会有数据写入）/ "memory"（纯内存提供者，如 D，
     //                 只贡献内存不参与写入）。节点亲和分配时，写者的分布表按角色构建，
     //                 让写者均匀地把数据分流到内存节点上。
     Result BmRegister(uint32_t rank, std::vector<uint16_t> mediaType, std::vector<uint64_t> bm,
                       std::vector<uint64_t> capacity, std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList,
-                      bool storageEnabled = false, const std::string &backendId = "", const std::string &role = "");
+                      const StorageOptions &storageOptions = {}, const std::string &backendId = "",
+                      const std::string &role = "");
 
     Result BmUnregister(uint32_t rank, uint16_t mediaType);
 

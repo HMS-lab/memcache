@@ -140,8 +140,6 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
                      "Failed to start meta mgr proxy of meta service " << name_);
     MMC_RETURN_ERROR(metaMgrProxy_->UpdateDefragEvictThreshold(options_.defragEvictThreshold),
                      "Failed to apply defrag evict waste percent threshold of meta service " << name_);
-    // 模式由 MetaService 启动配置统一确定，不能再由任一 rank 的注册请求改变。
-    metaMgrProxy_->GetMetaManager()->SetSsdMetadataMode(static_cast<SsdMetadataMode>(options_.ssdMetadataMode));
 
     metaBackUpMgrPtr_ = MMCMetaBackUpMgrFactory::GetInstance("DefaultMetaBackup");
     auto backupConf = MmcMakeRef<MMCMetaBackUpConfDefault>(metaNetServer_);
@@ -263,8 +261,9 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
 
 Result MmcMetaService::BmRegister(uint32_t rank, std::vector<uint16_t> mediaType, std::vector<uint64_t> bm,
                                   std::vector<uint64_t> capacity,
-                                  std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList, bool storageEnabled,
-                                  const std::string &backendId, const std::string &role)
+                                  std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList,
+                                  const StorageOptions &storageOptions, const std::string &backendId,
+                                  const std::string &role)
 {
     std::lock_guard<std::mutex> guard(mutex_);
     if (!started_) {
@@ -288,8 +287,14 @@ Result MmcMetaService::BmRegister(uint32_t rank, std::vector<uint16_t> mediaType
     }
     MMC_ASSERT_LOG_AND_RETURN(metaBackUpMgrPtr_ != nullptr, "metaBackUpMgrPtr_ is nullptr", MMC_MALLOC_FAILED);
     MMC_ASSERT_LOG_AND_RETURN(metaMgrProxy_ != nullptr, "metaMgrProxy_ is nullptr", MMC_MALLOC_FAILED);
+    if (storageOptions.storageEnabled) {
+        MMC_RETURN_ERROR(
+            metaMgrProxy_->GetMetaManager()->ValidateSsdMetadataSeparation(storageOptions.ssdMetadataSeparated),
+            "Storage metadata separation rejected, rank=" << rank
+                                                          << ", separated=" << storageOptions.ssdMetadataSeparated);
+    }
     MMC_RETURN_ERROR(metaBackUpMgrPtr_->Load(blobList), "Mount loc { " << rank << " } load backup failed");
-    MMC_RETURN_ERROR(metaMgrProxy_->Mount(locs, infos, blobList, storageEnabled, options_.enableMaxValueMode),
+    MMC_RETURN_ERROR(metaMgrProxy_->Mount(locs, infos, blobList, storageOptions, options_.enableMaxValueMode),
                      "Mount loc { " << rank << " } failed");
     metaBackUpMgrPtr_->ActivateRank(rank);
     MMC_LOG_TRACE("Mount loc {rank:" << rank << ", rebuild size:" << blobList.size() << ", mediaNum:" << typeNum

@@ -27,7 +27,6 @@
 
 #include "mmc_defrag_evict.h"
 #include "mmc_global_allocator.h"
-#include "mmc_storage_mode.h"
 #include "mmc_mem_obj_meta.h"
 #include "mmc_meta_container.h"
 #include "mmc_meta_backup_mgr.h"
@@ -288,8 +287,9 @@ public:
                  std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList, bool enableMaxValueMode = false);
 
     Result Mount(const std::vector<MmcLocation> &locs, const std::vector<MmcLocalMemlInitInfo> &localMemInitInfos,
-                 std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList, bool storageEnabled,
+                 std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList, const StorageOptions &storageOptions,
                  bool enableMaxValueMode = false);
+
     /**
      * @brief unmount the mempool contributor at given location
      * @param loc          [in] location of the mem pool contributor to be unmounted
@@ -515,13 +515,14 @@ public:
         return !ssdEnabledRanks_.empty();
     }
 
-    /**
-     * @brief 设置 SSD 元数据管理模式
-     * @param mode             [in] 初始化时确定的元数据管理模式
-     */
-    void SetSsdMetadataMode(SsdMetadataMode mode)
+    Result ValidateSsdMetadataSeparation(bool separated) const
     {
-        ssdMetadataMode_ = mode;
+        if (ssdMetadataSeparationResolved_.load(std::memory_order_acquire) && IsSsdMetadataSeparated() != separated) {
+            MMC_LOG_ERROR("SSD metadata separation mismatch, current=" << IsSsdMetadataSeparated()
+                                                                       << ", reported=" << separated);
+            return MMC_INVALID_PARAM;
+        }
+        return MMC_OK;
     }
 
     /**
@@ -529,7 +530,7 @@ public:
      */
     bool IsSsdMetadataSeparated() const
     {
-        return ssdMetadataMode_ == MMC_SSD_METADATA_SEPARATED;
+        return ssdMetadataSeparated_.load(std::memory_order_acquire);
     }
 
     /**
@@ -871,8 +872,9 @@ private:
     MmcThreadPoolPtr removeThreadPool_;
     // EraseIf 并行执行专用池：线程数按 shard 数对齐（上限 kShardLruPoolMax）
     MmcThreadPoolPtr shardLruThreadPool_;
-    // 由 MetaService 冷启动配置统一设置。
-    SsdMetadataMode ssdMetadataMode_{MMC_SSD_METADATA_AGGREGATED};
+    // 由首次成功的存储注册确定，在当前 manager 生命周期内保持固定。
+    std::atomic<bool> ssdMetadataSeparated_{false};
+    std::atomic<bool> ssdMetadataSeparationResolved_{false};
     std::unordered_set<uint32_t> ssdEnabledRanks_;
     mutable std::mutex ssdMutex_;
 };

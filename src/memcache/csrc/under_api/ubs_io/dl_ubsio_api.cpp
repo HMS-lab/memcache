@@ -39,6 +39,7 @@ ubsio_batch_free_addressFunc DlUbsioApi::pUbsioBatchFreeAddress = nullptr;
 ubsio_register_meta_event_callbackFunc DlUbsioApi::pUbsioRegisterMetaEventCallback = nullptr;
 ubsio_kv_cache_exitFunc DlUbsioApi::pUbsioKvCacheExit = nullptr;
 ubsio_get_resource_infoFunc DlUbsioApi::pUbsioGetResourceInfo = nullptr;
+UbsioGetUnderFsTypeFunc DlUbsioApi::pUbsioGetUnderFsType = nullptr;
 ubsio_scan_keyFunc DlUbsioApi::pUbsioKvCacheScanKey = nullptr;
 ubsio_free_scan_key_resultFunc DlUbsioApi::pUbsioKvCacheFreeScanKeyResult = nullptr;
 
@@ -90,6 +91,7 @@ Result DlUbsioApi::LoadLibrary()
                 "UbsioKvCacheRegisterMetaEventCallback");
     DL_LOAD_SYM(pUbsioKvCacheExit, ubsio_kv_cache_exitFunc, ubsioHandle, "UbsioKvCacheExit");
     DlLoadSymOptional(pUbsioGetResourceInfo, ubsioHandle, "UbsioGetResourceInfo");
+    DL_LOAD_SYM(pUbsioGetUnderFsType, UbsioGetUnderFsTypeFunc, ubsioHandle, "UbsioGetUnderFsType");
     DlLoadSymOptional(pUbsioKvCacheScanKey, ubsioHandle, "UbsioKvCacheScanKey");
     DlLoadSymOptional(pUbsioKvCacheFreeScanKeyResult, ubsioHandle, "UbsioKvCacheFreeScanKeyResult");
 
@@ -105,6 +107,7 @@ void DlUbsioApi::CleanupLibrary()
     }
 
     pUbsioClientInit = nullptr;
+    pUbsioGetUnderFsType = nullptr;
     pUbsioPut = nullptr;
     pUbsioGet = nullptr;
     pUbsioExist = nullptr;

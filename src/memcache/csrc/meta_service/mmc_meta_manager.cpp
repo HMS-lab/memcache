@@ -2007,14 +2007,14 @@ Result MmcMetaManager::Mount(const MmcLocation &loc, const MmcLocalMemlInitInfo 
 
 Result MmcMetaManager::Mount(const std::vector<MmcLocation> &locs,
                              const std::vector<MmcLocalMemlInitInfo> &localMemInitInfos,
-                             std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList, bool storageEnabled,
-                             bool enableMaxValueMode)
+                             std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList,
+                             const StorageOptions &storageOptions, bool enableMaxValueMode)
 {
     if (locs.size() != localMemInitInfos.size()) {
         MMC_LOG_ERROR("Mount: loc size:" << locs.size() << " != localMemInitInfo size:" << localMemInitInfos.size());
         return MMC_INVALID_PARAM;
     }
-    if (storageEnabled && IsSsdMetadataSeparated()) {
+    if (storageOptions.storageEnabled && storageOptions.ssdMetadataSeparated) {
         // separated 模式只重建内存层元数据，SSD 文件及其生命周期由 UBSIO 管理。
         blobList.erase(std::remove_if(blobList.begin(), blobList.end(),
                                       [](const auto &entry) {
@@ -2041,12 +2041,15 @@ Result MmcMetaManager::Mount(const std::vector<MmcLocation> &locs,
                                                     << " mediaType_: " << locs[i - 1].mediaType_);
             }
         }
-    } else if (storageEnabled && !locs.empty()) {
+    } else if (storageOptions.storageEnabled && !locs.empty()) {
+        ssdMetadataSeparated_.store(storageOptions.ssdMetadataSeparated, std::memory_order_release);
+        ssdMetadataSeparationResolved_.store(true, std::memory_order_release);
         std::lock_guard<std::mutex> guard(ssdMutex_);
         ssdEnabledRanks_.insert(locs.front().rank_);
-        MMC_LOG_TRACE("Storage enabled for rank=" << locs.front().rank_);
+        MMC_LOG_TRACE("Storage enabled for rank=" << locs.front().rank_
+                                                  << ", separated=" << storageOptions.ssdMetadataSeparated);
     }
-    return MMC_OK;
+    return ret;
 }
 
 Result MmcMetaManager::RebuildMeta(std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList)
