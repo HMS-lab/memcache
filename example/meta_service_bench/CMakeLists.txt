@@ -94,7 +94,7 @@ else ()
             ${PROJECT_3RDPARTY_SRC_DIR}/prometheus-cpp-lite/core/include
     )
 
-    target_link_libraries(bench_meta_service PUBLIC mmc_static pthread dl)
+    target_link_libraries(bench_meta_service PUBLIC mmc_static Python::Python pthread dl)
     target_link_directories(bench_meta_service PUBLIC
             ${PROJECT_OUTPUT_PATH}/acc_links/lib64/
             ${PROJECT_3RDPARTY_BIN_DIR}/spdlog/lib

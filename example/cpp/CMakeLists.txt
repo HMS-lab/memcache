@@ -99,9 +99,8 @@ else ()
     add_executable(memcache_cpp_test memcache_cpp_test.cpp)
     target_link_libraries(memcache_cpp_test PUBLIC mmc_shared)
     # 查找 Python 开发库
-    find_package(Python3 REQUIRED COMPONENTS Development)
     target_link_libraries(memcache_cpp_test PUBLIC
-            Python3::Python  # 添加 Python 库
+            Python::Python  # 添加 Python 库
             pthread
             dl
     )

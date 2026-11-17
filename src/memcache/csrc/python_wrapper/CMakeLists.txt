@@ -1,11 +1,4 @@
 file(GLOB SOURCES "*.cpp")
-set(PYTHON_EXECUTABLE "python3")
-execute_process(
-        COMMAND ${PYTHON_EXECUTABLE} -c "import sys; print([s for s in sys.path if 'packages' in s][0])"
-        OUTPUT_VARIABLE PYTHON_SYS_PATH
-)
-string(STRIP ${PYTHON_SYS_PATH} PYTHON_SYS_PATH)
-
 set(PYTHON_PACKAGE_NAME "_pymmc")
 
 find_package(pybind11 REQUIRED)

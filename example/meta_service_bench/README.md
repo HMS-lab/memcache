@@ -13,6 +13,17 @@ bash script/build_and_pack_run.sh --build_mode DEBUG --incremental --build_cpp_e
 ./build/example/meta_service_bench/bench_meta_service_async_test
 ```
 
+An activated Python 3.11 virtual environment is selected automatically:
+
+```bash
+python3.11 -m venv .venv311
+source .venv311/bin/activate
+python -m pip install pybind11
+bash script/build_and_pack_run.sh --build_mode DEBUG --incremental --build_cpp_example ON
+```
+
+Alternatively, pass `--python /absolute/path/to/python3.11`. The selected interpreter supplies its own headers and shared-library paths, including base-installation paths for a venv. Matching Python development files are required. Incremental builds refresh the Python selection; manual CMake cache edits are unnecessary.
+
 The local test executable is built with the example and is not installed in the runtime package. Building requires the repository dependencies, including pybind11, spdlog, and MemFabric. Standalone CMake integration is retained for existing users with installed libraries exporting internal symbols; the in-tree static-library build is recommended.
 
 ## Run
