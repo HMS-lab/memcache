@@ -12,7 +12,7 @@
 
 【模型权重】：GLM-5.1-w8a8c8-MTP
 
-**注意：由于MemCache在A2上的优选方案（基于卡侧ROCE传输的多机池化）对NPU驱动固件和操作系统PAGESIZE有要求，部分客户环境不符合，本案例中采用了MemCache备选方案（基于PCIE传输的单机L2池化），消解了底软不兼容的问题。**
+**注意：由于MemCache在A2上的优选方案（基于卡侧ROCE传输的多机池化）对NPU驱动固件有要求，部分客户环境不符合，本案例中采用了MemCache备选方案（基于PCIE传输的单机L2池化），消解了底软不兼容的问题。**
 
 【NPU驱动固件】：无特殊要求
 
@@ -49,11 +49,11 @@ vllm-ascend官方镜像中已安装memcache及其配套，可通过如下方式�
 pip list | grep mem
 ```
 
-目前推荐的稳定版本为1.1.5，安装命令为：
+目前推荐的稳定版本为1.3.1，安装命令为：
 
 ```shell
-pip install memfabric_hybrid==1.1.5
-pip install memcache_hybrid==1.1.5
+pip install memfabric_hybrid==1.3.1 --force-reinstall --no-deps
+pip install memcache_hybrid==1.3.1 --force-reinstall --no-deps
 ```
 
 如果因网络原因无法在线安装，可以在 [PyPI · The Python Package Index](https://pypi.org/) 下载安装包离线安装。

@@ -18,7 +18,7 @@ DeepSeek-V4 拥有百万字超长上下文，在 Agent 能力、世界知识和�
 
 【NPU驱动固件】：不低于25.5.1
 
-【OS PAGESIZE】：使用命令 `getconf PAGESIZE` 查询系统页大小，结果为4K方可使用memcache。若查询结果为64K，需要考虑更换OS。
+【OS PAGESIZE】：使用命令 `getconf PAGESIZE` 查询系统页大小，若结果为64K则要求memcache/memfabric版本不低于1.3.1
 
 ## 测试结果
 
@@ -55,11 +55,11 @@ vllm-ascend官方镜像中已安装memcache及其配套，可通过如下方式�
 pip list | grep mem
 ```
 
-目前推荐的稳定版本为1.1.5，安装命令为：
+目前推荐的稳定版本为1.3.1，安装命令为：
 
 ```shell
-pip install memfabric_hybrid==1.1.5
-pip install memcache_hybrid==1.1.5
+pip install memfabric_hybrid==1.3.1 --force-reinstall --no-deps
+pip install memcache_hybrid==1.3.1 --force-reinstall --no-deps
 ```
 
 如果因网络原因无法在线安装，可以在 [PyPI · The Python Package Index](https://pypi.org/) 下载安装包离线安装。
