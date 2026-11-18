@@ -36,6 +36,12 @@
 //   -l <logFile>      Log file for MMC library output          (default: bench_meta_service.log)
 //   --perf             Enable perf profiling of meta_service     (default: off)
 //   --perf-freq <hz>   perf record sample frequency                (default: 99)
+//   --perf-target <who>  Which processes perf records: meta|clients|client0 (default: meta)
+//   --metrics-interval-ms <ms>  Sample /metrics every ms; 0 disables  (default: 1000)
+//   -q, --queue-depth <q>  Logical operations in flight per thread    (default: 1)
+//   --meta-numa <nodes>   NUMA nodes for meta_service: 5, 4,6, 4-7 or !5 (default: unbound)
+//   --worker-numa <nodes> NUMA nodes for coordinator + clients, same format (default: unbound)
+//   --numa-mem <policy>   Memory policy of NUMA binding: bind|preferred|none (default: bind)
 
 #include <algorithm>
 #include <array>
@@ -43,6 +49,7 @@
 #include <arpa/inet.h>
 #include <cerrno>
 #include <chrono>
+#include <climits>
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
@@ -50,16 +57,21 @@
 #include <cstring>
 #include <cstdarg>
 #include <fcntl.h>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <map>
 #include <mutex>
 #include <netinet/in.h>
 #include <random>
+#include <sched.h>
+#include <set>
 #include <sstream>
 #include <string>
 #include <sys/mman.h>
+#include <sys/prctl.h>
 #include <sys/socket.h>
+#include <sys/syscall.h>
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
@@ -131,7 +143,50 @@ constexpr int kMetricsReceiveBufferSize = 16 * 1024;
 
 constexpr uint64_t kBytesPerMB = 1024 * 1024;
 
+constexpr int kMaxNumaNodeCount = 1024;
+constexpr int kDecimalBase = 10;
+constexpr const char *kNumaSysfsNodePrefix = "/sys/devices/system/node/node";
+constexpr const char *kNumaSysfsOnline = "/sys/devices/system/node/online";
+// Linux mempolicy modes from <linux/mempolicy.h>, defined here so libnuma headers are not required.
+constexpr int kMpolPreferred = 1;
+constexpr int kMpolBind = 2;
+constexpr const char *kMetaServiceProcName = "meta_service";
+constexpr const char *kClientProcNamePrefix = "bench_client_";
+
+
 int gTermFd = STDERR_FILENO;
+
+enum class NumaMemPolicy : int { kNone = 0, kPreferred, kBind };
+
+enum class PerfTarget : int { kMeta = 0, kClients, kClient0 };
+
+inline const char *PerfTargetName(PerfTarget target)
+{
+    switch (target) {
+        case PerfTarget::kMeta:
+            return "meta_service";
+        case PerfTarget::kClients:
+            return "all clients";
+        case PerfTarget::kClient0:
+            return "client 0";
+        default:
+            return "unknown";
+    }
+}
+
+inline const char *NumaMemPolicyName(NumaMemPolicy policy)
+{
+    switch (policy) {
+        case NumaMemPolicy::kNone:
+            return "none";
+        case NumaMemPolicy::kPreferred:
+            return "preferred";
+        case NumaMemPolicy::kBind:
+            return "bind";
+        default:
+            return "unknown";
+    }
+}
 
 enum OpType : int { kOpPut = 0, kOpGet, kOpAlloc, kOpUpdate, kOpTypeCount };
 
@@ -167,6 +222,10 @@ struct BenchConfig {
     bool perfEnable = false;
     int perfFreq = kDefaultPerfFreq;
     int metricsIntervalMs = kDefaultMetricsIntervalMs;
+    PerfTarget perfTarget = PerfTarget::kMeta;
+    std::string metaNumaNodes;   // empty = unbound
+    std::string workerNumaNodes; // empty = unbound
+    NumaMemPolicy numaMemPolicy = NumaMemPolicy::kBind;
 };
 
 void TermLog(const char *fmt, ...)
@@ -194,6 +253,220 @@ void RedirectLogsToFile(const std::string &logFile)
     setbuf(stdout, nullptr);
     setbuf(stderr, nullptr);
 }
+
+struct NumaBinding {
+    std::string spec;
+    std::vector<int> nodes;
+    std::string cpuList;
+    cpu_set_t cpuSet{};
+};
+
+// Parses the kernel cpulist format, e.g. "0-23,48-71".
+bool ParseCpuList(const std::string &cpuList, cpu_set_t &cpuSet)
+{
+    CPU_ZERO(&cpuSet);
+    std::istringstream stream(cpuList);
+    std::string range;
+    int cpuCount = 0;
+    while (std::getline(stream, range, ',')) {
+        if (range.empty()) {
+            continue;
+        }
+        char *end = nullptr;
+        const long first = std::strtol(range.c_str(), &end, kDecimalBase);
+        if (end == range.c_str()) {
+            return false;
+        }
+        long last = first;
+        if (*end == '-') {
+            const char *lastStart = end + 1;
+            last = std::strtol(lastStart, &end, kDecimalBase);
+            if (end == lastStart) {
+                return false;
+            }
+        }
+        if (*end != '\0' || first < 0 || last < first || last >= CPU_SETSIZE) {
+            return false;
+        }
+        for (long cpu = first; cpu <= last; ++cpu) {
+            CPU_SET(static_cast<int>(cpu), &cpuSet);
+            ++cpuCount;
+        }
+    }
+    return cpuCount > 0;
+}
+
+// Parses a node list such as "4", "4,6" or "4-7" (same format as the kernel cpulist).
+bool ParseNodeList(const std::string &list, std::set<int> &nodes)
+{
+    std::istringstream stream(list);
+    std::string range;
+    while (std::getline(stream, range, ',')) {
+        if (range.empty()) {
+            continue;
+        }
+        char *end = nullptr;
+        const long first = std::strtol(range.c_str(), &end, kDecimalBase);
+        if (end == range.c_str()) {
+            return false;
+        }
+        long last = first;
+        if (*end == '-') {
+            const char *lastStart = end + 1;
+            last = std::strtol(lastStart, &end, kDecimalBase);
+            if (end == lastStart) {
+                return false;
+            }
+        }
+        if (*end != '\0' || first < 0 || last < first || last >= kMaxNumaNodeCount) {
+            return false;
+        }
+        for (long node = first; node <= last; ++node) {
+            nodes.insert(static_cast<int>(node));
+        }
+    }
+    return !nodes.empty();
+}
+
+bool ReadNodeCpuList(int node, std::string &cpuList, cpu_set_t &cpuSet)
+{
+    std::ifstream file(kNumaSysfsNodePrefix + std::to_string(node) + "/cpulist");
+    if (!file.is_open() || !std::getline(file, cpuList)) {
+        return false;
+    }
+    return ParseCpuList(cpuList, cpuSet);
+}
+
+// Online nodes with at least one CPU this process may run on (respects the container cpuset).
+bool UsableNumaNodes(std::set<int> &nodes)
+{
+    std::ifstream onlineFile(kNumaSysfsOnline);
+    std::string onlineList;
+    std::set<int> onlineNodes;
+    if (!onlineFile.is_open() || !std::getline(onlineFile, onlineList) || !ParseNodeList(onlineList, onlineNodes)) {
+        return false;
+    }
+    cpu_set_t allowed;
+    if (sched_getaffinity(0, sizeof(allowed), &allowed) != 0) {
+        return false;
+    }
+    for (int node : onlineNodes) {
+        std::string cpuList;
+        cpu_set_t cpus;
+        if (!ReadNodeCpuList(node, cpuList, cpus)) {
+            continue;
+        }
+        cpu_set_t common;
+        CPU_AND(&common, &cpus, &allowed);
+        if (CPU_COUNT(&common) > 0) {
+            nodes.insert(node);
+        }
+    }
+    return !nodes.empty();
+}
+
+std::string JoinNodes(const std::vector<int> &nodes)
+{
+    std::string text;
+    for (int node : nodes) {
+        text += (text.empty() ? "" : ",") + std::to_string(node);
+    }
+    return text;
+}
+
+// Validates the nodes in the coordinator so a bad --*-numa value fails before any process is forked.
+// Accepts "4", "4,6", "4-7" or "!5" (all usable nodes except 5).
+bool ResolveNumaBinding(const std::string &spec, NumaBinding &binding)
+{
+    binding.spec = spec;
+    binding.nodes.clear();
+    binding.cpuList.clear();
+    CPU_ZERO(&binding.cpuSet);
+    if (spec.empty() || spec == "-1") {
+        return true;
+    }
+    std::set<int> nodes;
+    if (spec[0] == '!') {
+        std::set<int> excluded;
+        if (!ParseNodeList(spec.substr(1), excluded)) {
+            std::cerr << "Invalid NUMA node list: " << spec << "\n";
+            return false;
+        }
+        if (!UsableNumaNodes(nodes)) {
+            std::cerr << "Cannot determine usable NUMA nodes for " << spec << "\n";
+            return false;
+        }
+        for (int node : excluded) {
+            nodes.erase(node);
+        }
+    } else if (!ParseNodeList(spec, nodes)) {
+        std::cerr << "Invalid NUMA node list: " << spec << "\n";
+        return false;
+    }
+    if (nodes.empty()) {
+        std::cerr << "No NUMA nodes left for " << spec << "\n";
+        return false;
+    }
+    for (int node : nodes) {
+        std::string cpuList;
+        cpu_set_t cpus;
+        if (!ReadNodeCpuList(node, cpuList, cpus)) {
+            std::cerr << "NUMA node " << node << " does not exist or has no CPUs\n";
+            return false;
+        }
+        CPU_OR(&binding.cpuSet, &binding.cpuSet, &cpus);
+        binding.cpuList += (binding.cpuList.empty() ? "" : ",") + cpuList;
+        binding.nodes.push_back(node);
+    }
+    return true;
+}
+
+// Binds the calling process (before it spawns threads) to the nodes' CPUs and memory. Threads and
+// processes created afterwards inherit both the CPU affinity and the memory policy.
+bool ApplyNumaBinding(const NumaBinding &binding, NumaMemPolicy memPolicy, const char *owner)
+{
+    if (binding.nodes.empty()) {
+        return true;
+    }
+    const std::string nodes = JoinNodes(binding.nodes);
+    if (sched_setaffinity(0, sizeof(binding.cpuSet), &binding.cpuSet) != 0) {
+        TermLog("[%s] Failed to set CPU affinity to NUMA nodes %s: %s\n", owner, nodes.c_str(), strerror(errno));
+        return false;
+    }
+    if (memPolicy != NumaMemPolicy::kNone) {
+        constexpr size_t kBitsPerMaskWord = sizeof(unsigned long) * CHAR_BIT;
+        std::array<unsigned long, kMaxNumaNodeCount / kBitsPerMaskWord> nodeMask{};
+        for (int node : binding.nodes) {
+            const auto bit = static_cast<size_t>(node);
+            nodeMask[bit / kBitsPerMaskWord] |= 1UL << (bit % kBitsPerMaskWord);
+        }
+        const int mode = memPolicy == NumaMemPolicy::kBind ? kMpolBind : kMpolPreferred;
+        // The kernel reads maxnode - 1 bits of the mask (same convention as libnuma).
+        if (syscall(SYS_set_mempolicy, mode, nodeMask.data(), kMaxNumaNodeCount + 1) != 0) {
+            TermLog("[%s] Failed to set memory policy %s to NUMA nodes %s: %s\n", owner, NumaMemPolicyName(memPolicy),
+                    nodes.c_str(), strerror(errno));
+            return false;
+        }
+    }
+    TermLog("[%s] pid=%d bound to NUMA nodes %s (cpus %s, mem %s)\n", owner, getpid(), nodes.c_str(),
+            binding.cpuList.c_str(), NumaMemPolicyName(memPolicy));
+    return true;
+}
+
+std::string DescribeNumaBinding(const NumaBinding &binding)
+{
+    if (binding.nodes.empty()) {
+        return "unbound";
+    }
+    return "nodes " + JoinNodes(binding.nodes) + " (cpus " + binding.cpuList + ")";
+}
+
+void SetProcessName(const std::string &name)
+{
+    // Lets top/ps/numastat tell the meta_service and client processes apart.
+    prctl(PR_SET_NAME, name.c_str(), 0, 0, 0);
+}
+
 
 struct LatencyHistogram {
     std::array<uint64_t, kLatencyHistogramBucketCount> buckets{};
@@ -805,18 +1078,48 @@ void WriteResult(ProcessResult &out, const ThreadStats &stats, double durationSe
     out.valid = 1;
 }
 
-pid_t StartPerfOnMetaService(int metaPid, const BenchConfig &cfg)
+// perf record takes a comma separated pid list, so one perf can follow every client process.
+std::string JoinPids(const std::vector<pid_t> &pids)
 {
-    std::string metaPidStr = std::to_string(metaPid);
+    std::string text;
+    for (pid_t pid : pids) {
+        text += (text.empty() ? "" : ",") + std::to_string(pid);
+    }
+    return text;
+}
+
+pid_t StartPerfOnPids(const std::vector<pid_t> &pids, const BenchConfig &cfg)
+{
+    std::string pidList = JoinPids(pids);
     std::string freqStr = std::to_string(cfg.perfFreq);
     pid_t pid = fork();
     if (pid != 0) {
         return pid;
     }
-    execlp("perf", "perf", "record", "-F", freqStr.c_str(), "-g", "-p", metaPidStr.c_str(), "-o", kDefaultPerfDataFile,
+    execlp("perf", "perf", "record", "-F", freqStr.c_str(), "-g", "-p", pidList.c_str(), "-o", kDefaultPerfDataFile,
            nullptr);
     TermLog("[perf] failed to launch perf: %s\n", strerror(errno));
     _exit(kPerfExecFailCode);
+}
+
+// Starts perf and verifies it survived the first second; returns -1 when profiling is unavailable.
+pid_t StartPerfChecked(const std::vector<pid_t> &pids, const BenchConfig &cfg)
+{
+    pid_t perfPid = StartPerfOnPids(pids, cfg);
+    if (perfPid <= 0) {
+        TermLog("[perf] failed to fork perf process, profiling disabled\n");
+        return -1;
+    }
+    sleep(kPerfReadyWaitSec);
+    int perfStatus = 0;
+    pid_t reaped = waitpid(perfPid, &perfStatus, WNOHANG);
+    if (reaped == perfPid || reaped == -1) {
+        TermLog("[perf] perf exited early (perf installed? permissions? ulimit -n?), profiling disabled\n");
+        return -1;
+    }
+    TermLog("[perf] profiling %s (pid %s) -> %s\n", PerfTargetName(cfg.perfTarget),
+            JoinPids(pids).c_str(), kDefaultPerfDataFile);
+    return perfPid;
 }
 
 void StopPerf(pid_t perfPid)
@@ -1039,7 +1342,11 @@ bool ParseArgs(int argc, char *argv[], BenchConfig &cfg)
                 << "  --perf-freq <hz>   perf record sample frequency                (default: " << kDefaultPerfFreq
                 << ")\n"
                 << "  --metrics-interval-ms <ms>  Sample /metrics every ms; 0 disables (default: "
-                << kDefaultMetricsIntervalMs << ")\n";
+                << kDefaultMetricsIntervalMs << ")\n"
+                << "  --perf-target <who>  Profile meta|clients|client0                 (default: meta)\n"
+                << "  --meta-numa <nodes>   NUMA nodes for meta_service, e.g. 5, 4,6, 4-7, !5 (default: unbound)\n"
+                << "  --worker-numa <nodes> NUMA nodes for coordinator + clients, same format  (default: unbound)\n"
+                << "  --numa-mem <policy>   NUMA memory policy: bind|preferred|none             (default: bind)\n";
             return false;
         }
         if (a == "--perf") {
@@ -1096,7 +1403,33 @@ bool ParseArgs(int argc, char *argv[], BenchConfig &cfg)
             cfg.perfFreq = std::max(1, std::atoi(v.c_str()));
         else if (a == "--metrics-interval-ms")
             cfg.metricsIntervalMs = std::max(0, std::atoi(v.c_str()));
-        else {
+        else if (a == "--perf-target") {
+            if (v == "meta")
+                cfg.perfTarget = PerfTarget::kMeta;
+            else if (v == "clients")
+                cfg.perfTarget = PerfTarget::kClients;
+            else if (v == "client0")
+                cfg.perfTarget = PerfTarget::kClient0;
+            else {
+                std::cerr << "Invalid --perf-target: " << v << " (expected meta|clients|client0)\n";
+                return false;
+            }
+        } else if (a == "--meta-numa") {
+            cfg.metaNumaNodes = v;
+        } else if (a == "--worker-numa") {
+            cfg.workerNumaNodes = v;
+        } else if (a == "--numa-mem") {
+            if (v == "bind")
+                cfg.numaMemPolicy = NumaMemPolicy::kBind;
+            else if (v == "preferred")
+                cfg.numaMemPolicy = NumaMemPolicy::kPreferred;
+            else if (v == "none")
+                cfg.numaMemPolicy = NumaMemPolicy::kNone;
+            else {
+                std::cerr << "Invalid --numa-mem: " << v << " (expected bind|preferred|none)\n";
+                return false;
+            }
+        } else {
             std::cerr << "Unknown: " << a << "\n";
             return false;
         }
@@ -1113,6 +1446,11 @@ int main(int argc, char *argv[])
 {
     BenchConfig cfg;
     if (!ParseArgs(argc, argv, cfg))
+        return 1;
+
+    NumaBinding metaNuma;
+    NumaBinding workerNuma;
+    if (!ResolveNumaBinding(cfg.metaNumaNodes, metaNuma) || !ResolveNumaBinding(cfg.workerNumaNodes, workerNuma))
         return 1;
 
     gTermFd = dup(STDERR_FILENO);
@@ -1138,12 +1476,25 @@ int main(int argc, char *argv[])
               << "  Batch range:  [" << cfg.minBatch << ", " << cfg.maxBatch << "]\n"
               << "  HBM/proc:     " << cfg.capacityMB << " MB\n"
               << "  Log file:      " << cfg.logFile << "\n"
+              << "  Queue depth:  " << cfg.queueDepth << " (in flight/proc: "
+              << (cfg.threadCount * cfg.queueDepth) << ")\n"
               << "  Perf:          "
-              << (cfg.perfEnable ? std::string("record -> ") + kDefaultPerfDataFile : std::string("off")) << "\n"
+              << (cfg.perfEnable ? std::string("record ") + PerfTargetName(cfg.perfTarget) + " -> " +
+                                       kDefaultPerfDataFile
+                                 : std::string("off"))
+              << "\n"
               << "  Metrics:       "
               << (cfg.metricsIntervalMs > 0 ? std::to_string(cfg.metricsIntervalMs) + " ms" : std::string("off"))
               << "\n"
+              << "  NUMA meta:     " << DescribeNumaBinding(metaNuma) << "\n"
+              << "  NUMA worker:   " << DescribeNumaBinding(workerNuma) << "\n"
+              << "  NUMA mem:      " << NumaMemPolicyName(cfg.numaMemPolicy) << "\n"
               << std::endl;
+    for (int node : metaNuma.nodes) {
+        if (std::find(workerNuma.nodes.begin(), workerNuma.nodes.end(), node) != workerNuma.nodes.end()) {
+            TermLog("[numa] Warning, meta_service and workers share NUMA node %d\n", node);
+        }
+    }
 
     std::string metaUrl = "tcp://127.0.0.1:" + std::to_string(kMetaServicePort);
     std::string bmUrl = "tcp://127.0.0.1:" + std::to_string(kConfigStorePort);
@@ -1161,10 +1512,22 @@ int main(int argc, char *argv[])
     std::cout << "[1/3] Starting meta_service process..." << std::endl;
     pid_t metaPid = fork();
     if (metaPid == 0) {
+        SetProcessName(kMetaServiceProcName);
+        if (!ApplyNumaBinding(metaNuma, cfg.numaMemPolicy, kMetaServiceProcName)) {
+            _exit(1);
+        }
         return RunMetaService(metaUrl, bmUrl, metricsUrl, cfg.logFile, cfg.capacityMB);
     }
     if (metaPid < 0) {
         std::cerr << "Failed to fork meta_service!" << std::endl;
+        munmap(sharedResults, shmSize);
+        return 1;
+    }
+    // Bind the coordinator only after meta_service is forked, so that perf, the metrics sampler and all
+    // client processes (forked below) inherit the worker nodes while meta_service keeps its own nodes.
+    if (!ApplyNumaBinding(workerNuma, cfg.numaMemPolicy, "coordinator/clients")) {
+        kill(metaPid, SIGTERM);
+        waitpid(metaPid, nullptr, 0);
         munmap(sharedResults, shmSize);
         return 1;
     }
@@ -1175,22 +1538,8 @@ int main(int argc, char *argv[])
     metricsSampler.Start();
 
     pid_t perfPid = -1;
-    if (cfg.perfEnable) {
-        perfPid = StartPerfOnMetaService(metaPid, cfg);
-        if (perfPid > 0) {
-            sleep(kPerfReadyWaitSec);
-            int perfStatus = 0;
-            pid_t r = waitpid(perfPid, &perfStatus, WNOHANG);
-            if (r == perfPid || r == -1) {
-                TermLog("[perf] perf exited early (perf installed? permissions?), profiling disabled\n");
-                perfPid = -1;
-            } else {
-                TermLog("[perf] profiling meta_service (pid=%d) -> %s\n", metaPid, kDefaultPerfDataFile);
-            }
-        } else {
-            TermLog("[perf] failed to fork perf process, profiling disabled\n");
-            perfPid = -1;
-        }
+    if (cfg.perfEnable && cfg.perfTarget == PerfTarget::kMeta) {
+        perfPid = StartPerfChecked({metaPid}, cfg);
     }
 
     std::cout << "\n[2/3] Forking " << cfg.processCount << " client processes..." << std::endl;
@@ -1204,6 +1553,7 @@ int main(int argc, char *argv[])
         }
         pid_t pid = fork();
         if (pid == 0) {
+            SetProcessName(kClientProcNamePrefix + std::to_string(i));
             close(controlSocket[bench::kBarrierParentEnd]);
             for (int barrierFd : barrierFds) {
                 close(barrierFd);
@@ -1222,6 +1572,14 @@ int main(int argc, char *argv[])
             clientPids.push_back(pid);
             barrierFds.push_back(controlSocket[bench::kBarrierParentEnd]);
         }
+    }
+
+    // Clients are parked on the startup barrier here, so perf attaches before they issue any request.
+    if (cfg.perfEnable && cfg.perfTarget != PerfTarget::kMeta && !clientPids.empty()) {
+        std::vector<pid_t> targets = cfg.perfTarget == PerfTarget::kClient0
+                                         ? std::vector<pid_t>{clientPids.front()}
+                                         : clientPids;
+        perfPid = StartPerfChecked(targets, cfg);
     }
 
     std::cout << "\n[3/3] Waiting for " << clientPids.size() << " clients to finish..." << std::endl;

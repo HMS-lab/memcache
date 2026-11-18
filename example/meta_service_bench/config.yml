@@ -1,0 +1,36 @@
+bench:
+  binary: ./build/example/meta_service_bench/bench_meta_service
+  cwd: /workspace/memcache
+  rerun: 1
+
+perf:
+  enabled: false
+  freq: 99
+  target: meta # meta | clients
+  max_stack: 0
+
+offcpu:
+  enabled: false
+  tool: offcputime-fixed
+  min_block_us: 1
+  comm_filter: ''
+  max_seconds: 86400
+
+pyroscope:
+  enabled: true
+  url: http://pyroscope_ip:<pyroscope_port>
+  name: ''
+
+grafana:
+  enabled: true
+  url_local: http://<grafana_ip>:<grafana_port>
+  api_key: ''
+  dashboard_uuid: ''
+  tags:
+  - memcache-bench
+
+mongo:
+  enabled: false
+  url: mongodb://<mongo_ip>:<mongo_port>
+  database: memcache
+  collection: bench_meta_service
