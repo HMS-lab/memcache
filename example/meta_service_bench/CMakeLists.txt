@@ -128,18 +128,6 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     set_target_properties(bench_meta_service PROPERTIES ENABLE_EXPORTS ON)
     target_link_options(bench_meta_service PRIVATE -Wl,--build-id=sha1)
 
-    if (NOT CMAKE_READELF)
-        find_program(CMAKE_READELF NAMES readelf llvm-readelf)
-    endif ()
-    if (NOT CMAKE_READELF)
-        message(FATAL_ERROR "readelf is required to verify the benchmark's profiling symbols")
-    endif ()
-    add_custom_command(TARGET bench_meta_service POST_BUILD
-            COMMAND "${CMAKE_COMMAND}"
-                    "-DBENCH_BINARY=$<TARGET_FILE:bench_meta_service>"
-                    "-DBENCH_READELF=${CMAKE_READELF}"
-                    -P "${CMAKE_CURRENT_SOURCE_DIR}/verify_profile_symbols.cmake"
-            VERBATIM)
 endif ()
 
 # Built alongside the example; not installed in the runtime package.

@@ -34,7 +34,6 @@ The local test executable is built with the example and is not installed in the 
 For GCC/Clang builds, the benchmark and its in-tree MemCache objects explicitly use `-g3`,
 `-fno-omit-frame-pointer`, `-fno-optimize-sibling-calls`, and `-fasynchronous-unwind-tables`.
 The executable retains its symbols even in a RELEASE build, exports dynamic symbols, and has a GNU build ID.
-A post-link check rejects a benchmark missing debug info, line info, symbol tables, unwind info, or its build ID.
 Standalone builds default to DEBUG. The DEBUG command above also disables optimization in in-tree MemCache code;
 optimization can inline functions even when full debug info is present. Compare measurements using the same build flags.
 
