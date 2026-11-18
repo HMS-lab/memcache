@@ -6,6 +6,7 @@ import subprocess
 from collections.abc import Iterator
 from hashlib import sha256
 from pathlib import Path
+from typing import cast
 
 import pytest
 from pandas import DataFrame, isna
@@ -14,6 +15,7 @@ from pytest import CaptureFixture, MonkeyPatch, TempPathFactory
 import meta_manager_sim.simulation as simulation
 from meta_manager_sim.config import MetaManagerConfig, RunConfig
 from meta_manager_sim.metrics import read_rss, render_summary
+from meta_manager_sim.native import NativeProcess
 from meta_manager_sim.simulation import _simulate_reads
 
 pytestmark = pytest.mark.native
@@ -144,12 +146,52 @@ def test_prefix_size_and_timing_breakdowns(
         "read_finish": 3,
         "evict_check": 4,
     }
-    assert (timings["min_ns"] <= timings["mean_ns"]).all()
-    assert (timings["mean_ns"] <= timings["max_ns"]).all()
+    assert (timings["min"] <= timings["mean"]).all()
+    assert (timings["mean"] <= timings["max"]).all()
     render_summary(measured_metrics)
     output = capsys.readouterr().out
     assert "33.33%" in output
     assert "org:model" in output
+
+
+@pytest.mark.parametrize("detailed", [False, True])
+def test_latency_replies_are_optional_and_drained_per_read(
+    detailed: bool,
+) -> None:
+    config = RunConfig(
+        MetaManagerConfig(((1, 65536),), max_water_level=100),
+        detailed_stats=detailed,
+    )
+    reads = [
+        (
+            ("model:1", BLOCK_SIZE),
+            {"lookup", "alloc", "write_finish", "evict_check"},
+        ),
+        (("model:1", BLOCK_SIZE), {"lookup", "read_finish"}),
+        (("model:large", 131072), {"lookup", "alloc"}),
+    ]
+    with NativeProcess(profile=False) as process:
+        simulation._initialize_manager(process, config)
+        for read, operations in reads:
+            reply = process.request("read", reads=[read])
+            if detailed:
+                latencies = cast(dict[str, list[int]], reply["latencies"])
+                assert set(latencies) == operations
+                assert all(
+                    len(values) == 1
+                    and type(values[0]) is int
+                    and values[0] >= 0
+                    for values in latencies.values()
+                )
+            else:
+                assert "latencies" not in reply
+
+        details = process.request("snapshot")["details"]
+        if detailed:
+            assert "latencies" not in cast(dict[str, object], details)
+        else:
+            assert details is None
+        process.close()
 
 
 @pytest.mark.parametrize("policy", ["lru", "sharded_lru"])
@@ -210,6 +252,8 @@ def test_empty_workload_has_undefined_rates(
     ):
         assert isna(summary[field])
     assert metrics["memory"]["reads"].tolist() == [0, 0]
+    if detailed:
+        assert metrics["latencies"].empty
     render_summary(metrics)
     assert "n/a" in capsys.readouterr().out
 

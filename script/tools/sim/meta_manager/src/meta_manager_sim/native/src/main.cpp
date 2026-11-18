@@ -6,6 +6,7 @@
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <utility>
 #include <unistd.h>
 
 using ock::mmc::Json;
@@ -54,6 +55,9 @@ int main()
                         ++readIndex;
                     }
                     reply = manager->Progress();
+                    if (auto latencies = manager->TakeLatencies(); !latencies.is_null()) {
+                        reply["latencies"] = std::move(latencies);
+                    }
                 } else if (operation == "snapshot") {
                     reply = manager->Snapshot();
                 } else if (operation == "stop") {

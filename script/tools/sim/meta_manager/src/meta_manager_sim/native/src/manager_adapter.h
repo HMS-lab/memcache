@@ -26,6 +26,7 @@ public:
     void Access(const std::string &key, uint64_t size);
 
     Json Progress() const;
+    Json TakeLatencies();
     Json Snapshot();
     void Close();
 

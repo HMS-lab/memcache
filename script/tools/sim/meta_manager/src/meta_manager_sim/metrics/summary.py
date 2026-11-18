@@ -1,6 +1,7 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 # Licensed under Mulan PSL v2. See the repository LICENSE file.
 
+import pandas as pd
 from pandas import DataFrame
 
 """ ----------------------------------------------------------------------- """
@@ -52,6 +53,22 @@ def _summarize_memory(summary: DataFrame, memory: DataFrame) -> None:
     summary["rss_max_bytes"] = memory["rss_bytes"].max()
 
 
+def _summarize_latencies(latencies: DataFrame) -> DataFrame:
+    samples = latencies.groupby(level="operation")["latency_ns"]
+    summary = samples.agg(
+        count="count", total="sum", min="min", mean="mean", max="max"
+    )
+
+    # Compute per-operation latency percentiles as separate columns
+    quantiles = pd.Index([0.5, 0.9, 0.95, 0.99, 0.999, 0.9999])
+    percentiles = (
+        samples.quantile(quantiles).unstack().reindex(columns=quantiles)
+    )
+    percentiles.columns = ["p50", "p90", "p95", "p99", "p99.9", "p99.99"]
+
+    return summary.join(percentiles)
+
+
 def _overview_table(summary: DataFrame) -> DataFrame:
     overview = summary[
         [
@@ -90,7 +107,9 @@ def _detail_tables(metrics: dict[str, DataFrame]) -> dict[str, DataFrame]:
         "By size": metrics["allocations"][
             ["allocs", "alloc_ok", "alloc_fail", "alloc_fail_rate"]
         ],
-        "Timings": metrics["latencies"][["count", "mean_ns", "max_ns"]],
+        "Timings [ns]": metrics["latencies"][
+            ["count", "mean", "p50", "p90", "p95", "p99", "p99.9", "p99.99"]
+        ],
     }
 
 
@@ -124,8 +143,7 @@ def summarize_metrics(metrics: dict[str, DataFrame]) -> None:
     _summarize_memory(summary, metrics["memory"])
 
     if "latencies" in metrics:
-        latencies = metrics["latencies"]
-        latencies["mean_ns"] = latencies["total_ns"] / latencies["count"]
+        metrics["latencies"] = _summarize_latencies(metrics["latencies"])
 
 
 def render_summary(metrics: dict[str, DataFrame]) -> None:

@@ -68,10 +68,23 @@ from `cli/arguments.py`; programmatic defaults in `config.py` can differ.
   cached keys plus completed removal callbacks in this one-blob model.
 - Keep the Python/C++ JSONL fields synchronized. `init` takes `config` and
   `detailed_stats`, returning flat `pid`, `progress`, `pools` and `details`
-  fields. `read` takes `reads=[(key, size)]`, returning counters. Model parsing
-  belongs to C++, so do not add a separate model IPC field.
+  fields. `read` takes `reads=[(key, size)]`, returning counters and, only with
+  detailed stats, `latencies` mapping operation names to lists of nanoseconds.
+  Model parsing belongs to C++, so do not add a separate model IPC field.
   `snapshot` returns final state, and `stop` shuts down the manager. There is
-  no version field or simulator batch-size setting.
+  no version field or simulator batch-size setting. Snapshot details contain
+  prefix and allocation counters, without latency history.
+- With `--detailed-stats`, C++ records individual operation durations and drains
+  its timing buffer after every read reply. Keep the full sample history in
+  Python so it does not accumulate in native RSS. Aggregate in
+  `metrics/summary.py`: count, total, min, mean, max and P50/P90/P95/P99/P99.9/
+  P99.99, all in nanoseconds except count. Use all samples and pandas' linear
+  interpolation, independently of the RSS sampling interval. Timing history
+  consumes Python memory only when detailed stats are enabled.
+- `lookup` timings cover all reads and `alloc` covers every miss, including
+  failed allocations. `read_finish` covers hits, `write_finish` covers
+  successful allocations and `evict_check` includes waiting for eviction and
+  removal callbacks. Do not replace these native timings with IPC round trips.
 - Measure RSS from the actual C++ PID, including under Heaptrack. RSS covers
   the whole worker process, including runtime and adapter overhead. Keep only
   read counts, RSS and cached-key counts in memory samples; timing breakdowns
@@ -192,11 +205,13 @@ Keep coverage focused:
   nested requests, model keys and line selection
 - `test_config.py`: size/group parsing and CLI-to-config conversion
 - `test_metrics.py`: RSS units, exact integer totals, signed RSS changes,
-  display formatting and the actual coordinates exported in plots
+  aggregation and percentiles from individual latency samples, display
+  formatting and the actual coordinates exported in plots
 - `test_simulation.py`: real hits/misses, allocation failures, prefix/size
-  breakdowns, native timings, sampling, unequal pools, both eviction policies,
-  empty workloads and cleanup after an input failure; a small C++ harness
-  checks native key conversion against the previous Python format
+  breakdowns, per-read timing replies and buffer clearing, disabled timing
+  collection, sampling, unequal pools, both eviction policies, empty workloads
+  and cleanup after an input failure; a small C++ harness checks native key
+  conversion against the previous Python format
 - `test_examples.py`: all three Bash examples, trace line selection and plot
   export; all three entrypoints support help without build tools
 - `test_profile.py`: optional real Heaptrack capture and native-PID sampling

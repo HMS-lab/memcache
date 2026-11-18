@@ -5,6 +5,7 @@ from io import StringIO
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import pytest
 from matplotlib.figure import Figure
 from matplotlib.image import imread
 from pandas import DataFrame
@@ -17,6 +18,7 @@ from meta_manager_sim.metrics import (
     render_summary,
     summarize_metrics,
 )
+from meta_manager_sim.metrics.summary import _summarize_latencies
 
 
 def test_rss_is_read_from_the_requested_pid_in_bytes(
@@ -75,6 +77,39 @@ def test_exact_totals_and_decreasing_rss(capsys: CaptureFixture[str]) -> None:
     assert "100.00%" in output
     for name, original in originals.items():
         assert_frame_equal(metrics[name], original)
+
+
+def test_latency_summary_from_individual_samples() -> None:
+    latencies = (
+        DataFrame.from_records(
+            [("lookup", value) for value in (10, 20, 30, 40, 50)]
+            + [("alloc", 7)],
+            columns=["operation", "latency_ns"],
+        )
+        .set_index("operation")
+        .astype("uint64")
+    )
+
+    timings = _summarize_latencies(latencies)
+    assert timings.loc["lookup"].to_dict() == pytest.approx(
+        {
+            "count": 5,
+            "total": 150,
+            "min": 10,
+            "mean": 30,
+            "max": 50,
+            "p50": 30,
+            "p90": 46,
+            "p95": 48,
+            "p99": 49.6,
+            "p99.9": 49.96,
+            "p99.99": 49.996,
+        }
+    )
+    assert timings.at["alloc", "count"] == 1
+    assert timings.loc["alloc"].drop("count").eq(7).all()
+    for column in ("count", "total", "min", "max"):
+        assert timings[column].dtype.kind in "iu"
 
 
 def test_plot_exports_rss_and_cached_keys_against_reads(

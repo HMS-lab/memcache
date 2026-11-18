@@ -3,7 +3,6 @@
 
 #include "manager_adapter.h"
 
-#include <algorithm>
 #include <iostream>
 #include <stdexcept>
 #include <thread>
@@ -247,6 +246,11 @@ Json Manager::Progress() const
     return progress;
 }
 
+Json Manager::TakeLatencies()
+{
+    return detailedStats_ ? std::exchange(latencies_, Json::object()) : Json(nullptr);
+}
+
 Json Manager::Snapshot()
 {
     WaitForCompletion();
@@ -267,9 +271,7 @@ Json Manager::Snapshot()
 
     return {{"progress", Progress()},
             {"pools", pools},
-            {"details", detailedStats_
-                            ? Json{{"prefixes", prefixes_}, {"allocations", allocations_}, {"latencies", latencies_}}
-                            : Json(nullptr)}};
+            {"details", detailedStats_ ? Json{{"prefixes", prefixes_}, {"allocations", allocations_}} : Json(nullptr)}};
 }
 
 // Counters and optional operation timings
@@ -283,14 +285,7 @@ void Manager::RecordTiming(const std::string &name, Clock::time_point before)
     const auto duration = Clock::now() - before;
     const auto nanoseconds =
         static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count());
-    auto &row = latencies_[name];
-    if (row.is_null()) {
-        row = Json::object();
-    }
-    Add(row, "count");
-    Add(row, "total_ns", nanoseconds);
-    row["min_ns"] = std::min(row.value("min_ns", nanoseconds), nanoseconds);
-    row["max_ns"] = std::max(row.value("max_ns", nanoseconds), nanoseconds);
+    latencies_[name].push_back(nanoseconds);
 }
 
 void Manager::RecordAccess(const std::string &model, uint64_t size, bool hit, uint64_t reserved)

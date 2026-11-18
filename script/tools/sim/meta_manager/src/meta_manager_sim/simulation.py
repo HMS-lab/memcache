@@ -37,8 +37,11 @@ def _request_reads(
     reads: Iterable[tuple[str, int]],
     snapshot_init: dict[str, object],
     sample_interval: int,
-) -> tuple[dict[str, object], list[tuple[int, int, int]]]:
+) -> tuple[
+    dict[str, object], list[tuple[int, int, int]], dict[str, list[int]]
+]:
     samples: list[tuple[int, int, int]] = []
+    latencies: dict[str, list[int]] = {}
 
     def _sample(progress: dict[str, object]) -> None:
         # Note: Use the C++ PID even when Heaptrack launches the process
@@ -55,6 +58,13 @@ def _request_reads(
 
     for reads_completed, read in enumerate(reads, start=1):
         progress = process.request("read", reads=[read])
+
+        # Keep per-operation timing samples for later aggregation
+        for operation, values in cast(
+            dict[str, list[int]], progress.pop("latencies", {})
+        ).items():
+            latencies.setdefault(operation, []).extend(values)
+
         if sample_interval and reads_completed % sample_interval == 0:
             _sample(progress)
 
@@ -62,11 +72,13 @@ def _request_reads(
     snapshot_final = process.request("snapshot")
     _sample(cast(dict[str, object], snapshot_final["progress"]))
 
-    return snapshot_final, samples
+    return snapshot_final, samples, latencies
 
 
 def _build_metrics(
-    snapshot: dict[str, object], samples: list[tuple[int, int, int]]
+    snapshot: dict[str, object],
+    samples: list[tuple[int, int, int]],
+    latencies: dict[str, list[int]],
 ) -> dict[str, DataFrame]:
     metrics = {
         "summary": DataFrame([snapshot["progress"]], dtype="uint64"),
@@ -113,13 +125,19 @@ def _build_metrics(
         by_size.index = by_size.index.astype("uint64")
         metrics["allocations"] = by_size.sort_index()
 
-        # Native call counts and timings (by operation)
-        metrics["latencies"] = DataFrame.from_dict(
-            details.get("latencies", {}),
-            orient="index",
-            columns=["count", "total_ns", "min_ns", "max_ns"],
-            dtype="uint64",
-        ).rename_axis("operation")
+        # Individual durations, grouped by operation during summarization
+        metrics["latencies"] = (
+            DataFrame.from_records(
+                (
+                    (operation, duration)
+                    for operation, values in latencies.items()
+                    for duration in values
+                ),
+                columns=["operation", "latency_ns"],
+            )
+            .set_index("operation")
+            .astype("uint64")
+        )
 
     return metrics
 
@@ -130,13 +148,13 @@ def _simulate_reads(
     with NativeProcess(config.profile) as process:
         # Initialize MetaManager and replay reads sequentially
         snapshot_init = _initialize_manager(process, config)
-        snapshot_final, samples = _request_reads(
+        snapshot_final, samples, latencies = _request_reads(
             process, reads, snapshot_init, config.memory_sample_every
         )
 
         profile_path = process.close()
 
-    metrics = _build_metrics(snapshot_final, samples)
+    metrics = _build_metrics(snapshot_final, samples, latencies)
     metrics["summary"] = metrics["summary"].assign(
         detailed_stats=config.detailed_stats,
         profile_path=str(profile_path) if profile_path else None,
