@@ -29,6 +29,47 @@ Alternatively, pass `--python /absolute/path/to/python3.11`. The selected interp
 
 The local test executable is built with the example and is not installed in the runtime package. Building requires the repository dependencies, including pybind11, spdlog, and MemFabric. Standalone CMake integration is retained for existing users with installed libraries exporting internal symbols; the in-tree static-library build is recommended.
 
+## Native profiling symbols (Alloy/Pyroscope)
+
+For GCC/Clang builds, the benchmark and its in-tree MemCache objects explicitly use `-g3`,
+`-fno-omit-frame-pointer`, `-fno-optimize-sibling-calls`, and `-fasynchronous-unwind-tables`.
+The executable retains its symbols even in a RELEASE build, exports dynamic symbols, and has a GNU build ID.
+A post-link check rejects a benchmark missing debug info, line info, symbol tables, unwind info, or its build ID.
+Standalone builds default to DEBUG. The DEBUG command above also disables optimization in in-tree MemCache code;
+optimization can inline functions even when full debug info is present. Compare measurements using the same build flags.
+
+These settings do not rebuild externally loaded libraries. In standalone mode this includes MemCache itself;
+in both modes it includes MemFabric, libc, libstdc++, and libpython. Each needs its own symbols for complete stacks.
+If using the matching MemFabric source checkout, build its DEBUG package, install it, and source that installation's
+environment before launching the benchmark. For this metadata-only benchmark a CPU build is sufficient:
+
+```bash
+# Run from the matching MemFabric source root, after fetching its build dependencies.
+bash script/build_and_pack_run.sh --build_mode DEBUG --xpu_type NONE --build_python OFF
+```
+
+To inspect the exact benchmark executable being used (from the MemCache repository root):
+
+```bash
+readelf -W -S build/example/meta_service_bench/bench_meta_service \
+  | rg '\.(debug_info|debug_line|symtab|dynsym|eh_frame|note.gnu.build-id)\s'
+nm -C build/example/meta_service_bench/bench_meta_service | rg 'Worker\(|RunClient\('
+```
+
+`AccWrk` and client names in a thread-grouped profile are labels, not function names. If deep stacks resolve but
+their common outermost frames are unknown, missing libc/libstdc++ thread-start symbols are one possibility.
+Use an unknown frame's address and mapped module to identify the owner; the flame graph alone cannot establish
+whether it belongs to the benchmark, MemFabric, a system library, or the kernel.
+
+Alloy must be able to read the running client's executable and mapped libraries in its mount/PID namespace,
+as well as matching system-library debug files (for example, Ubuntu's `libc6-dbg` and matching libstdc++ debug symbols).
+Keep the profiled binaries available and do not replace them during collection. For short runs, ensure Alloy has
+time to discover the client processes and read their symbols before they exit. An executable with symbols does not
+repair collector access problems or missing symbols in another library. Frame pointers help older collectors;
+newer implementations may unwind using `.eh_frame` instead. See the documentation matching your Alloy version:
+[unknown-symbol troubleshooting](https://grafana.com/docs/pyroscope/latest/configure-client/grafana-alloy/ebpf/troubleshooting/)
+and [pyroscope.ebpf configuration](https://grafana.com/docs/alloy/latest/reference/components/pyroscope/pyroscope.ebpf/).
+
 ## Run
 
 ```bash
