@@ -5,9 +5,11 @@ Bench parameters come from the CLI, environment settings from config.yml.
 Usage: python3 runner.py [--config config.yml] [-p 8 -t 2 ...]
 """
 import argparse
+import codecs
 import json
 import os
 import re
+import selectors
 import signal
 import socket
 import subprocess
@@ -111,7 +113,8 @@ def build_command(cfg, args):
     for name, flag, _, _, _ in PARAMS:
         cmd += [flag, str(getattr(args, name))]
     if args.perf or tool_enabled(cfg, "pyroscope"):
-        cmd += ["--perf", "--perf-freq", str(args.perf_freq), "--perf-target", args.perf_target]
+        cmd += ["--perf", "--perf-freq", str(args.perf_freq)]
+    cmd += ["--perf-target", args.perf_target]
     if args.meta_numa is not None:
         cmd += ["--meta-numa", str(args.meta_numa)]
     if args.worker_numa is not None:
@@ -120,21 +123,50 @@ def build_command(cfg, args):
     return cmd
 
 
-def run(cmd, cwd):
+def run(cmd, cwd, on_profile=None):
     """Run the command, echoing its output live. Returns (exit_code, output)."""
-    lines = []
-    with subprocess.Popen(
-        cmd,
-        cwd=cwd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        errors="replace",
-    ) as proc:
-        for line in proc.stdout:
-            print(line, end="", flush=True)
-            lines.append(line)
-    return proc.returncode, "".join(lines)
+    chunks = []
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    control, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    with control, child, selectors.DefaultSelector() as watcher:
+        command = list(cmd)
+        inherited = ()
+        if on_profile is not None:
+            command += ["--profile-control-fd", str(child.fileno())]
+            inherited = (child.fileno(),)
+        with subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              pass_fds=inherited) as proc:
+            child.close()
+            watcher.register(proc.stdout, selectors.EVENT_READ, "output")
+            if on_profile is not None:
+                watcher.register(control, selectors.EVENT_READ, "control")
+            try:
+                while watcher.get_map():
+                    for key, _ in watcher.select():
+                        if key.data == "output":
+                            data = os.read(proc.stdout.fileno(), 65536)
+                            text = decoder.decode(data, final=not data)
+                            print(text, end="", flush=True)
+                            chunks.append(text)
+                            if not data:
+                                watcher.unregister(proc.stdout)
+                            continue
+                        message = control.recv(65536)
+                        if not message:
+                            watcher.unregister(control)
+                            continue
+                        try:
+                            on_profile(message)
+                        except (OSError, RuntimeError, ValueError) as error:
+                            print(f"Profiling synchronization failed: {error}", file=sys.stderr)
+                            control.sendall(b"!")
+                            watcher.unregister(control)
+                        else:
+                            control.sendall({b"R": b"S", b"D": b"T"}[message[:1]])
+            except BaseException:
+                proc.kill()
+                raise
+        return proc.returncode, "".join(chunks)
 
 
 def number(text):
@@ -364,48 +396,126 @@ def upload_folded(cfg, folded_file, name, sample_rate, started_at, duration_s):
     return True
 
 
-# offcputime prints the comm as the first folded frame, so the process is picked by name.
-OFFCPU_COMM = {"meta": r"^meta_service;", "clients": r"^bench_client",
-               "client0": r"^bench_client_0;"}
 OFFCPU_SAMPLE_RATE = 1000000   # offcputime counts microseconds, so 1e6 makes Pyroscope show seconds
 
 
-def start_offcpu(cfg, perf_data):
-    """Start off-CPU sampling alongside the benchmark. Returns a handle, or None."""
+def start_offcpu(cfg, perf_data, target_pids):
+    """Start off-CPU sampling while workload clients are held at the startup barrier."""
     if not tool_enabled(cfg, "offcpu"):
         return None
     offcpu = cfg["offcpu"]
     path = f"{os.path.splitext(perf_data)[0]}.offcpu.folded"
-    command = [offcpu.get("tool", "offcputime-bpfcc"), "-df",
+    command = [offcpu.get("tool", "offcputime-bpfcc"), "-df", "-p", target_pids,
                str(int(offcpu.get("max_seconds", 86400)))]
     if offcpu.get("min_block_us"):
         command += ["-m", str(int(offcpu["min_block_us"]))]
+    startup_wait = float(offcpu.get("startup_wait_seconds", 2))
+    if not 0 < startup_wait < float("inf"):
+        raise ValueError("offcpu.startup_wait_seconds must be finite and positive")
     try:
         handle = open(path, "w")
-        process = subprocess.Popen(command, stdout=handle, stderr=subprocess.PIPE, text=True)
+        try:
+            process = subprocess.Popen(command, stdout=handle, stderr=subprocess.PIPE, text=True)
+        except OSError:
+            handle.close()
+            raise
     except OSError as error:
         print(f"Warning: cannot start {command[0]}: {error}", file=sys.stderr)
         return None
-    print(f"Off-CPU sampling started: {' '.join(command)}", flush=True)
-    return {"process": process, "file": handle, "path": path}
+    result = {"process": process, "file": handle, "path": path, "stopped": False, "valid": False}
+    try:
+        # Folded-output BCC tools have no readiness message. Allow probe compilation/attachment
+        # before releasing the workload; the grace period is configurable for slower hosts.
+        process.wait(timeout=startup_wait)
+    except subprocess.TimeoutExpired:
+        result["valid"] = True
+        print(f"Off-CPU sampling started: {' '.join(command)}", flush=True)
+        return result
+    except BaseException:
+        stop_offcpu(result)
+        raise
+    stop_offcpu(result)
+    raise RuntimeError("off-CPU tool exited during startup; workload was not released")
+
+
+def stop_offcpu(offcpu_handle):
+    """Stop and reap a collector before client teardown; safe to call again during cleanup."""
+    if offcpu_handle is None:
+        return True
+    if offcpu_handle["stopped"]:
+        return offcpu_handle["valid"]
+    process = offcpu_handle["process"]
+    try:
+        if process.poll() is None:
+            try:
+                process.send_signal(signal.SIGINT)
+            except ProcessLookupError:
+                offcpu_handle["valid"] = False
+        else:
+            offcpu_handle["valid"] = False
+        _, errors = process.communicate(timeout=60)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        _, errors = process.communicate()
+        offcpu_handle["valid"] = False
+        print("Warning: off-CPU tool did not stop, profile dropped", file=sys.stderr)
+    except BaseException:
+        process.kill()
+        process.communicate()
+        offcpu_handle["valid"] = False
+        raise
+    finally:
+        offcpu_handle["file"].close()
+        offcpu_handle["stopped"] = True
+    if process.returncode != 0:
+        offcpu_handle["valid"] = False
+    if errors.strip():
+        print(f"Off-CPU tool: {errors.strip()}", file=sys.stderr)
+    return offcpu_handle["valid"]
+
+
+class WorkloadProfile:
+    """Synchronize runner-owned collection with the native client's two barriers."""
+
+    def __init__(self, cfg, perf_data):
+        self.cfg = cfg
+        self.perf_data = perf_data
+        self.offcpu = None
+        self.started_at = None
+        self.start = None
+        self.duration_s = None
+
+    def on_event(self, message):
+        if message.startswith(b"R ") and self.started_at is None:
+            target_pids = message[2:].decode("ascii")
+            if not re.fullmatch(r"[1-9]\d*(,[1-9]\d*)*", target_pids):
+                raise ValueError("invalid profiling target process IDs")
+            self.offcpu = start_offcpu(self.cfg, self.perf_data, target_pids)
+            if tool_enabled(self.cfg, "offcpu") and self.offcpu is None:
+                raise RuntimeError("off-CPU collection could not start")
+            self.started_at = datetime.now(timezone.utc)
+            self.start = time.monotonic()
+        elif message == b"D" and self.started_at is not None and self.duration_s is None:
+            self.duration_s = time.monotonic() - self.start
+            if not stop_offcpu(self.offcpu):
+                raise RuntimeError("off-CPU collection failed or ended before the workload drained")
+        else:
+            raise RuntimeError(f"unexpected profile control message: {message!r}")
+
+    def close(self):
+        stop_offcpu(self.offcpu)
 
 
 def finish_offcpu(cfg, args, offcpu_handle, started_at, duration_s):
     """Stop off-CPU sampling, keep the benchmark's own stacks and send them to Pyroscope."""
     if offcpu_handle is None:
         return None
-    process, handle, path = offcpu_handle["process"], offcpu_handle["file"], offcpu_handle["path"]
-    process.send_signal(signal.SIGINT)   # bcc tools print their report on SIGINT
-    try:
-        process.wait(timeout=180)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        print("Warning: off-CPU tool did not stop, profile dropped", file=sys.stderr)
-        handle.close()
+    if not stop_offcpu(offcpu_handle):
         return None
-    handle.close()
+    path = offcpu_handle["path"]
 
-    pattern = cfg["offcpu"].get("comm_filter") or OFFCPU_COMM.get(args.perf_target, "")
+    # The collector filters by process ID, preserving named workers such as net_pool0 and AccWrk:0.
+    pattern = cfg["offcpu"].get("comm_filter") or ""
     with open(path, errors="replace") as f:
         lines = [line for line in f if re.match(pattern, line)] if pattern else f.readlines()
     if not lines:
@@ -515,26 +625,31 @@ def main():
         label = f"run {run_number}/{args.rerun}" if args.rerun > 1 else "run"
         annotation_id = grafana_start_annotation(cfg, f"{label}: {' '.join(cmd)}")
         perf_data = os.path.join(cfg["bench"].get("cwd") or ".", "perf.data")
-        offcpu_handle = start_offcpu(cfg, perf_data)
+        profile = WorkloadProfile(cfg, perf_data)
 
         started_at = datetime.now(timezone.utc)
         start = time.monotonic()
-        exit_code, output = run(cmd, cfg["bench"].get("cwd"))
+        try:
+            exit_code, output = run(cmd, cfg["bench"].get("cwd"), profile.on_event)
+        finally:
+            profile.close()
         duration_s = time.monotonic() - start
         final_exit_code = final_exit_code or exit_code
 
         grafana_end_annotation(cfg, annotation_id,
                                f"{label} ({duration_s:.0f}s, exit={exit_code}): {' '.join(cmd)}")
 
-        offcpu_name = finish_offcpu(cfg, args, offcpu_handle, started_at, duration_s)
+        offcpu_name = None
+        if profile.duration_s is not None:
+            offcpu_name = finish_offcpu(cfg, args, profile.offcpu, profile.started_at, profile.duration_s)
 
         metrics = parse_report(output)
         if not metrics:
             print("Warning: Benchmark Report not found in output", file=sys.stderr)
 
         flamegraph_name, flamegraph_pid = None, None
-        if tool_enabled(cfg, "pyroscope"):
-            flamegraph_name = send_flamegraph(cfg, args, perf_data, started_at, duration_s)
+        if tool_enabled(cfg, "pyroscope") and profile.duration_s is not None:
+            flamegraph_name = send_flamegraph(cfg, args, perf_data, profile.started_at, profile.duration_s)
             if flamegraph_name:
                 flamegraph_pid = metrics.get("meta_service_pid")
 
@@ -542,6 +657,8 @@ def main():
             doc = {
                 "started_at": started_at,
                 "duration_s": duration_s,
+                "workload_started_at": profile.started_at,
+                "workload_duration_s": profile.duration_s,
                 "host": socket.gethostname(),
                 "command": " ".join(cmd),
                 "exit_code": exit_code,

@@ -34,7 +34,36 @@ Alternatively, pass `--python /absolute/path/to/python3.11`. The selected interp
 
 The local test executable is built with the example and is not installed in the runtime package. Building requires the repository dependencies, including pybind11, spdlog, and MemFabric. Standalone CMake integration is retained for existing users with installed libraries exporting internal symbols; the in-tree static-library build is recommended.
 
+Runner profiling-handshake tests use Python's standard library and fake collector/benchmark processes:
+
+```bash
+python3 -B example/meta_service_bench/runner_test.py
+```
+
 ## Native profiling symbols (Alloy/Pyroscope)
+
+Built-in `--perf` recording starts after every client completes registration, warmup, and async transport
+setup, before the startup barrier releases the workload. This applies to all `--perf-target` selections
+(`meta`, `clients`, and `client0`). Recording stops after every client drains its workload, before the
+teardown barrier releases clients to disconnect. Warmup and client teardown are excluded from `perf.data`
+and the flamegraph uploaded from it by `runner.py`. A small amount of barrier and profiler startup overhead
+can still be sampled. External Alloy collection keeps its own collection window.
+
+When `offcpu.enabled` is true, `runner.py` starts its collector only after all clients finish warmup.
+A private control socket holds the clients at the startup barrier until the runner acknowledges startup.
+The runner stops and reaps the collector at the drained barrier before acknowledging client teardown.
+The runner and benchmark executable must both include this control protocol. Collector startup or runtime
+failure aborts the run rather than silently releasing an unprofiled workload.
+
+Folded-output BCC tools do not expose a readiness signal. `offcpu.startup_wait_seconds` (default: 2)
+provides a startup grace period while clients remain paused; increase it if BPF compilation and probe
+attachment take longer on your host. A live collector after this delay does not prove attachment completed.
+Collector initialization and small amounts of barrier overhead can be sampled, but warmup is excluded.
+Pyroscope uploads use the workload window; MongoDB also stores `workload_started_at` and `workload_duration_s`
+separately from the full run's existing timestamps. The off-CPU duration limit (`max_seconds`) includes collector
+startup; set it longer than the expected workload plus startup time.
+The collector uses `-p` to select the same process IDs as `perf.target`, including all their named worker
+threads. `offcpu.comm_filter`, if set, further filters the folded output by thread name.
 
 For GCC/Clang builds, the benchmark and its in-tree MemCache objects explicitly use `-g3`,
 `-fno-omit-frame-pointer`, `-fno-optimize-sibling-calls`, and `-fasynchronous-unwind-tables`.

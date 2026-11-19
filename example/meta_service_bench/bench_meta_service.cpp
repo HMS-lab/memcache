@@ -221,6 +221,7 @@ struct BenchConfig {
     uint64_t capacityMB = kDefaultCapacityMB;
     std::string logFile = kDefaultLogFile;
     bool perfEnable = false;
+    int profileControlFd = -1; // Internal runner handshake; not used for standalone runs.
     int perfFreq = kDefaultPerfFreq;
     int metricsIntervalMs = kDefaultMetricsIntervalMs;
     PerfTarget perfTarget = PerfTarget::kMeta;
@@ -1419,6 +1420,14 @@ bool ParseArgs(int argc, char *argv[], BenchConfig &cfg)
                 std::cerr << "Invalid --perf-target: " << v << " (expected meta|clients|client0)\n";
                 return false;
             }
+        } else if (a == "--profile-control-fd") {
+            char *end = nullptr;
+            long descriptor = std::strtol(v.c_str(), &end, kDecimalBase);
+            if (end == v.c_str() || *end != '\0' || descriptor < 0 || descriptor > INT_MAX) {
+                std::cerr << "Invalid profile control descriptor\n";
+                return false;
+            }
+            cfg.profileControlFd = static_cast<int>(descriptor);
         } else if (a == "--meta-numa") {
             cfg.metaNumaNodes = v;
         } else if (a == "--worker-numa") {
@@ -1452,6 +1461,11 @@ int main(int argc, char *argv[])
     BenchConfig cfg;
     if (!ParseArgs(argc, argv, cfg))
         return 1;
+
+    if (cfg.profileControlFd >= 0 && fcntl(cfg.profileControlFd, F_SETFD, FD_CLOEXEC) < 0) {
+        std::cerr << "Invalid profile control descriptor: " << strerror(errno) << std::endl;
+        return 1;
+    }
 
     // Arguments have been copied into cfg. Reuse only contiguous argv storage,
     // leaving the environment untouched. Children inherit this storage and size.
@@ -1526,6 +1540,9 @@ int main(int argc, char *argv[])
     std::cout << "[1/3] Starting meta_service process..." << std::endl;
     pid_t metaPid = fork();
     if (metaPid == 0) {
+        if (cfg.profileControlFd >= 0) {
+            close(cfg.profileControlFd);
+        }
         SetProcessName(kMetaServiceProcName, processTitle, processTitleSize);
         if (!ApplyNumaBinding(metaNuma, cfg.numaMemPolicy, kMetaServiceProcName)) {
             _exit(1);
@@ -1552,9 +1569,6 @@ int main(int argc, char *argv[])
     metricsSampler.Start();
 
     pid_t perfPid = -1;
-    if (cfg.perfEnable && cfg.perfTarget == PerfTarget::kMeta) {
-        perfPid = StartPerfChecked({metaPid}, cfg);
-    }
 
     std::cout << "\n[2/3] Forking " << cfg.processCount << " client processes..." << std::endl;
     std::vector<pid_t> clientPids;
@@ -1567,6 +1581,9 @@ int main(int argc, char *argv[])
         }
         pid_t pid = fork();
         if (pid == 0) {
+            if (cfg.profileControlFd >= 0) {
+                close(cfg.profileControlFd);
+            }
             SetProcessName(kClientProcNamePrefix + std::to_string(i), processTitle, processTitleSize);
             close(controlSocket[bench::kBarrierParentEnd]);
             for (int barrierFd : barrierFds) {
@@ -1588,18 +1605,56 @@ int main(int argc, char *argv[])
         }
     }
 
-    // Clients are parked on the startup barrier here, so perf attaches before they issue any request.
-    if (cfg.perfEnable && cfg.perfTarget != PerfTarget::kMeta && !clientPids.empty()) {
-        std::vector<pid_t> targets = cfg.perfTarget == PerfTarget::kClient0
-                                         ? std::vector<pid_t>{clientPids.front()}
-                                         : clientPids;
-        perfPid = StartPerfChecked(targets, cfg);
-    }
+    const auto startProfiling = [&]() {
+        // Every client has finished warmup and transport setup and is waiting for START.
+        std::vector<pid_t> targets = clientPids;
+        if (cfg.perfTarget == PerfTarget::kMeta) {
+            targets = {metaPid};
+        } else if (cfg.perfTarget == PerfTarget::kClient0) {
+            targets = {clientPids.front()};
+        }
+        if (cfg.perfEnable) {
+            perfPid = StartPerfChecked(targets, cfg);
+        }
+        if (cfg.profileControlFd < 0) {
+            return true;
+        }
+        // Include target process IDs so the runner can capture every named pool thread.
+        std::string request = "R " + JoinPids(targets);
+        ssize_t sent;
+        do {
+            sent = send(cfg.profileControlFd, request.data(), request.size(), MSG_NOSIGNAL);
+        } while (sent < 0 && errno == EINTR);
+        return sent == static_cast<ssize_t>(request.size()) &&
+               bench::ReceiveBarrierMessage(cfg.profileControlFd, bench::BarrierMessage::START);
+    };
+    const auto stopProfiling = [&]() {
+        if (perfPid <= 0) {
+            return true;
+        }
+        StopPerf(perfPid);
+        perfPid = -1;
+        TermLog("[perf] data saved to %s (view: perf report -i %s)\n", kDefaultPerfDataFile, kDefaultPerfDataFile);
+        return true;
+    };
+    const auto finishProfiling = [&]() {
+        stopProfiling();
+        // Ask the runner to freeze its collection before releasing any client to disconnect.
+        bool runnerStopped = cfg.profileControlFd < 0 ||
+                             bench::WaitForBarrier(cfg.profileControlFd, bench::BarrierMessage::DRAINED,
+                                                   bench::BarrierMessage::TEARDOWN);
+        return runnerStopped;
+    };
 
     std::cout << "\n[3/3] Waiting for " << clientPids.size() << " clients to finish..." << std::endl;
     bool clientsFailed = clientPids.size() != static_cast<size_t>(cfg.processCount);
     if (!clientsFailed) {
-        clientsFailed = !bench::CoordinateClients(barrierFds);
+        clientsFailed = !bench::CoordinateClients(barrierFds, startProfiling, finishProfiling);
+    }
+    // Also stop an active recorder if coordination failed before every client drained.
+    stopProfiling();
+    if (cfg.profileControlFd >= 0) {
+        close(cfg.profileControlFd);
     }
     if (clientsFailed) {
         std::cerr << "Client coordination failed; aborting benchmark." << std::endl;
@@ -1620,11 +1675,6 @@ int main(int argc, char *argv[])
     }
 
     metricsSampler.Stop();
-
-    if (perfPid > 0) {
-        StopPerf(perfPid);
-        TermLog("[perf] data saved to %s (view: perf report -i %s)\n", kDefaultPerfDataFile, kDefaultPerfDataFile);
-    }
 
     kill(metaPid, SIGTERM);
     int metaStatus = 0;
