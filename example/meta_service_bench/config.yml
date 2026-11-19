@@ -15,6 +15,7 @@ offcpu:
   min_block_us: 1
   comm_filter: ''
   max_seconds: 86400
+  startup_wait_seconds: 2
 
 pyroscope:
   enabled: true

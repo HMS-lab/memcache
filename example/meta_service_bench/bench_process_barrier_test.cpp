@@ -112,20 +112,46 @@ void RunOrderingTest(int clientCount)
         parentFds.push_back(barriers[i][bench::kBarrierParentEnd]);
     }
     bool coordinated = false;
-    std::thread coordinator([&] { coordinated = bench::CoordinateClients(parentFds); });
+    Channel hooks = CreateChannel();
+    std::thread coordinator([&] {
+        coordinated = bench::CoordinateClients(
+            parentFds,
+            [&] {
+                return bench::WaitForBarrier(hooks[bench::kBarrierClientEnd], bench::BarrierMessage::READY,
+                                             bench::BarrierMessage::START);
+            },
+            [&] {
+                return bench::WaitForBarrier(hooks[bench::kBarrierClientEnd], bench::BarrierMessage::DRAINED,
+                                             bench::BarrierMessage::TEARDOWN);
+            });
+    });
     if (clientCount > kSlowClient) {
         // A ready client cannot start while another client is still warming up.
         CheckNoMessage(observers[kFastClient][bench::kBarrierParentEnd]);
+        CheckNoMessage(hooks[bench::kBarrierParentEnd]);
         Check(bench::SendBarrierMessage(gate[bench::kBarrierParentEnd], bench::BarrierMessage::READY));
     }
+    Check(bench::ReceiveBarrierMessage(hooks[bench::kBarrierParentEnd], bench::BarrierMessage::READY));
+    // Starting the profiler must finish before any workload can begin.
+    for (const auto &observer : observers) {
+        CheckNoMessage(observer[bench::kBarrierParentEnd]);
+    }
+    Check(bench::SendBarrierMessage(hooks[bench::kBarrierParentEnd], bench::BarrierMessage::START));
     for (const auto &observer : observers) {
         Check(bench::ReceiveBarrierMessage(observer[bench::kBarrierParentEnd], bench::BarrierMessage::START));
     }
     if (clientCount > kSlowClient) {
         // A drained client cannot disconnect while another client still has requests.
         CheckNoMessage(observers[kFastClient][bench::kBarrierParentEnd]);
+        CheckNoMessage(hooks[bench::kBarrierParentEnd]);
         Check(bench::SendBarrierMessage(gate[bench::kBarrierParentEnd], bench::BarrierMessage::DRAINED));
     }
+    Check(bench::ReceiveBarrierMessage(hooks[bench::kBarrierParentEnd], bench::BarrierMessage::DRAINED));
+    // Stopping the profiler must finish before any client can tear down.
+    for (const auto &observer : observers) {
+        CheckNoMessage(observer[bench::kBarrierParentEnd]);
+    }
+    Check(bench::SendBarrierMessage(hooks[bench::kBarrierParentEnd], bench::BarrierMessage::TEARDOWN));
     coordinator.join();
     Check(coordinated);
     for (int i = 0; i < clientCount; ++i) {
@@ -135,6 +161,8 @@ void RunOrderingTest(int clientCount)
         Reap(pids[i], EXIT_SUCCESS);
     }
     close(gate[bench::kBarrierParentEnd]);
+    close(hooks[bench::kBarrierParentEnd]);
+    close(hooks[bench::kBarrierClientEnd]);
 }
 
 void RunExitTest(bool afterStartup)
@@ -174,7 +202,20 @@ void RunExitTest(bool afterStartup)
         close(channel[bench::kBarrierClientEnd]);
         parentFds.push_back(channel[bench::kBarrierParentEnd]);
     }
-    Check(!bench::CoordinateClients(parentFds));
+    bool startCalled = false;
+    bool teardownCalled = false;
+    Check(!bench::CoordinateClients(
+        parentFds,
+        [&] {
+            startCalled = true;
+            return true;
+        },
+        [&] {
+            teardownCalled = true;
+            return true;
+        }));
+    Check(startCalled == afterStartup);
+    Check(!teardownCalled);
     for (int fd : parentFds) {
         close(fd);
     }
@@ -193,6 +234,21 @@ void RunClosedWaitingClientTest()
     close(unfinished[bench::kBarrierParentEnd]);
     close(unfinished[bench::kBarrierClientEnd]);
 }
+
+void RunFailedHookTest(bench::BarrierMessage arrival, bench::BarrierMessage release)
+{
+    Channel channel = CreateChannel();
+    Check(bench::SendBarrierMessage(channel[bench::kBarrierClientEnd], arrival));
+    bool called = false;
+    Check(!bench::CoordinateBarrier({channel[bench::kBarrierParentEnd]}, arrival, release, [&] {
+        called = true;
+        return false;
+    }));
+    Check(called);
+    CheckNoMessage(channel[bench::kBarrierClientEnd]);
+    close(channel[bench::kBarrierParentEnd]);
+    close(channel[bench::kBarrierClientEnd]);
+}
 } // namespace
 
 int main()
@@ -204,6 +260,8 @@ int main()
     RunExitTest(false);
     RunExitTest(true);
     RunClosedWaitingClientTest();
+    RunFailedHookTest(bench::BarrierMessage::READY, bench::BarrierMessage::START);
+    RunFailedHookTest(bench::BarrierMessage::DRAINED, bench::BarrierMessage::TEARDOWN);
     std::cout << "Process barrier tests passed\n";
     return EXIT_SUCCESS;
 }

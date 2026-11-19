@@ -14,6 +14,7 @@
 #define MEMCACHE_BENCH_PROCESS_BARRIER_H
 
 #include <cerrno>
+#include <functional>
 #include <poll.h>
 #include <sys/socket.h>
 #include <vector>
@@ -51,7 +52,8 @@ inline bool WaitForBarrier(int socketFd, BarrierMessage arrival, BarrierMessage 
 
 // The parent watches every channel, including clients already waiting for release.
 // EOF or an unexpected message aborts coordination instead of stranding peers.
-inline bool CoordinateBarrier(const std::vector<int> &socketFds, BarrierMessage arrival, BarrierMessage release)
+inline bool CoordinateBarrier(const std::vector<int> &socketFds, BarrierMessage arrival, BarrierMessage release,
+                              const std::function<bool()> &beforeRelease = {})
 {
     std::vector<pollfd> watchers;
     for (int socketFd : socketFds) {
@@ -79,6 +81,10 @@ inline bool CoordinateBarrier(const std::vector<int> &socketFds, BarrierMessage 
             --remaining;
         }
     }
+    // All clients are parked here. Run lifecycle actions before any client is released.
+    if (beforeRelease && !beforeRelease()) {
+        return false;
+    }
     for (int socketFd : socketFds) {
         if (!SendBarrierMessage(socketFd, release)) {
             return false;
@@ -87,12 +93,13 @@ inline bool CoordinateBarrier(const std::vector<int> &socketFds, BarrierMessage 
     return true;
 }
 
-inline bool CoordinateClients(const std::vector<int> &socketFds)
+inline bool CoordinateClients(const std::vector<int> &socketFds, const std::function<bool()> &beforeStart = {},
+                              const std::function<bool()> &beforeTeardown = {})
 {
     // On failure the caller must close all parent endpoints and reap/stop its children.
     return !socketFds.empty() &&
-           CoordinateBarrier(socketFds, BarrierMessage::READY, BarrierMessage::START) &&
-           CoordinateBarrier(socketFds, BarrierMessage::DRAINED, BarrierMessage::TEARDOWN);
+           CoordinateBarrier(socketFds, BarrierMessage::READY, BarrierMessage::START, beforeStart) &&
+           CoordinateBarrier(socketFds, BarrierMessage::DRAINED, BarrierMessage::TEARDOWN, beforeTeardown);
 }
 } // namespace bench
 
