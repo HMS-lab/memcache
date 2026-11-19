@@ -2,6 +2,11 @@
 
 This tool runs MetaService and simulated local-service clients in separate child processes. It measures metadata RPC performance without device memory transfers or NPU hardware. Mock BM registration supplies fake HBM capacity; backup requests are acknowledged without copying cached data.
 
+Processes appear as `bench_coord` (coordinator), `meta_service` (server), and `bench_client_0`,
+`bench_client_1`, etc. (clients, numbered from zero) in `top` and `ps`, including command-line display
+(`top -c`). Linux short process names are limited to 15 visible characters; the command-line title
+retains the full name when the original argument storage has enough space.
+
 Each client process retains its `MetaNetClient` connection for registration, warmup, and server callbacks. A separate MemFabric connection submits measured requests asynchronously. Its handshake uses an invalid rank so it does not replace the registered connection. Request messages carry the registered rank where required.
 
 All processes finish registration, validated warmup, and async connection setup before the coordinator releases the startup barrier. Once a process drains its workload, it stops its timer and waits at the teardown barrier with its clients connected. Clients disconnect only after every process has drained its requests, including dependent Updates. Both barriers are outside workload measurement. Setup errors, failed warmup, or a client exiting before a barrier completes abort the run and release waiting peers.

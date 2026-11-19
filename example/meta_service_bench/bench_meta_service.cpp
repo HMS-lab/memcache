@@ -152,6 +152,7 @@ constexpr int kMpolPreferred = 1;
 constexpr int kMpolBind = 2;
 constexpr const char *kMetaServiceProcName = "meta_service";
 constexpr const char *kClientProcNamePrefix = "bench_client_";
+constexpr const char *kCoordinatorProcName = "bench_coord";
 
 
 int gTermFd = STDERR_FILENO;
@@ -461,10 +462,14 @@ std::string DescribeNumaBinding(const NumaBinding &binding)
     return "nodes " + JoinNodes(binding.nodes) + " (cpus " + binding.cpuList + ")";
 }
 
-void SetProcessName(const std::string &name)
+void SetProcessName(const std::string &name, char *processTitle, size_t processTitleSize)
 {
-    // Lets top/ps/numastat tell the meta_service and client processes apart.
-    prctl(PR_SET_NAME, name.c_str(), 0, 0, 0);
+    // Set both comm (top's default) and argv (top -c / ps args).
+    if (prctl(PR_SET_NAME, name.c_str(), 0, 0, 0) != 0) {
+        TermLog("[%s] Failed to set process name: %s\n", name.c_str(), strerror(errno));
+    }
+    std::memset(processTitle, 0, processTitleSize);
+    std::memcpy(processTitle, name.c_str(), std::min(name.size(), processTitleSize - 1));
 }
 
 
@@ -1448,6 +1453,15 @@ int main(int argc, char *argv[])
     if (!ParseArgs(argc, argv, cfg))
         return 1;
 
+    // Arguments have been copied into cfg. Reuse only contiguous argv storage,
+    // leaving the environment untouched. Children inherit this storage and size.
+    char *processTitle = argv[0];
+    size_t processTitleSize = std::strlen(argv[0]) + 1;
+    for (int i = 1; i < argc && argv[i] == processTitle + processTitleSize; ++i) {
+        processTitleSize += std::strlen(argv[i]) + 1;
+    }
+    SetProcessName(kCoordinatorProcName, processTitle, processTitleSize);
+
     NumaBinding metaNuma;
     NumaBinding workerNuma;
     if (!ResolveNumaBinding(cfg.metaNumaNodes, metaNuma) || !ResolveNumaBinding(cfg.workerNumaNodes, workerNuma))
@@ -1512,7 +1526,7 @@ int main(int argc, char *argv[])
     std::cout << "[1/3] Starting meta_service process..." << std::endl;
     pid_t metaPid = fork();
     if (metaPid == 0) {
-        SetProcessName(kMetaServiceProcName);
+        SetProcessName(kMetaServiceProcName, processTitle, processTitleSize);
         if (!ApplyNumaBinding(metaNuma, cfg.numaMemPolicy, kMetaServiceProcName)) {
             _exit(1);
         }
@@ -1553,7 +1567,7 @@ int main(int argc, char *argv[])
         }
         pid_t pid = fork();
         if (pid == 0) {
-            SetProcessName(kClientProcNamePrefix + std::to_string(i));
+            SetProcessName(kClientProcNamePrefix + std::to_string(i), processTitle, processTitleSize);
             close(controlSocket[bench::kBarrierParentEnd]);
             for (int barrierFd : barrierFds) {
                 close(barrierFd);
