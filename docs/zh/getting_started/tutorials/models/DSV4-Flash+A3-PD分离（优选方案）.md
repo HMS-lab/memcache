@@ -90,7 +90,7 @@ pip install memcache_hybrid==1.3.1 --force-reinstall --no-deps
 
 MemCache由MetaService和LocalService两个组件构成，其中LocalService负责内存申请、数据读写和传输；MetaService作为独立进程启动，通过TCP与LocalService建立连接，负责元数据管理、数据淘汰、主备切换（高可用等功能）。
 
-在A3环境上使用memcache时建议使用device_sdma协议配合[分离部署](https://gitcode.com/Ascend/memcache/wiki/MemCache+vLLM+A3%E5%88%86%E7%A6%BB%E9%83%A8%E7%BD%B2%E6%A1%88%E4%BE%8B.md)模式，达成最优性能。
+在A3环境上使用memcache时建议使用device_sdma协议配合[分离部署](https://ascend-memcache.readthedocs.io/zh-cn/latest/getting_started/MemCache%2BvLLM%2BA3%E7%8B%AC%E7%AB%8B%E9%83%A8%E7%BD%B2%E6%A1%88%E4%BE%8B/)模式，达成最优性能。
 
 启动时MetaService、LocalService的配置由各自配置文件导入，默认配置文件在memcache的whl包config目录下
 

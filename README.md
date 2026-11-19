@@ -24,15 +24,15 @@ High-performance distributed key-value cache
 
 ## 🔄Latest News
 
-- [2026/06] MemCache使能推理PrefixCache加速案例实践，请关注[wiki主页案例库](https://gitcode.com/Ascend/memcache/wiki/Home.md)获取最新案例
+- [2026/06] MemCache使能推理PrefixCache加速案例实践，请关注[文档案例导航](https://ascend-memcache.readthedocs.io/zh-cn/latest/getting_started/)获取最新案例
 - [2025/12] MemCache已作为vllm-ascend backend使能大模型推理加速，详情查看vllm-ascend开源社区，[使用示例](https://docs.vllm.ai/projects/ascend/en/v0.27.1rc1/user_guide/feature_guide/kv_pool.html#example-of-using-memcache-as-a-kv-pool-backend)
 
 - [2025/11] MemCache项目于2025年11月开源，开源社区地址为：<https://gitcode.com/Ascend/memcache>
 
 ## 🔜 Roadmap&发布策略
 
-MemCache roadmap详见：[**Roadmap**](https://gitcode.com/Ascend/memcache/wiki/Roadmap.md)
-MemCache 分支发布策略：[**分支发布策略**](https://gitcode.com/Ascend/memcache/wiki/%E5%BC%80%E5%8F%91%E4%B8%8E%E5%8F%91%E5%B8%83%E8%8A%82%E5%A5%8F%E5%8E%9F%E5%88%99.md)
+MemCache roadmap详见：[**Roadmap**](https://ascend-memcache.readthedocs.io/zh-cn/latest/community/Roadmap/)
+MemCache 分支发布策略：[**分支发布策略**](https://ascend-memcache.readthedocs.io/zh-cn/latest/developer_guide/contribution/%E5%BC%80%E5%8F%91%E4%B8%8E%E5%8F%91%E5%B8%83%E8%8A%82%E5%A5%8F%E5%8E%9F%E5%88%99/)
 
 ## 🎉概述
 
@@ -59,7 +59,7 @@ MemCache包含LocalService和MetaService两大核心组件：
   - MetaService作为独立进程运行，提供两种启动方式：python API启动；二进制启动，详见 [whl安装使用](./docs/zh/install_whl.md) 和 [run安装使用](./docs/zh/install_run.md)
   - MetaService支持两种部署形态：
   ***1、单点模式***：MetaService由单个进程组成，部署方式简单，但存在单点故障的问题。如果MetaService进程崩溃或无法访问，系统将无法继续提供服务，直至重新恢复为止。
-  ***2、HA模式***：该模式基于K8S的ClusterIP Service和Lease资源构建，部署较为复杂，该模式会部署多个MetaService进程实例，实现多活高可用。部署详见[怎么部署一个MemCache的HA集群](https://gitcode.com/Ascend/memcache/wiki/%E6%80%8E%E4%B9%88%E9%83%A8%E7%BD%B2%E4%B8%80%E4%B8%AAmemcache%E7%9A%84HA%E9%9B%86%E7%BE%A4.md)
+  ***2、HA模式***：该模式基于K8S的ClusterIP Service和Lease资源构建，部署较为复杂，该模式会部署多个MetaService进程实例，实现多活高可用。部署详见[怎么部署一个MemCache的HA集群](https://ascend-memcache.readthedocs.io/zh-cn/latest/user_guide/deployment_guide/%E6%80%8E%E4%B9%88%E9%83%A8%E7%BD%B2%E4%B8%80%E4%B8%AAmemcache%E7%9A%84HA%E9%9B%86%E7%BE%A4/)
 
 - **LocalService**：负责承担如下功能：
   - **客户端**：作为客户端，以whl/so形式作为共享库被应用进程加载调用API
@@ -134,7 +134,7 @@ MemCache核心能力是提供大容量内存池和高性能的H2D、D2H、**D2RH
 
 ## 📌FAQ
 
-常见问题请参考：[FAQ](https://gitcode.com/Ascend/memcache/wiki/FAQ.md)
+常见问题请参考：[FAQ](https://ascend-memcache.readthedocs.io/zh-cn/latest/getting_started/FAQ/)
 
 ## 📝相关信息
 

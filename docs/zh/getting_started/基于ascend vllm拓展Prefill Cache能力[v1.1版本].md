@@ -1,6 +1,6 @@
 # 基于ascend vllm拓展Prefill Cache能力[v1.1版本]
 
-## [Home](https://gitcode.com/Ascend/memcache/wiki/Home.md)
+## [文档首页](https://ascend-memcache.readthedocs.io/zh-cn/latest/)
 
 ## 1.方案介绍
 

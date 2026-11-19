@@ -51,6 +51,6 @@ memfabric使用2MB和1GB的大页，脚本默认按照1GB规格扫描，如果�
 
 1. 如果扫描2MB页可用内存比1GB页多，那么就是内存碎片比较严重，这个时候又由于ZonePageSize的机制，导致可用内存急剧减少，没有比较好的方法，推荐重启机器。
 
-2. 推荐杀掉占用进程，并使用 `echo 3 > /proc/sys/vm/drop_caches` 卸载缓存，然后采用[分离部署方案](https://gitcode.com/Ascend/memcache/wiki/MemCache+vLLM+A3分离部署案例.md)的方式，优先拉起内存池进程。
+2. 推荐杀掉占用进程，并使用 `echo 3 > /proc/sys/vm/drop_caches` 卸载缓存，然后采用[分离部署方案](https://ascend-memcache.readthedocs.io/zh-cn/latest/getting_started/MemCache%2BvLLM%2BA3%E7%8B%AC%E7%AB%8B%E9%83%A8%E7%BD%B2%E6%A1%88%E4%BE%8B/)的方式，优先拉起内存池进程。
 
-3. 参考[A3 HCCS场景扩大可用内存空间指导](https://gitcode.com/Ascend/memcache/wiki/MemCache扩大A3可用内存空间.md)升级BIOS彻底解决。
+3. 参考[A3 HCCS场景扩大可用内存空间指导](https://ascend-memcache.readthedocs.io/zh-cn/latest/user_guide/deployment_guide/MemCache%E6%89%A9%E5%A4%A7A3%E5%8F%AF%E7%94%A8%E5%86%85%E5%AD%98%E7%A9%BA%E9%97%B4/)升级BIOS彻底解决。

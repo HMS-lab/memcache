@@ -42,7 +42,7 @@ StatefulSet：负责“申请这些磁盘，并把它们作为裸块设备交给
 
 可以直接使用 UBSIO 独占的空闲物理盘，也可以使用 loop 设备。两种方式只选择一种。
 
-参考：[DRAM + SSD 多级池化配置指南](https://gitcode.com/Ascend/memcache/wiki/DRAM%20+%20SSD%20%E5%A4%9A%E7%BA%A7%E6%B1%A0%E5%8C%96%E9%85%8D%E7%BD%AE%E6%8C%87%E5%8D%97.md#%E5%9C%BA%E6%99%AF%E4%B8%80dram--%E7%A9%BA%E9%97%B2%E6%9C%AC%E5%9C%B0ssd%E7%9B%98%E6%8E%A8%E8%8D%90)。loop 设备请查看指南中的“场景二：无本地空闲 SSD 盘”。
+参考：[DRAM + SSD 多级池化配置指南](https://ascend-memcache.readthedocs.io/zh-cn/latest/user_guide/feature_guide/DRAM%2BSSD%E5%A4%9A%E7%BA%A7%E6%B1%A0%E5%8C%96/%E9%85%8D%E7%BD%AE%E6%8C%87%E5%8D%97/#%E5%9C%BA%E6%99%AF%E4%B8%80dram--%E7%A9%BA%E9%97%B2%E6%9C%AC%E5%9C%B0ssd%E7%9B%98%E6%8E%A8%E8%8D%90)。loop 设备请查看指南中的“场景二：无本地空闲 SSD 盘”。
 
 ### 第二步：给目标节点添加标签
 

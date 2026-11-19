@@ -7,7 +7,6 @@
 whl包已发布到[pypi](https://pypi.org/project/memcache-hybrid/#files)，可以直接在线安装。
 
 ```bash
-# 安装最新版本
 pip install memcache_hybrid
 ```
 
@@ -36,7 +35,7 @@ pip show memfabric_hybrid
 pip install memfabric_hybrid==1.0.8
 ```
 
-MemFabric详细安装方法可参考[MemFabric使用指导](https://gitcode.com/Ascend/memfabric_hybrid/blob/develop/docs/zh/installation.md)。
+MemFabric详细安装方法可参考[MemFabric使用指导](https://memfabric-hybrid.readthedocs.io/zh-cn/latest/wiki/quick_start/installation/)。
 
 ### 运行软件
 
@@ -140,7 +139,6 @@ Required-by:
 - whl 包已默认编译带上 ubsio 盘管理功能，如启用 SSD 需修改配置文件并设置此环境变量，详见 SSD 使用文档。
 
 ```bash
-export UBSIO_CONFIG_PATH=/usr/local/lib/python3.11/site-packages/memcache_hybrid/config/ubsio.conf
 export MMC_META_CONFIG_PATH=/usr/local/lib/python3.11/site-packages/memcache_hybrid/config/mmc-meta.conf
 export MMC_LOCAL_CONFIG_PATH=/usr/local/lib/python3.11/site-packages/memcache_hybrid/config/mmc-local.conf
 ```

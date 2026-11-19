@@ -4,7 +4,7 @@
 
 MemCache 提供了开箱即用的 **Client 端指标看板**，覆盖各 Rank 的 BATCH_PUT / BATCH_GET 操作延时、数据传输带宽及 UBS IO  存储资源等核心运维指标。看板的指标数据来源于 Client 端内置的指标采集框架，通过 30s 周期 Push 上报至 Meta Service，经 `/metrics` 端点以 Prometheus 格式对外暴露。
 
-> **前置依赖**：Prometheus + Grafana 的部署流程和基础对接方式，请先参考 [memcache 对接 Grafana + Prometheus 使用教程](https://gitcode.com/Ascend/memcache/wiki/memcache%E5%AF%B9%E6%8E%A5Grafana+Prometheus%E4%BD%BF%E7%94%A8%E6%95%99%E7%A8%8B.md)。
+> **前置依赖**：Prometheus + Grafana 的部署流程和基础对接方式，请先参考 [memcache 对接 Grafana + Prometheus 使用教程](https://ascend-memcache.readthedocs.io/zh-cn/latest/user_guide/monitoring/memcache%E5%AF%B9%E6%8E%A5Grafana%2BPrometheus%E4%BD%BF%E7%94%A8%E6%95%99%E7%A8%8B/)。
 
 ## 2. 看板导入
 

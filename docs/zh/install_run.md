@@ -56,7 +56,7 @@ bash script/build_and_pack_run.sh --build_mode RELEASE --build_test OFF
 
 ### 安装MemFabric
 
-MemCache依赖MemFabric，需要先安装MemFabric，详细安装方法可参考[MemFabric使用指导](https://gitcode.com/Ascend/memfabric_hybrid/blob/develop/docs/zh/installation.md)。
+MemCache依赖MemFabric，需要先安装MemFabric，详细安装方法可参考[MemFabric使用指导](https://memfabric-hybrid.readthedocs.io/zh-cn/latest/wiki/quick_start/installation/)。
 
 ### 安装MemCache
 

@@ -192,11 +192,11 @@ docker run --name "${NAME}" -it -d --net=host --shm-size=500g \
 在修改 MemCache 配置前，先在四台节点的容器中安装指定版本包：
 
 ```bash
-pip install memfabric_hybrid==1.2.0 --force-reinstall --no-deps
-pip install memcache_hybrid==1.2.0 --force-reinstall --no-deps
+pip install memfabric_hybrid==1.3.1 --force-reinstall --no-deps
+pip install memcache_hybrid==1.3.1 --force-reinstall --no-deps
 ```
 
-`--force-reinstall` 会覆盖当前环境中的同名包，`--no-deps` 不会自动安装或调整依赖。安装后在四台容器中读取本次 pip 安装包内的 `VERSION`，确认完整 commit 与本次测试基线一致，并且四台节点之间没有差异：
+`--force-reinstall` 会覆盖当前环境中的同名包，`--no-deps` 不会自动安装或调整依赖。在四台容器中执行以下检查，确认两个包的版本均为 `1.3.1`，并核对同一个包在各节点上的构建提交是否一致。
 
 ```bash
 python3 - <<'PY'
@@ -211,7 +211,7 @@ for package in ("memfabric_hybrid", "memcache_hybrid"):
 PY
 ```
 
-PyPI 发布的 `1.2.0` CPython 3.12 AArch64 wheel 参考值为：`memfabric_hybrid` commit 前 6 位 `999034`，`memcache_hybrid` commit 前 6 位 `4310d6`。
+PyPI 发布的 `1.3.1` CPython 3.12 AArch64 wheel 中，`memfabric_hybrid` 的构建提交前六位为 `137c52`，`memcache_hybrid` 为 `9922c2`。
 
 ### 修改MemCache配置文件
 
@@ -254,9 +254,6 @@ ock.mmc.evict_threshold_low = 50
 
 ## 数据淘汰高水位：空间使用率达到该值时，触发淘汰
 ock.mmc.evict_threshold_high = 70
-
-## DRAM压力水位：达到该值后，淘汰时快速删除数据释放内存
-ock.mmc.rewarm.dram_watermark = 90
 
 ## Log level: debug, info, warn, error
 ock.mmc.log_level = info
@@ -389,7 +386,7 @@ ubsio.standalone.force_new_disk = true
 
 其中 `80GB` 采用A3 分离模式典型值；使用前需确认节点具有足够剩余内存。`force_new_disk = true` 会把两个专用 loop 设备按新盘初始化，不恢复旧 UBS IO 元数据，因此只能用于已确认可覆盖的专用镜像文件。
 
-本次实测使用 `ubsio.mem.size_in_gb = 80`，Meta 水位使用 `50/70/90`。特性原理和完整参数说明参见 [DRAM + SSD 多级池化特性介绍](https://gitcode.com/Ascend/memcache/wiki/DRAM%20+%20SSD%20%E5%A4%9A%E7%BA%A7%E6%B1%A0%E5%8C%96%E7%89%B9%E6%80%A7%E4%BB%8B%E7%BB%8D.md) 与 [DRAM + SSD 多级池化配置指南](https://gitcode.com/Ascend/memcache/wiki/DRAM%20+%20SSD%20%E5%A4%9A%E7%BA%A7%E6%B1%A0%E5%8C%96%E9%85%8D%E7%BD%AE%E6%8C%87%E5%8D%97.md)。
+本次实测使用 `ubsio.mem.size_in_gb = 80`，Meta 淘汰低水位为 50%，高水位为 70%。特性原理和完整参数说明参见 [DRAM + SSD 多级池化特性介绍](https://ascend-memcache.readthedocs.io/zh-cn/latest/user_guide/feature_guide/DRAM%2BSSD%E5%A4%9A%E7%BA%A7%E6%B1%A0%E5%8C%96/%E7%89%B9%E6%80%A7%E4%BB%8B%E7%BB%8D/) 与 [DRAM + SSD 多级池化配置指南](https://ascend-memcache.readthedocs.io/zh-cn/latest/user_guide/feature_guide/DRAM%2BSSD%E5%A4%9A%E7%BA%A7%E6%B1%A0%E5%8C%96/%E9%85%8D%E7%BD%AE%E6%8C%87%E5%8D%97/)。
 
 **步骤五**：新建独立进程启动脚本。
 

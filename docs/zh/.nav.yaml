@@ -28,6 +28,7 @@ nav:
           - 多级池化:
               - 特性介绍: user_guide/feature_guide/DRAM+SSD多级池化/特性介绍.md
               - 配置指南: user_guide/feature_guide/DRAM+SSD多级池化/配置指南.md
+              - 对接远端共享存储: user_guide/feature_guide/DRAM+SSD多级池化/对接远端共享存储.md
               - Kubernetes配置示例: user_guide/feature_guide/DRAM+SSD多级池化/Kubernetes配置示例.md
               - UBSIO-K8s-CSI-Raw-Block解决方案: user_guide/feature_guide/DRAM+SSD多级池化/UBSIO-K8s-CSI-Raw-Block解决方案.md
               - 多级池化GLM-5.2+A3-4机PD分离: user_guide/feature_guide/DRAM+SSD多级池化/多级池化GLM-5.2+A3-4机PD分离.md
