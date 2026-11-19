@@ -437,6 +437,31 @@ Result list, each element represents the result of the corresponding write opera
 - `0`: Success
 - Other: Error
 
+#### batch_put_from_with_parents
+
+```python
+result = store.batch_put_from_with_parents(
+    keys, parents, buffer_ptrs, sizes, direct=memcache_hybrid.H2G, replicateConfig=defaultConfig
+)
+```
+
+**Function**
+
+Write data in batches exactly as `batch_put_from`, with a parent-key list as the second argument.
+Parent keys are forwarded through the client to MetaService, but parent-child relationships are not applied or
+validated yet. Allocation, copying, retries, default arguments, and return values match `batch_put_from`.
+
+**parameter**
+
+- `keys`: Flat key list, grouped into consecutive equal-length paths.
+- `parents`: Parent-key list, one parent for each path. For `keys=[A,B,C,D,E,F]` and `parents=[X,Y]`, the intended
+  paths are `X -> A -> B -> C` and `Y -> D -> E -> F`. This mapping is not used by the current implementation.
+- `buffer_ptrs`, `sizes`, `direct`, `replicateConfig`: Same meaning and defaults as in `batch_put_from`.
+
+**return value**
+
+One result per key, in input order, exactly as in `batch_put_from`.
+
 #### put_from_layers
 
 ```python

@@ -89,6 +89,9 @@ Result ock::mmc::MetaNetServer::Start(NetEngineOptions &options)
                                       std::bind(&MetaNetServer::HandleBatchUpdateLease, this, std::placeholders::_1));
     server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::ML_BATCH_ALLOC_REQ,
                                       std::bind(&MetaNetServer::HandleBatchAlloc, this, std::placeholders::_1));
+    server->RegRequestReceivedHandler(
+        LOCAL_META_OPCODE_REQ::ML_BATCH_ALLOC_WITH_PARENTS_REQ,
+        std::bind(&MetaNetServer::HandleBatchAllocWithParents, this, std::placeholders::_1));
     server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::LM_PING_REQ, nullptr);
     server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::LM_META_REPLICATE_REQ, nullptr);
     server->RegRequestReceivedHandler(LOCAL_META_OPCODE_REQ::LM_BLOB_COPY_REQ, nullptr);
@@ -276,6 +279,44 @@ Result MetaNetServer::HandleBatchAlloc(const NetContextPtr &context)
     TP_TRACE_END(TP_MMC_META_BATCH_PUT, batchResult);
     if (batchResult != MMC_OK) {
         MMC_LOG_ERROR("BatchAlloc failed. Keys count: " << req.keys_.size() << ", Error: " << batchResult);
+    }
+    return context->Reply(req.msgId, resp);
+}
+
+Result MetaNetServer::HandleBatchAllocWithParents(const NetContextPtr &context)
+{
+    BatchAllocWithParentsRequest req;
+    BatchAllocResponse resp;
+
+    Result getResult = context->GetRequest<BatchAllocWithParentsRequest>(req);
+    if (getResult != MMC_OK) {
+        MMC_LOG_ERROR("Failed to get BatchAllocWithParentsRequest: " << getResult);
+        return getResult;
+    }
+
+    MMC_LOG_DEBUG("HandleBatchAlloc start. caller rankId=" << req.rankId << ", Keys count: " << req.keys.size()
+                                                           << ", OperateId: " << req.operateId << ", Flags: "
+                                                           << req.flags << ", leaseTtlMs: " << req.leaseTtlMs);
+    // ALLOC_LOCAL_FIRST: expand preferredRank_ to all target-backend ranks (expand+shuffle are traced inside the
+    // function).
+    constexpr uint32_t allocStrategyMask = 0xFF;
+    const uint32_t metaStrategy = metaService_->Options().allocStrategy;
+    for (size_t i = 0; i < req.options.size(); ++i) {
+        // MetaService manages global allocation: override the low-byte request strategy and preserve the high GVA mask
+        // bits.
+        if (metaStrategy == ALLOC_ARRANGE || metaStrategy == ALLOC_LOCAL_FIRST) {
+            req.options[i].flags_ = (req.options[i].flags_ & ~allocStrategyMask) | metaStrategy;
+        }
+        if ((req.options[i].flags_ & allocStrategyMask) == ALLOC_LOCAL_FIRST) {
+            metaService_->ExpandLocalFirstRanks(req.options[i], req.rankId);
+        }
+    }
+    auto &metaMgrProxy = metaService_->GetMetaMgrProxy();
+    TP_TRACE_BEGIN(TP_MMC_META_BATCH_PUT);
+    Result batchResult = metaMgrProxy->BatchAllocWithParents(req, resp);
+    TP_TRACE_END(TP_MMC_META_BATCH_PUT, batchResult);
+    if (batchResult != MMC_OK) {
+        MMC_LOG_ERROR("BatchAlloc failed. Keys count: " << req.keys.size() << ", Error: " << batchResult);
     }
     return context->Reply(req.msgId, resp);
 }

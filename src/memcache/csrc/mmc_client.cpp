@@ -575,6 +575,59 @@ MMC_API int32_t mmcc_batch_put(const char **keys, uint32_t keys_count, const mmc
     return MMC_OK;
 }
 
+MMC_API int32_t mmcc_batch_put_with_parents(const char **keys, const char **parents, uint32_t keysCount,
+                                            uint32_t parentsCount, const mmc_buffer *bufs, mmc_put_options &options,
+                                            uint32_t flags, int *results)
+{
+    MMC_VALIDATE_RETURN(keys != nullptr, "invalid param, keys is null", MMC_INVALID_PARAM);
+    MMC_VALIDATE_RETURN(keysCount != 0, "invalid param, keys_count: " << keysCount, MMC_INVALID_PARAM);
+    MMC_VALIDATE_RETURN(bufs != nullptr, "invalid param, bufs is null", MMC_INVALID_PARAM);
+    MMC_VALIDATE_RETURN(results != nullptr, "invalid param, results is null", MMC_INVALID_PARAM);
+    MMC_VALIDATE_RETURN(MmcClientDefault::GetInstance() != nullptr, "client is not initialize", MMC_CLIENT_NOT_INIT);
+    MMC_VALIDATE_RETURN(parents != nullptr || parentsCount == 0, "invalid param, parents is null", MMC_INVALID_PARAM);
+
+    std::vector<std::string> keysVector;
+    std::vector<std::string> parentsVector;
+    std::vector<mmc_buffer> bufsVector;
+    std::vector<int> batchResult(keysCount, MMC_INVALID_PARAM);
+    keysVector.reserve(keysCount);
+    parentsVector.reserve(parentsCount);
+    bufsVector.reserve(keysCount);
+
+    // remove invalid keys, bufs
+    for (size_t i = 0; i < keysCount; ++i) {
+        if (keys[i] == nullptr) {
+            MMC_LOG_ERROR("Get invalid key nullptr on idx [" << i << "]");
+            return MMC_INVALID_PARAM;
+        }
+        if (strlen(keys[i]) == 0 || strlen(keys[i]) > MAX_KEY_LEN) {
+            MMC_LOG_ERROR("Remove invalid key: " << keys[i]);
+            return MMC_INVALID_PARAM; // 这个错误属于入参不合法，直接给调用者返回错误
+        }
+        if (bufs == nullptr || bufs[i].addr == 0 || bufs[i].type >= BUF_TYPE_BASE || bufs[i].len == 0) {
+            MMC_LOG_ERROR("Remove invalid buf with key: " << keys[i] << ", type: " << bufs[i].type
+                                                          << ", len: " << bufs[i].len);
+            return MMC_INVALID_PARAM;
+        }
+        keysVector.emplace_back(keys[i]);
+        bufsVector.emplace_back(bufs[i]);
+    }
+    for (size_t i = 0; i < parentsCount; ++i) {
+        MMC_VALIDATE_RETURN(parents[i] != nullptr, "invalid param, parent is null on idx [" << i << "]",
+                            MMC_INVALID_PARAM);
+        parentsVector.emplace_back(parents[i]);
+    }
+
+    MMC_RETURN_ERROR(MmcClientDefault::GetInstance()->BatchPutWithParents(keysVector, parentsVector, bufsVector,
+                                                                          options, flags, batchResult),
+                     MmcClientDefault::GetInstance()->Name() << " batch_put failed!");
+
+    for (uint32_t i = 0; i < keysVector.size(); ++i) {
+        results[i] = batchResult[i];
+    }
+    return MMC_OK;
+}
+
 MMC_API int32_t mmcc_local_service_id(uint32_t *localServiceId)
 {
     MMC_VALIDATE_RETURN(localServiceId != nullptr, "invalid param, localServiceID is null", MMC_INVALID_PARAM);

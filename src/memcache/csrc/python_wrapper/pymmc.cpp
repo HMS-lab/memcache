@@ -906,6 +906,23 @@ PYBIND11_MODULE(_pymmc, m)
             "Put object data directly from pre-allocated buffers for multiple "
             "keys")
         .def(
+            "batch_put_from_with_parents",
+            [](MmcacheStore &self, const std::vector<std::string> &keys, const std::vector<std::string> &parents,
+               const std::vector<uintptr_t> &bufferPtrs, const std::vector<size_t> &sizes, const int32_t &direct,
+               const ReplicateConfig &replicateConfig) {
+                std::vector<void *> buffers;
+                buffers.reserve(bufferPtrs.size());
+                for (uintptr_t ptr : bufferPtrs) {
+                    buffers.push_back(reinterpret_cast<void *>(ptr));
+                }
+                py::gil_scoped_release release;
+                return self.BatchPutFromWithParents(keys, parents, buffers, sizes, direct, replicateConfig);
+            },
+            py::arg("keys"), py::arg("parents"), py::arg("buffer_ptrs"), py::arg("sizes"),
+            py::arg("direct") = static_cast<int32_t>(SMEMB_COPY_H2G), py::arg("replicateConfig") = defaultConfig,
+            "Put object data directly from pre-allocated buffers for multiple "
+            "keys; parent keys are forwarded without applying parent-child relationships")
+        .def(
             "put_from_layers",
             [](MmcacheStore &self, const std::string &key, const std::vector<uintptr_t> &buffer_ptrs,
                const std::vector<size_t> &sizes, const int32_t &direct, const ReplicateConfig &replicateConfig) {

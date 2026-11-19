@@ -523,6 +523,64 @@ std::vector<int> MmcacheStore::BatchPutFrom(const std::vector<std::string> &keys
     return results;
 }
 
+std::vector<int> MmcacheStore::BatchPutFromWithParents(const std::vector<std::string> &keys,
+                                                       const std::vector<std::string> &parents,
+                                                       const std::vector<void *> &buffers,
+                                                       const std::vector<size_t> &sizes, const int32_t direct,
+                                                       const ReplicateConfig &replicateConfig)
+{
+    const size_t count = keys.size();
+    MMC_VALIDATE_RETURN(count > 0, "key vector is empty", {});
+
+    std::vector<int> results(count, MMC_INVALID_PARAM);
+    if (buffers.size() != count || sizes.size() != count) {
+        MMC_LOG_ERROR("Input vector sizes mismatch: keys=" << keys.size() << ", buffers=" << buffers.size()
+                                                           << ", sizes=" << sizes.size());
+        return results;
+    }
+    uint32_t type = 0;
+    switch (direct) {
+        case SMEMB_COPY_L2G:
+            type = MEDIA_HBM;
+            break;
+        case SMEMB_COPY_H2G:
+            type = MEDIA_DRAM;
+            break;
+        default:
+            MMC_LOG_ERROR("Failed to batch put by type " << direct);
+            return results;
+    }
+
+    std::vector<const char *> keyArray(count);
+    std::vector<const char *> parentArray(parents.size());
+    std::vector<mmc_buffer> bufferArray(count);
+    for (size_t i = 0; i < count; ++i) {
+        keyArray[i] = keys[i].c_str();
+        bufferArray[i] = {.addr = reinterpret_cast<uint64_t>(buffers[i]),
+                          .type = type,
+                          .offset = 0,
+                          .len = static_cast<uint64_t>(sizes[i])};
+    }
+    for (size_t i = 0; i < parents.size(); ++i) {
+        parentArray[i] = parents[i].c_str();
+    }
+
+    mmc_put_options options{};
+    auto temp = CopyPutOptions(replicateConfig, options);
+    MMC_ASSERT_LOG_AND_RETURN(temp, "CopyPutOptions(replicateConfig, options) = " << temp, results);
+    TP_TRACE_BEGIN(TP_MMC_PY_BATCH_PUT);
+    // ALLOC_RANDOM is the default when no allocation strategy is configured (pure random allocation).
+    // If MetaService configures ock.mmc.alloc_strategy = local_first / arrange,
+    // HandleAlloc/HandleBatchAlloc override the request's low-byte strategy with the meta configuration.
+    mmcc_batch_put_with_parents(keyArray.data(), parentArray.data(), count, parents.size(), bufferArray.data(), options,
+                                ALLOC_RANDOM, results.data());
+    TP_TRACE_END(TP_MMC_PY_BATCH_PUT, 0);
+    for (size_t i = 0; i < count; i++) {
+        results[i] = ReturnWrapper(results[i], keys[i]);
+    }
+    return results;
+}
+
 std::vector<int> MmcacheStore::BatchGetInto(const std::vector<std::string> &keys, const std::vector<void *> &buffers,
                                             const std::vector<size_t> &sizes, const int32_t direct)
 {

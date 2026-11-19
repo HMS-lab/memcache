@@ -25,7 +25,7 @@ namespace mmc {
 
 class KeyInfo {
 public:
-    KeyInfo(uint64_t size, uint32_t blobNum) : size_(size), blobNum_(blobNum) {};
+    KeyInfo(uint64_t size, uint32_t blobNum) : size_(size), blobNum_(blobNum){};
 
     ~KeyInfo() = default;
 
@@ -404,6 +404,23 @@ public:
      */
     virtual std::vector<int> BatchWriteFinish(const std::vector<std::string> &keys,
                                               const std::vector<int32_t> &writeResults) = 0;
+
+    /**
+     * @brief Put object data directly from pre-allocated buffers for multiple keys with parent keys
+     * @param keys Vector of keys of the objects to put, grouped into equal-length paths
+     * @param parents Vector of parent keys, one per consecutive path in keys
+     * @param buffers Vector of pointers to the pre-allocated buffers
+     * @param sizes Vector of sizes of the buffers
+     * @param direct Data copy direction, as in BatchPutFrom
+     * @param replicateConfig Preferred rank for allocation
+     * @note Parent keys are forwarded to MetaService only; parent-child relationships are not applied yet.
+     * @return Vector of integers, where each element is 0 on success, or a negative value on error
+     */
+    virtual std::vector<int> BatchPutFromWithParents(const std::vector<std::string> &keys,
+                                                     const std::vector<std::string> &parents,
+                                                     const std::vector<void *> &buffers,
+                                                     const std::vector<size_t> &sizes, const int32_t direct = 3,
+                                                     const ReplicateConfig &replicateConfig = {}) = 0;
 };
 
 } // namespace mmc

@@ -475,6 +475,90 @@ Result MmcClientDefault::BatchPut(const std::vector<std::string> &keys, const st
     return ret;
 }
 
+Result MmcClientDefault::BatchPutWithParents(const std::vector<std::string> &keys,
+                                             const std::vector<std::string> &parents,
+                                             const std::vector<mmc_buffer> &bufs, mmc_put_options &options,
+                                             uint32_t flags, std::vector<int> &batchResult)
+{
+    MMC_VALIDATE_RETURN(bmProxy_ != nullptr, "BmProxy is null", MMC_CLIENT_NOT_INIT);
+    MMC_VALIDATE_RETURN(metaNetClient_ != nullptr, "MetaNetClient is null", MMC_CLIENT_NOT_INIT);
+
+    if (keys.empty() || bufs.empty() || keys.size() != bufs.size()) {
+        MMC_LOG_ERROR("client " << name_ << " batch get failed: keys size:" << keys.size()
+                                << ", bufs size:" << bufs.size());
+        return MMC_INVALID_PARAM;
+    }
+
+    std::vector<MmcBufferArray> bufferArrays{};
+    bufferArrays.reserve(bufs.size());
+    for (const auto &buf : bufs) {
+        MmcBufferArray bufArr{};
+        bufArr.AddBuffer(buf);
+        bufferArrays.emplace_back(bufArr);
+    }
+
+    return BatchPutWithParents(keys, parents, bufferArrays, options, flags, batchResult);
+}
+
+Result MmcClientDefault::BatchPutWithParents(const std::vector<std::string> &keys,
+                                             const std::vector<std::string> &parents,
+                                             const std::vector<MmcBufferArray> &bufArrs, mmc_put_options &options,
+                                             uint32_t flags, std::vector<int> &batchResult)
+{
+    MMC_VALIDATE_RETURN(bmProxy_ != nullptr, "BmProxy is null", MMC_CLIENT_NOT_INIT);
+    MMC_VALIDATE_RETURN(metaNetClient_ != nullptr, "MetaNetClient is null", MMC_CLIENT_NOT_INIT);
+
+    if (keys.empty() || bufArrs.empty() || keys.size() != bufArrs.size()) {
+        MMC_LOG_ERROR("client " << name_ << " batch get failed: keys size:" << keys.size()
+                                << ", bufArrs size:" << bufArrs.size());
+        return MMC_INVALID_PARAM;
+    }
+
+    // DoBatchPut assigns batchResult centrally; an early return on alloc RPC failure preserves the caller's values.
+    auto ret = DoBatchPutWithParents(keys, parents, bufArrs, options, flags, batchResult);
+
+    // Defensive retry: -2017 means the GVA registration is missing or unmounted. WRITE_FAIL released the failed keys,
+    // so allocation and writing can be retried. Clear preferredLocalServiceIDs to switch nodes; retry only if all RPCs
+    // succeeded.
+    for (int32_t retryRound = 1; retryRound <= MAX_PUT_RETRY_TIMES; ++retryRound) {
+        const std::vector<size_t> retryIndices = CollectPutRetryKeys(batchResult);
+        if (!ShouldContinuePutRetry(ret, retryIndices)) {
+            if (ret != MMC_OK) {
+                MMC_LOG_WARN("client " << name_ << " batch put retry skipped, ret: " << ret);
+            }
+            break;
+        }
+        std::vector<std::string> retryKeys;
+        std::vector<MmcBufferArray> retryBufArrs;
+        retryKeys.reserve(retryIndices.size());
+        retryBufArrs.reserve(retryIndices.size());
+        for (size_t index : retryIndices) {
+            retryKeys.push_back(keys[index]);
+            retryBufArrs.push_back(bufArrs[index]);
+        }
+        MMC_LOG_WARN("client " << name_ << " batch put " << retryKeys.size() << " keys copy failed, retry round "
+                               << retryRound << "/" << MAX_PUT_RETRY_TIMES);
+        mmc_put_options retryOptions = options;
+        std::fill(std::begin(retryOptions.preferredLocalServiceIDs), std::end(retryOptions.preferredLocalServiceIDs),
+                  -1);
+        // Keep the initial -2017: an early return on alloc RPC failure during retry must preserve the original failure.
+        std::vector<int> retryResult(retryKeys.size(), SMEM_BM_GVA_NOT_FOUND);
+        const Result retryRet =
+            DoBatchPutWithParents(retryKeys, parents, retryBufArrs, retryOptions, flags, retryResult);
+        for (size_t j = 0; j < retryIndices.size(); ++j) {
+            batchResult[retryIndices[j]] = retryResult[j];
+        }
+        if (retryRet != MMC_OK && ret == MMC_OK) {
+            ret = retryRet;
+        }
+    }
+
+    if (ret != MMC_OK) {
+        MMC_LOG_ERROR("client " << name_ << " batch put failed: " << ret);
+    }
+    return ret;
+}
+
 bool IsHybmCopyRetryable(Result ret)
 {
     return ret == SMEM_BM_GVA_NOT_FOUND;
@@ -510,6 +594,81 @@ Result MmcClientDefault::DoBatchPut(const std::vector<std::string> &keys, const 
     }
     MMC_LOG_DEBUG("ClientBatchPut: keys=" << keys.size() << ", caller rankId=" << rankId_
                                           << ", allocFlags=" << request.flags_);
+    BatchAllocResponse allocResponse{};
+    TP_TRACE_BEGIN(TP_MMC_CLIENT_BATCH_PUT_RPC);
+    auto allocRpcRet = metaNetClient_->SyncCall(request, allocResponse, rpcRetryTimeOut_);
+    TP_TRACE_END(TP_MMC_CLIENT_BATCH_PUT_RPC, allocRpcRet == MMC_OK ? 0 : 1);
+    MMC_RETURN_ERROR(allocRpcRet, "batch put alloc failed");
+    // check alloc result
+    if (keys.size() != allocResponse.blobs_.size() || keys.size() != allocResponse.numBlobs_.size() ||
+        keys.size() != allocResponse.results_.size()) {
+        MMC_LOG_ERROR("Mismatch in number of keys and allocated blobs, keys="
+                      << keys.size() << ", blobs=" << allocResponse.blobs_.size() << ", numBlobs="
+                      << allocResponse.numBlobs_.size() << ", results=" << allocResponse.results_.size());
+        return MMC_ERROR;
+    }
+
+    // put obj — 从此时开始计时, alloc 失败不会产生虚假指标
+    batchResult.assign(keys.size(), MMC_OK);
+    BandwidthGuard guard(MetricOp::BATCH_PUT, bandwidthCollector_, bufArrs, batchResult);
+    auto ret = PutData2Blobs(keys, bufArrs, allocResponse, batchResult);
+
+    // update blob state
+    BatchUpdateRequest updateRequest{};
+    for (size_t i = 0; i < keys.size(); ++i) {
+        for (const auto &blob : allocResponse.blobs_[i]) {
+            updateRequest.keys_.push_back(keys[i]);
+            updateRequest.ranks_.push_back(blob.rank_);
+            updateRequest.mediaTypes_.push_back(blob.mediaType_);
+            updateRequest.actionResults_.push_back(batchResult[i] == 0 ? MMC_WRITE_OK : MMC_WRITE_FAIL);
+            updateRequest.operateIds_.push_back(operateId);
+        }
+    }
+    // 写需要同步更新，异步更新会出现立即读查询blob不可读的情况
+    BatchUpdateResponse updateResponse{};
+    Result updateRet = SyncUpdateState(updateRequest, "batch put update", updateResponse);
+    if (updateRet != MMC_OK) {
+        // WRITE_OK 未到服务端时 blob 停在 ALLOCATED，若仍返回成功会导致假写成功
+        // 且 key 在租约超时前无法重写。报错让调用方感知，可通过 Remove(key) 后重写恢复。
+        MMC_LOG_ERROR("client " << name_ << " batch put update state failed: " << updateRet);
+        return updateRet;
+    }
+
+    size_t updateIndex = 0;
+    for (size_t i = 0; i < keys.size(); ++i) {
+        const size_t blobCount = allocResponse.blobs_[i].size();
+        for (size_t blobIndex = 0; blobIndex < blobCount; ++blobIndex) {
+            const auto &updateResult = updateResponse.results_[updateIndex++];
+            if (updateResult == MMC_OK || batchResult[i] != MMC_OK) {
+                continue;
+            }
+
+            batchResult[i] = updateResult;
+        }
+    }
+
+    if (ret != MMC_OK) {
+        MMC_LOG_ERROR("client " << name_ << " batch put failed: " << ret);
+    }
+    return ret;
+}
+
+Result MmcClientDefault::DoBatchPutWithParents(const std::vector<std::string> &keys,
+                                               const std::vector<std::string> &parents,
+                                               const std::vector<MmcBufferArray> &bufArrs, mmc_put_options &options,
+                                               uint32_t flags, std::vector<int> &batchResult)
+{
+    // alloc blobs
+    uint64_t operateId = GenerateOperateId(rankId_);
+    BatchAllocWithParentsRequest request(keys, parents, {}, flags, operateId, rankId_);
+    for (const auto &bufArr : bufArrs) {
+        AllocOptions tmpAllocOptions{};
+        MMC_VALIDATE_RETURN(PrepareAllocOpt(bufArr.TotalSize(), options, flags, tmpAllocOptions) == MMC_OK,
+                            "option param error", MMC_ERROR);
+        request.options.emplace_back(std::move(tmpAllocOptions));
+    }
+    MMC_LOG_DEBUG("ClientBatchPut: keys=" << keys.size() << ", caller rankId=" << rankId_
+                                          << ", allocFlags=" << request.flags);
     BatchAllocResponse allocResponse{};
     TP_TRACE_BEGIN(TP_MMC_CLIENT_BATCH_PUT_RPC);
     auto allocRpcRet = metaNetClient_->SyncCall(request, allocResponse, rpcRetryTimeOut_);

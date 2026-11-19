@@ -101,7 +101,7 @@ struct AllocRequest : MsgBase {
 
     AllocRequest() : MsgBase{0, ML_ALLOC_REQ, 0}, operateId_{0}, rankId_{0} {}
     AllocRequest(const std::string &key, const AllocOptions &prot, uint64_t operateId, const uint32_t rankId)
-        : MsgBase{0, ML_ALLOC_REQ, 0}, operateId_(operateId), rankId_(rankId), key_(key), options_(prot) {};
+        : MsgBase{0, ML_ALLOC_REQ, 0}, operateId_(operateId), rankId_(rankId), key_(key), options_(prot){};
 
     Result Serialize(NetMsgPacker &packer) const override
     {
@@ -136,7 +136,7 @@ struct GetRequest : MsgBase {
 
     GetRequest() : MsgBase{0, ML_GET_REQ, 0}, operateId_{0}, rankId_{0}, isGet_{false} {}
     explicit GetRequest(const std::string &key, uint32_t rankId, uint64_t operateId, bool isGet)
-        : MsgBase{0, ML_GET_REQ, 0}, key_(key), rankId_(rankId), operateId_(operateId), isGet_(isGet) {};
+        : MsgBase{0, ML_GET_REQ, 0}, key_(key), rankId_(rankId), operateId_(operateId), isGet_(isGet){};
 
     Result Serialize(NetMsgPacker &packer) const override
     {
@@ -293,6 +293,66 @@ struct BatchAllocRequest : MsgBase {
     }
 };
 
+struct BatchAllocWithParentsRequest : MsgBase {
+    std::vector<std::string> keys;
+    std::vector<std::string> parents;
+    std::vector<AllocOptions> options;
+    uint32_t flags;
+    uint32_t rankId; // Caller rank; local-first allocation uses this to identify the caller's node.
+    uint64_t operateId;
+    uint64_t leaseTtlMs{0};
+
+    BatchAllocWithParentsRequest()
+        : MsgBase{0, ML_BATCH_ALLOC_WITH_PARENTS_REQ, 0}, flags{0}, rankId{0}, operateId(0), leaseTtlMs(0)
+    {}
+
+    BatchAllocWithParentsRequest(const std::vector<std::string> &keys, const std::vector<std::string> &parents,
+                                 const std::vector<AllocOptions> &options, uint32_t flags, uint64_t operateId,
+                                 const uint32_t rankId, uint64_t leaseTtlMs = 0)
+        : MsgBase{0, ML_BATCH_ALLOC_WITH_PARENTS_REQ, 0}, keys(keys), parents(parents), options(options), flags(flags),
+          rankId(rankId), operateId(operateId), leaseTtlMs(leaseTtlMs)
+    {}
+
+    Result Serialize(NetMsgPacker &packer) const override
+    {
+        packer.Serialize(msgVer);
+        packer.Serialize(msgId);
+        packer.Serialize(destRankId);
+        packer.Serialize(keys);
+        packer.Serialize(parents);
+        MMC_ASSERT_LOG_AND_RETURN(keys.size() == options.size(),
+                                  "keys.size() = " << keys.size() << ", options.size() = " << options.size(),
+                                  MMC_ERROR);
+        for (const auto &option : options) {
+            option.Serialize(packer);
+        }
+        packer.Serialize(flags);
+        packer.Serialize(rankId);
+        packer.Serialize(operateId);
+        packer.Serialize(leaseTtlMs);
+        return MMC_OK;
+    }
+
+    Result Deserialize(NetMsgUnpacker &packer) override
+    {
+        packer.Deserialize(msgVer);
+        packer.Deserialize(msgId);
+        packer.Deserialize(destRankId);
+        packer.Deserialize(keys);
+        packer.Deserialize(parents);
+        options.clear();
+        options.assign(keys.size(), AllocOptions());
+        for (auto &option : options) {
+            option.Deserialize(packer);
+        }
+        packer.Deserialize(flags);
+        packer.Deserialize(rankId);
+        packer.Deserialize(operateId);
+        packer.Deserialize(leaseTtlMs);
+        return MMC_OK;
+    }
+};
+
 struct BatchAllocResponse : MsgBase {
     std::vector<std::vector<MmcMemBlobDesc>> blobs_;
     std::vector<uint8_t> numBlobs_;
@@ -344,7 +404,7 @@ struct RemoveRequest : MsgBase {
 
     RemoveRequest() : MsgBase{0, ML_REMOVE_REQ, 0} {}
     explicit RemoveRequest(const std::string &key, uint32_t flags = 0)
-        : MsgBase{0, ML_REMOVE_REQ, 0}, key_(key), flags_(flags) {};
+        : MsgBase{0, ML_REMOVE_REQ, 0}, key_(key), flags_(flags){};
 
     Result Serialize(NetMsgPacker &packer) const override
     {
@@ -480,7 +540,7 @@ struct UpdateRequest : MsgBase {
     UpdateRequest(const BlobActionResult &result, const std::string &key, const uint64_t &rank,
                   const uint16_t &mediaType, const uint64_t &operateId)
         : MsgBase{0, ML_UPDATE_REQ, 0}, actionResult_(result), key_(key), rank_(rank), mediaType_(mediaType),
-          operateId_(operateId) {};
+          operateId_(operateId){};
 
     Result Serialize(NetMsgPacker &packer) const override
     {
@@ -525,7 +585,7 @@ struct Response : MsgBase {
     std::vector<Result> keyResults_;
 
     Response() : MsgBase{0, ML_UPDATE_REQ, 0} {}
-    explicit Response(const Result &ret) : MsgBase{0, ML_UPDATE_REQ, 0}, ret_(ret) {};
+    explicit Response(const Result &ret) : MsgBase{0, ML_UPDATE_REQ, 0}, ret_(ret){};
 
     Result Serialize(NetMsgPacker &packer) const override
     {
