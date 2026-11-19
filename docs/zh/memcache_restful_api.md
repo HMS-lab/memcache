@@ -11,6 +11,10 @@ This document defines the target contract of the MemCache Hybrid REST interface;
 - `error_message` returns the actual error cause; in scenarios such as when the interface is not implemented, `Not supported` can be returned
 - If the successful response contains `timestamp`, its meaning is defined by the corresponding interface; `timestamp` in the error response indicates the error response generation time, and `0` in the example is only a placeholder value
 
+The SDK method `batch_put_from_with_parents` uses a separate client-to-MetaService allocation RPC and forwards
+parent keys to MetaService. It currently writes exactly like `batch_put_from`: parent-child relationships are
+not applied or exposed through REST, and the REST endpoints below are unchanged.
+
 ## 1 `GET /metadata?key=...`
 
 ### Purpose

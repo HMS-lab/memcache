@@ -146,6 +146,12 @@ public:
     std::vector<int> BatchWriteFinish(const std::vector<std::string> &keys,
                                       const std::vector<int32_t> &writeResults) override;
 
+    std::vector<int> BatchPutFromWithParents(const std::vector<std::string> &keys,
+                                             const std::vector<std::string> &parents,
+                                             const std::vector<void *> &buffers, const std::vector<size_t> &sizes,
+                                             const int32_t direct = 3,
+                                             const ReplicateConfig &replicateConfig = {}) override;
+
     // bellow only python api use
     mmc_buffer Get(const std::string &key);
 

@@ -332,6 +332,33 @@ Write multiple keys in batches.
 
 Returns a list of processing results corresponding to each key. Each element `0` represents success, and a negative number represents failure.
 
+#### BatchPutFromWithParents
+
+```c++
+virtual std::vector<int> BatchPutFromWithParents(
+    const std::vector<std::string> &keys, const std::vector<std::string> &parents,
+    const std::vector<void *> &buffers, const std::vector<size_t> &sizes,
+    const int32_t direct = 3,
+    const ReplicateConfig &replicateConfig = {}) = 0;
+```
+
+**Function**
+
+Same write behavior as `BatchPutFrom`, with parent keys forwarded to MetaService. Parent-child relationships are
+not applied or validated yet; allocation, copying, retries, and result handling are unchanged.
+
+**parameter**
+
+- `keys`: Flat key list, grouped into consecutive equal-length paths.
+- `parents`: Parent keys, one per path. For `keys=[A,B,C,D,E,F]` and `parents=[X,Y]`, the intended paths are
+  `X -> A -> B -> C` and `Y -> D -> E -> F`. This mapping is not used yet.
+- `buffers`, `sizes`, `replicateConfig`: Same meaning as in `BatchPutFrom`.
+- `direct`: Same meaning and default as in `BatchPutFrom`; the default is `3` (H2G).
+
+**return value**
+
+One result per key, in input order, exactly as in `BatchPutFrom`.
+
 #### BatchRemove
 
 ```c++

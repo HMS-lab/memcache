@@ -58,6 +58,8 @@ private:
 
     Result HandleBatchAlloc(const NetContextPtr &context);
 
+    Result HandleBatchAllocWithParents(const NetContextPtr &context);
+
     Result HandleBmRegister(const NetContextPtr &context);
 
     Result HandleGetExternalConfig(const NetContextPtr &context);

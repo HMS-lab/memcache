@@ -134,6 +134,67 @@ Result MmcMetaMgrProxy::BatchAlloc(const BatchAllocRequest &req, BatchAllocRespo
     return MMC_OK;
 }
 
+Result MmcMetaMgrProxy::BatchAllocWithParents(const BatchAllocWithParentsRequest &req, BatchAllocResponse &resp)
+{
+    // Parent keys arrive in req.parents; applying parent-child relationships is intentionally deferred.
+    MmcMetaMetricManager &metricManager = MmcMetaMetricManager::GetInstance();
+    metricManager.IncrementRequestCounter(RestMetricType::BATCH_ALLOC, UINT32_MAX);
+    resp.results_.resize(req.keys.size());
+    resp.blobs_.resize(req.keys.size());
+    if (req.keys.size() != req.options.size()) {
+        metricManager.IncrementFailureCounter(RestMetricType::BATCH_ALLOC);
+        MMC_LOG_ERROR("BatchAlloc input size mismatch, key count: " << req.keys.size()
+                                                                    << ", option count: " << req.options.size());
+        return MMC_ERROR;
+    }
+    // Watermark checks are batch-level: doing them once per key serializes every
+    // BatchAlloc through the global allocator lock and walks all rank allocators
+    // thousands of times per request.
+    // MEDIA_NONE means the default (top layer) media and is what clients send when no media is
+    // specified, so keep one extra slot for it; otherwise the default path would skip eviction.
+    std::array<uint64_t, MEDIA_NONE + 1> wantSize{};
+    for (const auto &option : req.options) {
+        const int media = static_cast<int>(option.mediaType_);
+        if (media >= 0 && media <= MEDIA_NONE) {
+            wantSize[media] += option.blobSize_ * option.numBlobs_;
+        }
+    }
+    for (int media = 0; media <= MEDIA_NONE; ++media) {
+        if (wantSize[media] > 0) {
+            metaMangerPtr_->CheckAndEvict(static_cast<MediaType>(media), wantSize[media]);
+        }
+    }
+    for (size_t i = 0; i < req.keys.size(); ++i) {
+        // per-rank tracking: UINT32_MAX if no preferred rank specified
+        const uint32_t rank = req.options[i].preferredRank_.empty() ? UINT32_MAX : req.options[i].preferredRank_[0];
+        MmcMemMetaDesc objMeta{};
+        TP_TRACE_BEGIN(TP_MMC_META_MGR_ALLOC);
+        metricManager.IncrementRequestCounter(RestMetricType::ALLOC, rank);
+        Result ret = metaMangerPtr_->Alloc(req.keys[i], req.options[i], req.operateId, req.leaseTtlMs, objMeta);
+        TP_TRACE_END(TP_MMC_META_MGR_ALLOC, ret);
+        IncrementResultCounter(metricManager, RestMetricType::ALLOC, ret, rank);
+        if (ret != MMC_OK) {
+            if (ret != MMC_DUPLICATED_OBJECT) {
+                MMC_LOG_ERROR("Allocation failed for key: " << req.keys[i] << ", error: " << ret);
+            }
+            resp.numBlobs_.push_back(0);
+            resp.prots_.push_back(0);
+            resp.priorities_.push_back(0);
+            resp.leases_.push_back(0);
+            resp.blobs_[i] = {};
+        } else {
+            resp.numBlobs_.push_back(objMeta.numBlobs_);
+            resp.prots_.push_back(objMeta.prot_);
+            resp.priorities_.push_back(objMeta.priority_);
+            resp.leases_.push_back(objMeta.blobs_.empty() ? 0 : objMeta.blobs_[0].leaseTimeoutTtlMs_);
+            resp.blobs_[i] = objMeta.blobs_;
+        }
+        resp.results_[i] = ret;
+    }
+    IncrementBatchResultCounter(metricManager, RestMetricType::BATCH_ALLOC, resp.results_);
+    return MMC_OK;
+}
+
 Result MmcMetaMgrProxy::UpdateState(const UpdateRequest &req, Response &resp)
 {
     MmcMetaMetricManager &metricManager = MmcMetaMetricManager::GetInstance();
