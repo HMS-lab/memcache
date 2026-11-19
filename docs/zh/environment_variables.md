@@ -43,7 +43,9 @@
 | 环境变量名 | 默认值 | 说明 |
 |-----------|-------|------|
 | `MMC_BUILD_JOBS` | `32` | 并行编译线程数，影响 `make -j` / `ninja -j` 的并行度。 |
-| `PYTHON_HOME` | `/usr/local/python3.11` 或 `/usr/local` | Python 安装路径，用于 pybind11 编译和 wheel 打包。未设置时自动探测。 |
+| `PYTHON_EXECUTABLE` | 自动选择 | 构建使用的 Python 可执行文件，优先于虚拟环境和 `PYTHON_HOME`；`--python` 可显式覆盖。解释器、头文件、共享库与 wheel 打包统一使用该 Python。 |
+| `VIRTUAL_ENV` | 未设置 | 激活 venv 后自动设置；未显式选择解释器时优先使用其 `bin/python`，开发头文件和共享库来自基础 Python 安装。 |
+| `PYTHON_HOME` | 自动选择 | 未指定解释器或激活 venv 时使用其 `bin/python3`；否则尝试 `/usr/local/python3.11/bin/python3` 和 PATH 中的 `python3`。构建时更新为所选解释器的 `sys.prefix`。 |
 | `MEMCACHE_VERSION` | 从 `VERSION` 文件读取 | 包版本号，用于生成 whl 包版本。**仅构建 Python whl 包时需要，C++ 构建不需要。** |
 | `ENABLE_FUZZ` | `OFF` | 是否启用 Fuzz 构建。`run_fuzz.sh` 会设为 `ON`，CMake 通过 `$ENV{ENABLE_FUZZ}` 读取。 |
 | `ASAN_OPTIONS` | 无 | AddressSanitizer 运行选项，UT 和 Fuzz 脚本设置默认值用于控制内存检查行为。 |

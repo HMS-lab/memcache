@@ -5,6 +5,9 @@ if (("${BUILD_CPP_EXAMPLE}" STREQUAL "") OR ("${BUILD_CPP_EXAMPLE}" STREQUAL "OF
     project(bench_meta_service VERSION 1.0 LANGUAGES CXX C)
     set(CMAKE_CXX_STANDARD 17)
     set(CMAKE_SKIP_RPATH TRUE)
+    if (NOT CMAKE_BUILD_TYPE)
+        set(CMAKE_BUILD_TYPE DEBUG CACHE STRING "Benchmark build type" FORCE)
+    endif ()
 
     set(MF_PATH $ENV{MEMFABRIC_HYBRID_HOME_PATH})
     if ("${MF_PATH}" STREQUAL "")
@@ -94,7 +97,7 @@ else ()
             ${PROJECT_3RDPARTY_SRC_DIR}/prometheus-cpp-lite/core/include
     )
 
-    target_link_libraries(bench_meta_service PUBLIC mmc_static pthread dl)
+    target_link_libraries(bench_meta_service PUBLIC mmc_static Python::Python pthread dl)
     target_link_directories(bench_meta_service PUBLIC
             ${PROJECT_OUTPUT_PATH}/acc_links/lib64/
             ${PROJECT_3RDPARTY_BIN_DIR}/spdlog/lib
@@ -105,3 +108,42 @@ else ()
             RUNTIME DESTINATION ${TARGET_INSTALL_DIR}/memcache/bin
             PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
 endif ()
+
+# Retain symbols and reliable native unwind information even in optimized profiling builds.
+# In-tree MemCache code is linked statically into the benchmark, so instrument its objects too.
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    set(BENCH_PROFILE_COMPILE_OPTIONS
+            -g3 -fno-omit-frame-pointer -fno-optimize-sibling-calls -fasynchronous-unwind-tables)
+    target_compile_options(bench_meta_service PRIVATE ${BENCH_PROFILE_COMPILE_OPTIONS})
+    if (TARGET mmc_objects)
+        target_compile_options(mmc_objects PRIVATE ${BENCH_PROFILE_COMPILE_OPTIONS})
+    endif ()
+
+    # The repository's RELEASE configuration otherwise strips the final executable.
+    get_target_property(BENCH_LINK_OPTIONS bench_meta_service LINK_OPTIONS)
+    if (BENCH_LINK_OPTIONS)
+        list(REMOVE_ITEM BENCH_LINK_OPTIONS -s -Wl,-s -Wl,--strip-all -Wl,--strip-debug)
+        set_property(TARGET bench_meta_service PROPERTY LINK_OPTIONS "${BENCH_LINK_OPTIONS}")
+    endif ()
+    set_target_properties(bench_meta_service PROPERTIES ENABLE_EXPORTS ON)
+    target_link_options(bench_meta_service PRIVATE -Wl,--build-id=sha1)
+
+endif ()
+
+# Built alongside the example; not installed in the runtime package.
+add_executable(bench_meta_service_async_test bench_async_test.cpp)
+get_target_property(BENCH_INCLUDE_DIRS bench_meta_service INCLUDE_DIRECTORIES)
+if (BENCH_INCLUDE_DIRS)
+    target_include_directories(bench_meta_service_async_test PRIVATE ${BENCH_INCLUDE_DIRS})
+endif ()
+get_target_property(BENCH_LINK_LIBS bench_meta_service LINK_LIBRARIES)
+get_target_property(BENCH_LINK_DIRS bench_meta_service LINK_DIRECTORIES)
+target_link_libraries(bench_meta_service_async_test PRIVATE ${BENCH_LINK_LIBS})
+if (BENCH_LINK_DIRS)
+    target_link_directories(bench_meta_service_async_test PRIVATE ${BENCH_LINK_DIRS})
+endif ()
+target_compile_options(bench_meta_service_async_test PRIVATE -W -fpermissive -Wno-float-equal)
+
+# The process protocol test has no MemCache, MemFabric, Python, or device runtime dependency.
+add_executable(bench_meta_service_barrier_test bench_process_barrier_test.cpp)
+target_link_libraries(bench_meta_service_barrier_test PRIVATE pthread)

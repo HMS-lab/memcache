@@ -36,6 +36,12 @@
 //   -l <logFile>      Log file for MMC library output          (default: bench_meta_service.log)
 //   --perf             Enable perf profiling of meta_service     (default: off)
 //   --perf-freq <hz>   perf record sample frequency                (default: 99)
+//   --perf-target <who>  Which processes perf records: meta|clients|client0 (default: meta)
+//   --metrics-interval-ms <ms>  Sample /metrics every ms; 0 disables  (default: 1000)
+//   -q, --queue-depth <q>  Logical operations in flight per thread    (default: 1)
+//   --meta-numa <nodes>   NUMA nodes for meta_service: 5, 4,6, 4-7 or !5 (default: unbound)
+//   --worker-numa <nodes> NUMA nodes for coordinator + clients, same format (default: unbound)
+//   --numa-mem <policy>   Memory policy of NUMA binding: bind|preferred|none (default: bind)
 
 #include <algorithm>
 #include <array>
@@ -43,6 +49,7 @@
 #include <arpa/inet.h>
 #include <cerrno>
 #include <chrono>
+#include <climits>
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
@@ -50,21 +57,28 @@
 #include <cstring>
 #include <cstdarg>
 #include <fcntl.h>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <map>
 #include <mutex>
 #include <netinet/in.h>
 #include <random>
+#include <sched.h>
+#include <set>
 #include <sstream>
 #include <string>
 #include <sys/mman.h>
+#include <sys/prctl.h>
 #include <sys/socket.h>
+#include <sys/syscall.h>
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
 #include <vector>
 
+#include "bench_async_transport.h"
+#include "bench_process_barrier.h"
 #include "mmc_blob_allocator.h"
 #include "mmc_blob_state.h"
 #include "mmc_def.h"
@@ -129,9 +143,53 @@ constexpr int kMetricsReceiveBufferSize = 16 * 1024;
 
 constexpr uint64_t kBytesPerMB = 1024 * 1024;
 
+constexpr int kMaxNumaNodeCount = 1024;
+constexpr int kDecimalBase = 10;
+constexpr const char *kNumaSysfsNodePrefix = "/sys/devices/system/node/node";
+constexpr const char *kNumaSysfsOnline = "/sys/devices/system/node/online";
+// Linux mempolicy modes from <linux/mempolicy.h>, defined here so libnuma headers are not required.
+constexpr int kMpolPreferred = 1;
+constexpr int kMpolBind = 2;
+constexpr const char *kMetaServiceProcName = "meta_service";
+constexpr const char *kClientProcNamePrefix = "bench_client_";
+constexpr const char *kCoordinatorProcName = "bench_coord";
+
+
 int gTermFd = STDERR_FILENO;
 
-enum OpType : int { kOpPut = 0, kOpGet, kOpTypeCount };
+enum class NumaMemPolicy : int { kNone = 0, kPreferred, kBind };
+
+enum class PerfTarget : int { kMeta = 0, kClients, kClient0 };
+
+inline const char *PerfTargetName(PerfTarget target)
+{
+    switch (target) {
+        case PerfTarget::kMeta:
+            return "meta_service";
+        case PerfTarget::kClients:
+            return "all clients";
+        case PerfTarget::kClient0:
+            return "client 0";
+        default:
+            return "unknown";
+    }
+}
+
+inline const char *NumaMemPolicyName(NumaMemPolicy policy)
+{
+    switch (policy) {
+        case NumaMemPolicy::kNone:
+            return "none";
+        case NumaMemPolicy::kPreferred:
+            return "preferred";
+        case NumaMemPolicy::kBind:
+            return "bind";
+        default:
+            return "unknown";
+    }
+}
+
+enum OpType : int { kOpPut = 0, kOpGet, kOpAlloc, kOpUpdate, kOpTypeCount };
 
 inline const char *OpTypeName(OpType t)
 {
@@ -140,12 +198,17 @@ inline const char *OpTypeName(OpType t)
             return "Put";
         case kOpGet:
             return "Get";
+        case kOpAlloc: return "  Alloc";
+        case kOpUpdate: return "  Update";
         default:
             return "Unknown";
     }
 }
 
 struct BenchConfig {
+    int rpcTimeoutMs = kRpcTimeoutMs;
+    int queueDepth = 1;
+    bool waitCompletions = false;
     int processCount = kDefaultProcessCount;
     int threadCount = kDefaultThreadCount;
     int opsPerThread = kDefaultOpsPerThread;
@@ -160,6 +223,10 @@ struct BenchConfig {
     bool perfEnable = false;
     int perfFreq = kDefaultPerfFreq;
     int metricsIntervalMs = kDefaultMetricsIntervalMs;
+    PerfTarget perfTarget = PerfTarget::kMeta;
+    std::string metaNumaNodes;   // empty = unbound
+    std::string workerNumaNodes; // empty = unbound
+    NumaMemPolicy numaMemPolicy = NumaMemPolicy::kBind;
 };
 
 void TermLog(const char *fmt, ...)
@@ -187,6 +254,224 @@ void RedirectLogsToFile(const std::string &logFile)
     setbuf(stdout, nullptr);
     setbuf(stderr, nullptr);
 }
+
+struct NumaBinding {
+    std::string spec;
+    std::vector<int> nodes;
+    std::string cpuList;
+    cpu_set_t cpuSet{};
+};
+
+// Parses the kernel cpulist format, e.g. "0-23,48-71".
+bool ParseCpuList(const std::string &cpuList, cpu_set_t &cpuSet)
+{
+    CPU_ZERO(&cpuSet);
+    std::istringstream stream(cpuList);
+    std::string range;
+    int cpuCount = 0;
+    while (std::getline(stream, range, ',')) {
+        if (range.empty()) {
+            continue;
+        }
+        char *end = nullptr;
+        const long first = std::strtol(range.c_str(), &end, kDecimalBase);
+        if (end == range.c_str()) {
+            return false;
+        }
+        long last = first;
+        if (*end == '-') {
+            const char *lastStart = end + 1;
+            last = std::strtol(lastStart, &end, kDecimalBase);
+            if (end == lastStart) {
+                return false;
+            }
+        }
+        if (*end != '\0' || first < 0 || last < first || last >= CPU_SETSIZE) {
+            return false;
+        }
+        for (long cpu = first; cpu <= last; ++cpu) {
+            CPU_SET(static_cast<int>(cpu), &cpuSet);
+            ++cpuCount;
+        }
+    }
+    return cpuCount > 0;
+}
+
+// Parses a node list such as "4", "4,6" or "4-7" (same format as the kernel cpulist).
+bool ParseNodeList(const std::string &list, std::set<int> &nodes)
+{
+    std::istringstream stream(list);
+    std::string range;
+    while (std::getline(stream, range, ',')) {
+        if (range.empty()) {
+            continue;
+        }
+        char *end = nullptr;
+        const long first = std::strtol(range.c_str(), &end, kDecimalBase);
+        if (end == range.c_str()) {
+            return false;
+        }
+        long last = first;
+        if (*end == '-') {
+            const char *lastStart = end + 1;
+            last = std::strtol(lastStart, &end, kDecimalBase);
+            if (end == lastStart) {
+                return false;
+            }
+        }
+        if (*end != '\0' || first < 0 || last < first || last >= kMaxNumaNodeCount) {
+            return false;
+        }
+        for (long node = first; node <= last; ++node) {
+            nodes.insert(static_cast<int>(node));
+        }
+    }
+    return !nodes.empty();
+}
+
+bool ReadNodeCpuList(int node, std::string &cpuList, cpu_set_t &cpuSet)
+{
+    std::ifstream file(kNumaSysfsNodePrefix + std::to_string(node) + "/cpulist");
+    if (!file.is_open() || !std::getline(file, cpuList)) {
+        return false;
+    }
+    return ParseCpuList(cpuList, cpuSet);
+}
+
+// Online nodes with at least one CPU this process may run on (respects the container cpuset).
+bool UsableNumaNodes(std::set<int> &nodes)
+{
+    std::ifstream onlineFile(kNumaSysfsOnline);
+    std::string onlineList;
+    std::set<int> onlineNodes;
+    if (!onlineFile.is_open() || !std::getline(onlineFile, onlineList) || !ParseNodeList(onlineList, onlineNodes)) {
+        return false;
+    }
+    cpu_set_t allowed;
+    if (sched_getaffinity(0, sizeof(allowed), &allowed) != 0) {
+        return false;
+    }
+    for (int node : onlineNodes) {
+        std::string cpuList;
+        cpu_set_t cpus;
+        if (!ReadNodeCpuList(node, cpuList, cpus)) {
+            continue;
+        }
+        cpu_set_t common;
+        CPU_AND(&common, &cpus, &allowed);
+        if (CPU_COUNT(&common) > 0) {
+            nodes.insert(node);
+        }
+    }
+    return !nodes.empty();
+}
+
+std::string JoinNodes(const std::vector<int> &nodes)
+{
+    std::string text;
+    for (int node : nodes) {
+        text += (text.empty() ? "" : ",") + std::to_string(node);
+    }
+    return text;
+}
+
+// Validates the nodes in the coordinator so a bad --*-numa value fails before any process is forked.
+// Accepts "4", "4,6", "4-7" or "!5" (all usable nodes except 5).
+bool ResolveNumaBinding(const std::string &spec, NumaBinding &binding)
+{
+    binding.spec = spec;
+    binding.nodes.clear();
+    binding.cpuList.clear();
+    CPU_ZERO(&binding.cpuSet);
+    if (spec.empty() || spec == "-1") {
+        return true;
+    }
+    std::set<int> nodes;
+    if (spec[0] == '!') {
+        std::set<int> excluded;
+        if (!ParseNodeList(spec.substr(1), excluded)) {
+            std::cerr << "Invalid NUMA node list: " << spec << "\n";
+            return false;
+        }
+        if (!UsableNumaNodes(nodes)) {
+            std::cerr << "Cannot determine usable NUMA nodes for " << spec << "\n";
+            return false;
+        }
+        for (int node : excluded) {
+            nodes.erase(node);
+        }
+    } else if (!ParseNodeList(spec, nodes)) {
+        std::cerr << "Invalid NUMA node list: " << spec << "\n";
+        return false;
+    }
+    if (nodes.empty()) {
+        std::cerr << "No NUMA nodes left for " << spec << "\n";
+        return false;
+    }
+    for (int node : nodes) {
+        std::string cpuList;
+        cpu_set_t cpus;
+        if (!ReadNodeCpuList(node, cpuList, cpus)) {
+            std::cerr << "NUMA node " << node << " does not exist or has no CPUs\n";
+            return false;
+        }
+        CPU_OR(&binding.cpuSet, &binding.cpuSet, &cpus);
+        binding.cpuList += (binding.cpuList.empty() ? "" : ",") + cpuList;
+        binding.nodes.push_back(node);
+    }
+    return true;
+}
+
+// Binds the calling process (before it spawns threads) to the nodes' CPUs and memory. Threads and
+// processes created afterwards inherit both the CPU affinity and the memory policy.
+bool ApplyNumaBinding(const NumaBinding &binding, NumaMemPolicy memPolicy, const char *owner)
+{
+    if (binding.nodes.empty()) {
+        return true;
+    }
+    const std::string nodes = JoinNodes(binding.nodes);
+    if (sched_setaffinity(0, sizeof(binding.cpuSet), &binding.cpuSet) != 0) {
+        TermLog("[%s] Failed to set CPU affinity to NUMA nodes %s: %s\n", owner, nodes.c_str(), strerror(errno));
+        return false;
+    }
+    if (memPolicy != NumaMemPolicy::kNone) {
+        constexpr size_t kBitsPerMaskWord = sizeof(unsigned long) * CHAR_BIT;
+        std::array<unsigned long, kMaxNumaNodeCount / kBitsPerMaskWord> nodeMask{};
+        for (int node : binding.nodes) {
+            const auto bit = static_cast<size_t>(node);
+            nodeMask[bit / kBitsPerMaskWord] |= 1UL << (bit % kBitsPerMaskWord);
+        }
+        const int mode = memPolicy == NumaMemPolicy::kBind ? kMpolBind : kMpolPreferred;
+        // The kernel reads maxnode - 1 bits of the mask (same convention as libnuma).
+        if (syscall(SYS_set_mempolicy, mode, nodeMask.data(), kMaxNumaNodeCount + 1) != 0) {
+            TermLog("[%s] Failed to set memory policy %s to NUMA nodes %s: %s\n", owner, NumaMemPolicyName(memPolicy),
+                    nodes.c_str(), strerror(errno));
+            return false;
+        }
+    }
+    TermLog("[%s] pid=%d bound to NUMA nodes %s (cpus %s, mem %s)\n", owner, getpid(), nodes.c_str(),
+            binding.cpuList.c_str(), NumaMemPolicyName(memPolicy));
+    return true;
+}
+
+std::string DescribeNumaBinding(const NumaBinding &binding)
+{
+    if (binding.nodes.empty()) {
+        return "unbound";
+    }
+    return "nodes " + JoinNodes(binding.nodes) + " (cpus " + binding.cpuList + ")";
+}
+
+void SetProcessName(const std::string &name, char *processTitle, size_t processTitleSize)
+{
+    // Set both comm (top's default) and argv (top -c / ps args).
+    if (prctl(PR_SET_NAME, name.c_str(), 0, 0, 0) != 0) {
+        TermLog("[%s] Failed to set process name: %s\n", name.c_str(), strerror(errno));
+    }
+    std::memset(processTitle, 0, processTitleSize);
+    std::memcpy(processTitle, name.c_str(), std::min(name.size(), processTitleSize - 1));
+}
+
 
 struct LatencyHistogram {
     std::array<uint64_t, kLatencyHistogramBucketCount> buckets{};
@@ -283,6 +568,9 @@ struct ThreadStats {
     uint64_t failureCount[kOpTypeCount] = {0};
     LatencySamples latency[kOpTypeCount];
     LatencyHistogram histogram[kOpTypeCount];
+    LatencyHistogram submission[kOpTypeCount];
+    uint64_t transportFailures[kOpTypeCount]{};
+    uint64_t timeouts[kOpTypeCount]{};
 };
 
 struct PerOpResult {
@@ -295,6 +583,9 @@ struct PerOpResult {
     double minUs;
     double maxUs;
     LatencyHistogram histogram;
+    LatencyHistogram submission;
+    uint64_t transportFailures{};
+    uint64_t timeouts{};
 };
 
 struct ProcessResult {
@@ -491,89 +782,68 @@ void PrintSep()
 
 void PrintAggReport(const std::vector<ProcessResult> &results, const BenchConfig &cfg)
 {
-    double maxDuration = 0.0;
-    uint64_t totalSuccess = 0;
-    uint64_t totalFailure = 0;
-    for (const auto &r : results) {
-        maxDuration = std::max(maxDuration, r.durationSec);
+    ThreadStats total;
+    double duration = 0;
+    for (const auto &process : results) {
+        duration = std::max(duration, process.durationSec);
         for (int i = 0; i < kOpTypeCount; ++i) {
-            totalSuccess += r.ops[i].successCount;
-            totalFailure += r.ops[i].failureCount;
+            total.successCount[i] += process.ops[i].successCount;
+            total.failureCount[i] += process.ops[i].failureCount;
+            total.histogram[i].MergeFrom(process.ops[i].histogram);
+            total.submission[i].MergeFrom(process.ops[i].submission);
+            total.transportFailures[i] += process.ops[i].transportFailures;
+            total.timeouts[i] += process.ops[i].timeouts;
         }
     }
-    uint64_t totalOps = totalSuccess + totalFailure;
-
-    std::cout << "\n========== Benchmark Report ==========\n\n";
-    std::cout << "Processes: " << cfg.processCount << ", Threads/proc: " << cfg.threadCount
-              << ", Ops/thread: " << cfg.opsPerThread << ", Put%: " << cfg.putPercent << ", Batch: [" << cfg.minBatch
-              << "," << cfg.maxBatch << "]"
-              << ", Total ops: " << totalOps << "\n\n";
-
-    PrintSep();
-    std::cout << "| " << std::left << std::setw(8) << "Op" << " | " << std::right << std::setw(8) << "Success" << " | "
-              << std::right << std::setw(8) << "Fail" << " | " << std::right << std::setw(10) << "Avg(us)" << " | "
-              << std::right << std::setw(10) << "P50(us)"
-              << " | " << std::right << std::setw(10) << "P95(us)" << " | " << std::right << std::setw(10) << "P99(us)"
-              << " | " << std::right << std::setw(10) << "Min(us)"
-              << " | " << std::right << std::setw(10) << "Max(us)" << " |\n";
-    PrintSep();
-
-    for (int i = 0; i < kOpTypeCount; ++i) {
-        uint64_t succ = 0, fail = 0;
-        LatencyHistogram globalHistogram;
-        for (const auto &r : results) {
-            const auto &op = r.ops[i];
-            if (op.successCount + op.failureCount == 0)
-                continue;
-            succ += op.successCount;
-            fail += op.failureCount;
-            globalHistogram.MergeFrom(op.histogram);
+    std::cout << "\nBenchmark report: queue depth/thread=" << cfg.queueDepth
+              << ", completion mode=" << (cfg.waitCompletions ? "wait" : "poll")
+              << ", maximum logical concurrency=" << static_cast<uint64_t>(cfg.processCount) * cfg.threadCount * cfg.queueDepth << "\n";
+    constexpr int operationColumnWidth = 14;
+    constexpr int valueColumnWidth = 12;
+    constexpr int metricColumnCount = 8;
+    constexpr int latencyPrecision = 2;
+    auto operationName = [](OpType type) {
+        return type == kOpAlloc ? "put-alloc" : type == kOpUpdate ? "put-update" : "get";
+    };
+    auto printTable = [&](const char *title, bool submission) {
+        const auto savedFlags = std::cout.flags();
+        const auto savedPrecision = std::cout.precision();
+        std::cout << "\n" << title << "\n"
+                  << std::left << std::setw(operationColumnWidth) << "Operation" << std::right;
+        for (const char *heading : {"Samples", "Avg (us)", "P50 (us)", "P95 (us)", "P99 (us)", "P999 (us)",
+                                    "Min (us)", "Max (us)"}) {
+            std::cout << std::setw(valueColumnWidth) << heading;
         }
-        std::cout << "| " << std::left << std::setw(8) << OpTypeName(static_cast<OpType>(i)) << " | " << std::right
-                  << std::setw(8) << succ << " | " << std::right << std::setw(8) << fail << " | " << std::fixed
-                  << std::setprecision(2) << std::right << std::setw(10)
-                  << (globalHistogram.count == 0 ? 0.0 : globalHistogram.totalUs / globalHistogram.count) << " | "
-                  << std::right << std::setw(10) << globalHistogram.Percentile(kPercentileP50, kPercentileDivisor)
-                  << " | " << std::right << std::setw(10)
-                  << globalHistogram.Percentile(kPercentileP95, kPercentileDivisor) << " | " << std::right
-                  << std::setw(10) << globalHistogram.Percentile(kPercentileP99, kPercentileDivisor) << " | "
-                  << std::right << std::setw(10) << globalHistogram.minUs << " | " << std::right << std::setw(10)
-                  << globalHistogram.maxUs << " |\n";
-    }
-    PrintSep();
-
-    std::cout << "Global P999(us):";
-    for (int i = 0; i < kOpTypeCount; ++i) {
-        LatencyHistogram histogram;
-        for (const auto &result : results) {
-            histogram.MergeFrom(result.ops[i].histogram);
+        std::cout << "\n" << std::string(operationColumnWidth + metricColumnCount * valueColumnWidth, '-') << "\n";
+        std::cout << std::fixed << std::setprecision(latencyPrecision);
+        for (auto type : {kOpAlloc, kOpUpdate, kOpGet}) {
+            const auto &histogram = submission ? total.submission[type] : total.histogram[type];
+            std::cout << std::left << std::setw(operationColumnWidth) << operationName(type)
+                      << std::right << std::setw(valueColumnWidth) << histogram.count
+                      << std::setw(valueColumnWidth) << (histogram.count ? histogram.totalUs / histogram.count : 0)
+                      << std::setw(valueColumnWidth) << histogram.Percentile(kPercentileP50, kPercentileDivisor)
+                      << std::setw(valueColumnWidth) << histogram.Percentile(kPercentileP95, kPercentileDivisor)
+                      << std::setw(valueColumnWidth) << histogram.Percentile(kPercentileP99, kPercentileDivisor)
+                      << std::setw(valueColumnWidth) << histogram.Percentile(kPercentileP999, kPercentileP999Divisor)
+                      << std::setw(valueColumnWidth) << histogram.minUs
+                      << std::setw(valueColumnWidth) << histogram.maxUs << "\n";
         }
-        std::cout << " " << OpTypeName(static_cast<OpType>(i)) << "="
-                  << histogram.Percentile(kPercentileP999, kPercentileP999Divisor);
+        std::cout.flags(savedFlags);
+        std::cout.precision(savedPrecision);
+    };
+    printTable("Client-observed RPC round-trip latency (us = microseconds)", false);
+    printTable("Submission duration (us = microseconds; overlaps RPC latency)", true);
+    std::cout << "\nLogical Put: success=" << total.successCount[kOpPut] << " fail=" << total.failureCount[kOpPut]
+              << "\nRPC outcomes:\n";
+    for (auto type : {kOpAlloc, kOpUpdate, kOpGet}) {
+        std::cout << "  " << operationName(type) << ": success=" << total.successCount[type]
+                  << " fail=" << total.failureCount[type] << " transport failures=" << total.transportFailures[type]
+                  << " timeouts=" << total.timeouts[type] << "\n";
     }
-    std::cout << "\n";
-
-    double throughput = (maxDuration > 0.0) ? static_cast<double>(totalOps) / maxDuration : 0.0;
-    std::cout << "\nTotal ops: " << totalOps << " (success: " << totalSuccess << ", failure: " << totalFailure << ")\n";
-    std::cout << "Max duration (wall): " << std::fixed << std::setprecision(2) << maxDuration << " sec\n";
-    std::cout << "Throughput:         " << std::fixed << std::setprecision(2) << throughput << " ops/sec\n\n";
-
-    std::cout << "Per-process summary:\n";
-    std::cout << "  " << std::left << std::setw(6) << "Rank" << " | " << std::right << std::setw(8) << "PID" << " | "
-              << std::right << std::setw(8) << "Ops" << " | " << std::right << std::setw(8) << "Succ" << " | "
-              << std::right << std::setw(8) << "Fail" << " | " << std::right << std::setw(10) << "Duration" << "\n";
-    for (const auto &r : results) {
-        uint64_t succ = 0, fail = 0;
-        for (int i = 0; i < kOpTypeCount; ++i) {
-            succ += r.ops[i].successCount;
-            fail += r.ops[i].failureCount;
-        }
-        std::cout << "  " << std::left << std::setw(6) << r.rank << " | " << std::right << std::setw(8) << r.pid
-                  << " | " << std::right << std::setw(8) << (succ + fail) << " | " << std::right << std::setw(8) << succ
-                  << " | " << std::right << std::setw(8) << fail << " | " << std::fixed << std::setprecision(2)
-                  << std::right << std::setw(10) << r.durationSec << "\n";
-    }
-    std::cout << "\n";
+    const uint64_t count = total.successCount[kOpPut] + total.failureCount[kOpPut] +
+        total.successCount[kOpGet] + total.failureCount[kOpGet];
+    std::cout << "Total logical ops: " << count << ", achieved logical ops/sec: " << (duration > 0 ? count / duration : 0)
+              << "\nRPC timing includes submission, transport, network, server queues and processing; excludes benchmark construction and response handling.\n";
 }
 
 Result RegisterMockBm(MetaNetClient &client, uint32_t rank, uint64_t gva, uint64_t capacity)
@@ -585,7 +855,8 @@ Result RegisterMockBm(MetaNetClient &client, uint32_t rank, uint64_t gva, uint64
     req.capacity_ = {capacity};
     req.storageEnabled_ = false;
     Response resp;
-    return client.SyncCall(req, resp, kRpcTimeoutMs);
+    Result ret = client.SyncCall(req, resp, kRpcTimeoutMs);
+    return ret == MMC_OK ? resp.ret_ : ret;
 }
 
 void RegisterMockBackupHandler(MetaNetClient &client)
@@ -613,110 +884,184 @@ Result DoPut(MetaNetClient &client, const std::string &key, uint32_t rank, uint6
     allocReq.key_ = key;
     allocReq.options_ = AllocOptions(blobSize, 1, MEDIA_HBM, {rank}, 0);
     allocReq.operateId_ = operateId;
+    allocReq.rankId_ = rank;
     AllocResponse allocResp;
     if (client.SyncCall(allocReq, allocResp, kRpcTimeoutMs) != MMC_OK)
         return MMC_ERROR;
-    if (allocResp.result_ != MMC_OK || allocResp.blobs_.empty())
+    if (allocResp.result_ != MMC_OK)
         return allocResp.result_;
+    if (allocResp.blobs_.empty())
+        return MMC_ERROR;
     auto &blob = allocResp.blobs_[0];
     UpdateRequest updateReq(MMC_WRITE_OK, key, blob.rank_, blob.mediaType_, operateId);
     Response updateResp;
-    return client.SyncCall(updateReq, updateResp, kRpcTimeoutMs);
+    Result ret = client.SyncCall(updateReq, updateResp, kRpcTimeoutMs);
+    return ret == MMC_OK ? updateResp.ret_ : ret;
 }
 
-Result DoBatchPut(MetaNetClient &client, const std::vector<std::string> &keys, uint32_t rank, uint64_t blobSize)
+template<typename ResponseType>
+bool DecodeResponse(const std::string &bytes, ResponseType &response)
 {
-    uint64_t operateId = GenerateOperateId(rank);
-    std::vector<AllocOptions> options;
-    options.reserve(keys.size());
-    for (size_t i = 0; i < keys.size(); ++i) {
-        options.push_back(AllocOptions(blobSize, 1, MEDIA_HBM, {rank}, 0));
+    try {
+        NetMsgUnpacker unpacker(bytes);
+        if (response.Deserialize(unpacker) != MMC_OK) return false;
+        // Some existing message deserializers do not propagate field read failures.
+        // Canonical reserialization detects truncated or otherwise malformed payloads.
+        NetMsgPacker verified;
+        return response.Serialize(verified) == MMC_OK && verified.String() == bytes;
+    } catch (const std::exception &) {
+        return false;
     }
-    BatchAllocRequest allocReq(keys, options, 0, operateId);
-    BatchAllocResponse allocResp;
-    if (client.SyncCall(allocReq, allocResp, kRpcTimeoutMs) != MMC_OK)
-        return MMC_ERROR;
-    BatchUpdateRequest updateReq{};
-    for (size_t i = 0; i < keys.size(); ++i) {
-        if (i >= allocResp.results_.size() || allocResp.results_[i] != MMC_OK)
-            continue;
-        if (i >= allocResp.blobs_.size())
-            continue;
-        for (const auto &blob : allocResp.blobs_[i]) {
-            updateReq.keys_.push_back(keys[i]);
-            updateReq.ranks_.push_back(blob.rank_);
-            updateReq.mediaTypes_.push_back(blob.mediaType_);
-            updateReq.actionResults_.push_back(MMC_WRITE_OK);
-            updateReq.operateIds_.push_back(operateId);
-        }
-    }
-    if (updateReq.keys_.empty())
-        return MMC_ERROR;
-    BatchUpdateResponse updateResp;
-    return client.SyncCall(updateReq, updateResp, kRpcTimeoutMs);
 }
 
-Result DoGet(MetaNetClient &client, const std::string &key, uint32_t rank)
-{
-    GetRequest req(key, rank, GenerateOperateId(rank), true);
-    AllocResponse resp;
-    return client.SyncCall(req, resp, kRpcTimeoutMs);
-}
+struct PendingOperation {
+    bool put;
+    bool batch;
+    bool failed{false};
+    OpType stage;
+    uint64_t operateId;
+    std::vector<std::string> keys;
+    size_t updateCount{0};
+    double start{0};
+};
 
-Result DoBatchGet(MetaNetClient &client, const std::vector<std::string> &keys, uint32_t rank)
+void Worker(bench::AsyncTransport &transport, const BenchConfig &cfg, ThreadStats &stats, int tid, uint32_t rank)
 {
-    BatchGetRequest req(keys, rank, GenerateOperateId(rank));
-    BatchAllocResponse resp;
-    return client.SyncCall(req, resp, kRpcTimeoutMs);
-}
-
-void Worker(MetaNetClient &client, const BenchConfig &cfg, ThreadStats &stats, int tid, uint32_t rank)
-{
-    std::mt19937 rng(
-        static_cast<unsigned int>(std::hash<std::thread::id>()(std::this_thread::get_id()) ^ static_cast<size_t>(tid)));
-    int getKeyMax = std::max(0, cfg.warmupKeyCount - 1);
-    std::uniform_int_distribution<int> getDist(0, getKeyMax);
-    std::uniform_int_distribution<int> bd(cfg.minBatch, cfg.maxBatch);
-    std::uniform_int_distribution<int> rd(1, 100);
+    bench::CompletionQueue queue;
+    std::unordered_map<uint32_t, PendingOperation> pending;
+    std::mt19937 rng(std::random_device{}());
+    std::uniform_int_distribution<int> batchDist(cfg.minBatch, cfg.maxBatch);
+    std::uniform_int_distribution<int> readDist(0, std::max(0, cfg.warmupKeyCount - 1));
+    std::uniform_int_distribution<int> ratioDist(1, kPercentileDivisor);
     uint64_t putCounter = 0;
-
-    for (int i = 0; i < cfg.opsPerThread; ++i) {
-        bool isPut = rd(rng) <= cfg.putPercent;
-        int batchSize = bd(rng);
-        OpType op = isPut ? kOpPut : kOpGet;
-
-        double s = NowUs();
-        Result ret = MMC_ERROR;
-        if (batchSize <= 1) {
-            if (isPut) {
-                std::string key = MakePutKey(rank, tid, putCounter++);
-                ret = DoPut(client, key, rank, cfg.blobSize);
-            } else {
-                std::string key = MakeKey(getDist(rng));
-                ret = DoGet(client, key, rank);
+    int issued = 0;
+    auto finish = [&](const PendingOperation &operation, bool ok) {
+        const auto type = operation.put ? kOpPut : kOpGet;
+        (ok ? stats.successCount[type] : stats.failureCount[type])++;
+    };
+    auto submit = [&](PendingOperation operation, const auto &request) {
+        NetMsgPacker packer;
+        if (request.Serialize(packer) != MMC_OK) {
+            stats.failureCount[operation.stage]++;
+            if (operation.put) finish(operation, false);
+            return;
+        }
+        const std::string bytes = packer.String();
+        uint32_t sequence = transport.Register(queue);
+        if (sequence == 0) {
+            stats.failureCount[operation.stage]++;
+            stats.transportFailures[operation.stage]++;
+            if (operation.put) finish(operation, false);
+            return;
+        }
+        pending.emplace(sequence, std::move(operation));
+        auto &entry = pending.at(sequence);
+        double end = 0;
+        int result = transport.Send(sequence, request.msgId, bytes, entry.start, end);
+        stats.submission[entry.stage].Record(end - entry.start);
+        if (result != MMC_OK) {
+            transport.Cancel(sequence);
+            queue.Push({sequence, end, result, {}});
+        }
+    };
+    while (issued < cfg.opsPerThread || !pending.empty()) {
+        if (transport.Failed()) {
+            for (const auto &entry : pending) {
+                stats.failureCount[entry.second.stage]++;
+                stats.transportFailures[entry.second.stage]++;
+                if (entry.second.put) finish(entry.second, false);
+                transport.Cancel(entry.first);
             }
-        } else {
-            std::vector<std::string> keys;
-            keys.reserve(static_cast<size_t>(batchSize));
-            if (isPut) {
-                for (int j = 0; j < batchSize; ++j) {
-                    keys.push_back(MakePutKey(rank, tid, putCounter++));
-                }
-                ret = DoBatchPut(client, keys, rank, cfg.blobSize);
+            pending.clear();
+            break;
+        }
+        while (issued < cfg.opsPerThread && pending.size() < static_cast<size_t>(cfg.queueDepth)) {
+            PendingOperation operation{};
+            operation.put = ratioDist(rng) <= cfg.putPercent;
+            operation.stage = operation.put ? kOpAlloc : kOpGet;
+            operation.operateId = GenerateOperateId(rank);
+            int size = batchDist(rng);
+            operation.batch = size > 1;
+            for (int key = 0; key < size; ++key) {
+                operation.keys.push_back(operation.put ? MakePutKey(rank, tid, putCounter++) : MakeKey(readDist(rng)));
+            }
+            ++issued;
+            if (operation.put) {
+                std::vector<AllocOptions> options(operation.keys.size(), AllocOptions(cfg.blobSize, 1, MEDIA_HBM, {rank}, 0));
+                if (operation.batch) submit(operation, BatchAllocRequest(operation.keys, options, 0, operation.operateId, rank));
+                else submit(operation, AllocRequest(operation.keys[0], options[0], operation.operateId, rank));
+            } else if (operation.batch) {
+                submit(operation, BatchGetRequest(operation.keys, rank, operation.operateId));
             } else {
-                for (int j = 0; j < batchSize; ++j) {
-                    keys.push_back(MakeKey(getDist(rng)));
-                }
-                ret = DoBatchGet(client, keys, rank);
+                submit(operation, GetRequest(operation.keys[0], rank, operation.operateId, true));
             }
         }
-        double e = NowUs();
-        if (ret == MMC_OK)
-            stats.successCount[op]++;
-        else
-            stats.failureCount[op]++;
-        stats.latency[op].Record(e - s);
-        stats.histogram[op].Record(e - s);
+        double deadline = bench::ClockUs() + cfg.rpcTimeoutMs * 1000.0;
+        for (const auto &entry : pending) deadline = std::min(deadline, entry.second.start + cfg.rpcTimeoutMs * 1000.0);
+        if (pending.empty()) continue;
+        auto completions = queue.Drain(cfg.waitCompletions, deadline);
+        for (auto &completion : completions) {
+            auto found = pending.find(completion.sequence);
+            if (found == pending.end()) continue;
+            PendingOperation operation = std::move(found->second);
+            pending.erase(found);
+            bool ok = completion.result == MMC_OK && !completion.bytes.empty();
+            BatchUpdateRequest update;
+            if (ok) {
+                stats.histogram[operation.stage].Record(completion.arrival - operation.start);
+                if (operation.stage == kOpUpdate) {
+                    if (operation.batch) {
+                        BatchUpdateResponse response;
+                        ok = DecodeResponse(completion.bytes, response) && response.results_.size() == operation.updateCount &&
+                            std::all_of(response.results_.begin(), response.results_.end(), [](Result r) { return r == MMC_OK; });
+                    } else {
+                        Response response;
+                        ok = DecodeResponse(completion.bytes, response) && response.ret_ == MMC_OK;
+                    }
+                } else {
+                    BatchAllocResponse response;
+                    if (operation.batch) {
+                        ok = DecodeResponse(completion.bytes, response) && response.results_.size() == operation.keys.size() &&
+                            response.blobs_.size() == operation.keys.size();
+                    } else {
+                        AllocResponse single;
+                        ok = DecodeResponse(completion.bytes, single);
+                        response.results_ = {single.result_};
+                        response.blobs_ = {single.blobs_};
+                    }
+                    if (ok) {
+                        for (size_t i = 0; i < operation.keys.size(); ++i) {
+                            if (response.results_[i] != MMC_OK || response.blobs_[i].empty()) { ok = false; continue; }
+                            if (!operation.put) continue;
+                            for (const auto &blob : response.blobs_[i]) {
+                                update.keys_.push_back(operation.keys[i]);
+                                update.ranks_.push_back(blob.rank_);
+                                update.mediaTypes_.push_back(blob.mediaType_);
+                                update.operateIds_.push_back(operation.operateId);
+                                update.actionResults_.push_back(MMC_WRITE_OK);
+                            }
+                        }
+                    }
+                }
+            } else stats.transportFailures[operation.stage]++;
+            (ok ? stats.successCount[operation.stage] : stats.failureCount[operation.stage])++;
+            operation.failed = operation.failed || !ok;
+            if (operation.stage == kOpAlloc && !update.keys_.empty()) {
+                operation.updateCount = update.keys_.size();
+                operation.stage = kOpUpdate;
+                if (operation.batch) submit(operation, update);
+                else submit(operation, UpdateRequest(MMC_WRITE_OK, update.keys_[0], update.ranks_[0],
+                    update.mediaTypes_[0], operation.operateId));
+            } else if (operation.put) finish(operation, !operation.failed);
+        }
+        for (auto it = pending.begin(); it != pending.end();) {
+            if (bench::ClockUs() - it->second.start < cfg.rpcTimeoutMs * 1000.0) { ++it; continue; }
+            transport.Cancel(it->first);
+            stats.timeouts[it->second.stage]++;
+            stats.failureCount[it->second.stage]++;
+            if (it->second.put) finish(it->second, false);
+            it = pending.erase(it);
+        }
     }
 }
 
@@ -731,22 +1076,55 @@ void WriteResult(ProcessResult &out, const ThreadStats &stats, double durationSe
         stats.latency[i].ComputeStats(out.ops[i].avgUs, out.ops[i].p50Us, out.ops[i].p95Us, out.ops[i].p99Us,
                                       out.ops[i].minUs, out.ops[i].maxUs);
         out.ops[i].histogram = stats.histogram[i];
+        out.ops[i].submission = stats.submission[i];
+        out.ops[i].transportFailures = stats.transportFailures[i];
+        out.ops[i].timeouts = stats.timeouts[i];
     }
     out.valid = 1;
 }
 
-pid_t StartPerfOnMetaService(int metaPid, const BenchConfig &cfg)
+// perf record takes a comma separated pid list, so one perf can follow every client process.
+std::string JoinPids(const std::vector<pid_t> &pids)
 {
-    std::string metaPidStr = std::to_string(metaPid);
+    std::string text;
+    for (pid_t pid : pids) {
+        text += (text.empty() ? "" : ",") + std::to_string(pid);
+    }
+    return text;
+}
+
+pid_t StartPerfOnPids(const std::vector<pid_t> &pids, const BenchConfig &cfg)
+{
+    std::string pidList = JoinPids(pids);
     std::string freqStr = std::to_string(cfg.perfFreq);
     pid_t pid = fork();
     if (pid != 0) {
         return pid;
     }
-    execlp("perf", "perf", "record", "-F", freqStr.c_str(), "-g", "-p", metaPidStr.c_str(), "-o", kDefaultPerfDataFile,
+    execlp("perf", "perf", "record", "-F", freqStr.c_str(), "-g", "-p", pidList.c_str(), "-o", kDefaultPerfDataFile,
            nullptr);
     TermLog("[perf] failed to launch perf: %s\n", strerror(errno));
     _exit(kPerfExecFailCode);
+}
+
+// Starts perf and verifies it survived the first second; returns -1 when profiling is unavailable.
+pid_t StartPerfChecked(const std::vector<pid_t> &pids, const BenchConfig &cfg)
+{
+    pid_t perfPid = StartPerfOnPids(pids, cfg);
+    if (perfPid <= 0) {
+        TermLog("[perf] failed to fork perf process, profiling disabled\n");
+        return -1;
+    }
+    sleep(kPerfReadyWaitSec);
+    int perfStatus = 0;
+    pid_t reaped = waitpid(perfPid, &perfStatus, WNOHANG);
+    if (reaped == perfPid || reaped == -1) {
+        TermLog("[perf] perf exited early (perf installed? permissions? ulimit -n?), profiling disabled\n");
+        return -1;
+    }
+    TermLog("[perf] profiling %s (pid %s) -> %s\n", PerfTargetName(cfg.perfTarget),
+            JoinPids(pids).c_str(), kDefaultPerfDataFile);
+    return perfPid;
 }
 
 void StopPerf(pid_t perfPid)
@@ -830,7 +1208,7 @@ int RunMetaService(const std::string &metaUrl, const std::string &bmUrl, const s
 }
 
 int RunClient(const BenchConfig &cfg, int clientIndex, ProcessResult *resultSlot, const std::string &metaUrl,
-              const std::string &logFile)
+              const std::string &logFile, int barrierFd)
 {
     RedirectLogsToFile(logFile);
 
@@ -840,7 +1218,8 @@ int RunClient(const BenchConfig &cfg, int clientIndex, ProcessResult *resultSlot
     std::string clientName = "BenchClient_" + std::to_string(clientIndex);
 
     auto client = MetaNetClientFactory::GetInstance(metaUrl, clientName);
-    if (client.Get() == nullptr || !client->Status()) {
+    if (client.Get() == nullptr) return 1;
+    if (!client->Status()) {
         NetEngineOptions opts;
         opts.name = clientName;
         opts.threadCount = kNetClientThreadCount;
@@ -864,20 +1243,39 @@ int RunClient(const BenchConfig &cfg, int clientIndex, ProcessResult *resultSlot
     TermLog("[client %d] Connected, rank=%u, capacity=%llu MB\n", clientIndex, rank,
             static_cast<unsigned long long>(cfg.capacityMB));
 
-    int warmupPerClient = cfg.warmupKeyCount / cfg.processCount;
-    int warmupStart = clientIndex * warmupPerClient;
+    int warmupStart = static_cast<int>(static_cast<int64_t>(clientIndex) * cfg.warmupKeyCount / cfg.processCount);
+    int warmupEnd = static_cast<int>(static_cast<int64_t>(clientIndex + 1) * cfg.warmupKeyCount / cfg.processCount);
+    int warmupPerClient = warmupEnd - warmupStart;
     for (int i = 0; i < warmupPerClient; ++i) {
         std::string key = MakeKey(warmupStart + i);
-        DoPut(*client.Get(), key, rank, cfg.blobSize);
+        Result warmupRet = DoPut(*client.Get(), key, rank, cfg.blobSize);
+        if (warmupRet != MMC_OK) {
+            TermLog("[client %d] Warmup Put failed for %s: %d\n", clientIndex, key.c_str(), warmupRet);
+            return 1;
+        }
     }
 
     std::vector<ThreadStats> threadStats(static_cast<size_t>(cfg.threadCount));
     std::vector<std::thread> workers;
     workers.reserve(static_cast<size_t>(cfg.threadCount));
 
+    bench::AsyncTransport transport;
+    constexpr uint16_t minSendCapacity = 32;
+    if (!transport.Start(metaUrl, std::max<uint16_t>(minSendCapacity, cfg.threadCount * cfg.queueDepth))) {
+        TermLog("[client %d] Async transport setup failed\n", clientIndex);
+        return 1;
+    }
+    TermLog("[client %d] Queue depth/thread=%d, mode=%s, maximum logical concurrency=%llu\n", clientIndex,
+        cfg.queueDepth, cfg.waitCompletions ? "wait" : "poll",
+        static_cast<unsigned long long>(cfg.processCount) * cfg.threadCount * cfg.queueDepth);
+    // No process may read the shared key range until every process has populated its partition.
+    if (!bench::WaitForBarrier(barrierFd, bench::BarrierMessage::READY, bench::BarrierMessage::START)) {
+        TermLog("[client %d] Startup barrier aborted\n", clientIndex);
+        return 1;
+    }
     double startUs = NowUs();
     for (int t = 0; t < cfg.threadCount; ++t) {
-        workers.emplace_back(Worker, std::ref(*client.Get()), std::ref(cfg),
+        workers.emplace_back(Worker, std::ref(transport), std::ref(cfg),
                              std::ref(threadStats[static_cast<size_t>(t)]), t, rank);
     }
     for (auto &w : workers)
@@ -892,21 +1290,30 @@ int RunClient(const BenchConfig &cfg, int clientIndex, ProcessResult *resultSlot
             merged.failureCount[i] += ts.failureCount[i];
             merged.latency[i].MergeFrom(ts.latency[i]);
             merged.histogram[i].MergeFrom(ts.histogram[i]);
+            merged.submission[i].MergeFrom(ts.submission[i]);
+            merged.transportFailures[i] += ts.transportFailures[i];
+            merged.timeouts[i] += ts.timeouts[i];
         }
     }
 
     WriteResult(*resultSlot, merged, durationSec, static_cast<int>(rank), getpid());
 
     uint64_t totalSucc = 0, totalFail = 0;
-    for (int i = 0; i < kOpTypeCount; ++i) {
+    for (int i = 0; i < kOpAlloc; ++i) {
         totalSucc += merged.successCount[i];
         totalFail += merged.failureCount[i];
     }
     TermLog("[client %d] Done: %llu succ, %llu fail, %.2fs\n", clientIndex, static_cast<unsigned long long>(totalSucc),
             static_cast<unsigned long long>(totalFail), durationSec);
 
+    // The duration above excludes this wait. Keep rank resources and callbacks alive for slower clients.
+    if (transport.Failed() ||
+        !bench::WaitForBarrier(barrierFd, bench::BarrierMessage::DRAINED, bench::BarrierMessage::TEARDOWN)) {
+        TermLog("[client %d] Teardown barrier aborted\n", clientIndex);
+        return 1;
+    }
     client->Stop();
-    return 0;
+    return transport.Failed() ? 1 : 0;
 }
 
 bool ParseArgs(int argc, char *argv[], BenchConfig &cfg)
@@ -916,6 +1323,8 @@ bool ParseArgs(int argc, char *argv[], BenchConfig &cfg)
         if (a == "-h" || a == "--help") {
             std::cout
                 << "Usage: bench_meta_service [options]\n"
+                << "  -q, --queue-depth <depth>  Logical operations per thread (default: 1)\n"
+                << "  --completion-mode poll|wait (default: poll)\n"
                 << "  -p <processes>    Client process count                    (default: " << kDefaultProcessCount
                 << ")\n"
                 << "  -t <threads>      Threads per process                     (default: " << kDefaultThreadCount
@@ -938,7 +1347,11 @@ bool ParseArgs(int argc, char *argv[], BenchConfig &cfg)
                 << "  --perf-freq <hz>   perf record sample frequency                (default: " << kDefaultPerfFreq
                 << ")\n"
                 << "  --metrics-interval-ms <ms>  Sample /metrics every ms; 0 disables (default: "
-                << kDefaultMetricsIntervalMs << ")\n";
+                << kDefaultMetricsIntervalMs << ")\n"
+                << "  --perf-target <who>  Profile meta|clients|client0                 (default: meta)\n"
+                << "  --meta-numa <nodes>   NUMA nodes for meta_service, e.g. 5, 4,6, 4-7, !5 (default: unbound)\n"
+                << "  --worker-numa <nodes> NUMA nodes for coordinator + clients, same format  (default: unbound)\n"
+                << "  --numa-mem <policy>   NUMA memory policy: bind|preferred|none             (default: bind)\n";
             return false;
         }
         if (a == "--perf") {
@@ -950,7 +1363,21 @@ bool ParseArgs(int argc, char *argv[], BenchConfig &cfg)
             return false;
         }
         std::string v = argv[++i];
-        if (a == "-p")
+        if (a == "-q" || a == "--queue-depth") {
+            char *end = nullptr;
+            long depth = std::strtol(v.c_str(), &end, 10);
+            if (end == v.c_str() || *end != '\0' || depth <= 0 || depth > UINT16_MAX) {
+                std::cerr << "Queue depth must be a positive integer within transport limits\n";
+                return false;
+            }
+            cfg.queueDepth = static_cast<int>(depth);
+        } else if (a == "--completion-mode") {
+            if (v != "poll" && v != "wait") {
+                std::cerr << "Completion mode must be poll or wait\n";
+                return false;
+            }
+            cfg.waitCompletions = v == "wait";
+        } else if (a == "-p")
             cfg.processCount = std::max(1, std::min(kMaxProcessCount, std::atoi(v.c_str())));
         else if (a == "-t")
             cfg.threadCount = std::max(1, std::atoi(v.c_str()));
@@ -981,10 +1408,40 @@ bool ParseArgs(int argc, char *argv[], BenchConfig &cfg)
             cfg.perfFreq = std::max(1, std::atoi(v.c_str()));
         else if (a == "--metrics-interval-ms")
             cfg.metricsIntervalMs = std::max(0, std::atoi(v.c_str()));
-        else {
+        else if (a == "--perf-target") {
+            if (v == "meta")
+                cfg.perfTarget = PerfTarget::kMeta;
+            else if (v == "clients")
+                cfg.perfTarget = PerfTarget::kClients;
+            else if (v == "client0")
+                cfg.perfTarget = PerfTarget::kClient0;
+            else {
+                std::cerr << "Invalid --perf-target: " << v << " (expected meta|clients|client0)\n";
+                return false;
+            }
+        } else if (a == "--meta-numa") {
+            cfg.metaNumaNodes = v;
+        } else if (a == "--worker-numa") {
+            cfg.workerNumaNodes = v;
+        } else if (a == "--numa-mem") {
+            if (v == "bind")
+                cfg.numaMemPolicy = NumaMemPolicy::kBind;
+            else if (v == "preferred")
+                cfg.numaMemPolicy = NumaMemPolicy::kPreferred;
+            else if (v == "none")
+                cfg.numaMemPolicy = NumaMemPolicy::kNone;
+            else {
+                std::cerr << "Invalid --numa-mem: " << v << " (expected bind|preferred|none)\n";
+                return false;
+            }
+        } else {
             std::cerr << "Unknown: " << a << "\n";
             return false;
         }
+    }
+    if (static_cast<uint64_t>(cfg.threadCount) * cfg.queueDepth > UINT16_MAX) {
+        std::cerr << "Threads times queue depth exceeds transport capacity\n";
+        return false;
     }
     return true;
 }
@@ -994,6 +1451,20 @@ int main(int argc, char *argv[])
 {
     BenchConfig cfg;
     if (!ParseArgs(argc, argv, cfg))
+        return 1;
+
+    // Arguments have been copied into cfg. Reuse only contiguous argv storage,
+    // leaving the environment untouched. Children inherit this storage and size.
+    char *processTitle = argv[0];
+    size_t processTitleSize = std::strlen(argv[0]) + 1;
+    for (int i = 1; i < argc && argv[i] == processTitle + processTitleSize; ++i) {
+        processTitleSize += std::strlen(argv[i]) + 1;
+    }
+    SetProcessName(kCoordinatorProcName, processTitle, processTitleSize);
+
+    NumaBinding metaNuma;
+    NumaBinding workerNuma;
+    if (!ResolveNumaBinding(cfg.metaNumaNodes, metaNuma) || !ResolveNumaBinding(cfg.workerNumaNodes, workerNuma))
         return 1;
 
     gTermFd = dup(STDERR_FILENO);
@@ -1019,12 +1490,25 @@ int main(int argc, char *argv[])
               << "  Batch range:  [" << cfg.minBatch << ", " << cfg.maxBatch << "]\n"
               << "  HBM/proc:     " << cfg.capacityMB << " MB\n"
               << "  Log file:      " << cfg.logFile << "\n"
+              << "  Queue depth:  " << cfg.queueDepth << " (in flight/proc: "
+              << (cfg.threadCount * cfg.queueDepth) << ")\n"
               << "  Perf:          "
-              << (cfg.perfEnable ? std::string("record -> ") + kDefaultPerfDataFile : std::string("off")) << "\n"
+              << (cfg.perfEnable ? std::string("record ") + PerfTargetName(cfg.perfTarget) + " -> " +
+                                       kDefaultPerfDataFile
+                                 : std::string("off"))
+              << "\n"
               << "  Metrics:       "
               << (cfg.metricsIntervalMs > 0 ? std::to_string(cfg.metricsIntervalMs) + " ms" : std::string("off"))
               << "\n"
+              << "  NUMA meta:     " << DescribeNumaBinding(metaNuma) << "\n"
+              << "  NUMA worker:   " << DescribeNumaBinding(workerNuma) << "\n"
+              << "  NUMA mem:      " << NumaMemPolicyName(cfg.numaMemPolicy) << "\n"
               << std::endl;
+    for (int node : metaNuma.nodes) {
+        if (std::find(workerNuma.nodes.begin(), workerNuma.nodes.end(), node) != workerNuma.nodes.end()) {
+            TermLog("[numa] Warning, meta_service and workers share NUMA node %d\n", node);
+        }
+    }
 
     std::string metaUrl = "tcp://127.0.0.1:" + std::to_string(kMetaServicePort);
     std::string bmUrl = "tcp://127.0.0.1:" + std::to_string(kConfigStorePort);
@@ -1042,10 +1526,22 @@ int main(int argc, char *argv[])
     std::cout << "[1/3] Starting meta_service process..." << std::endl;
     pid_t metaPid = fork();
     if (metaPid == 0) {
+        SetProcessName(kMetaServiceProcName, processTitle, processTitleSize);
+        if (!ApplyNumaBinding(metaNuma, cfg.numaMemPolicy, kMetaServiceProcName)) {
+            _exit(1);
+        }
         return RunMetaService(metaUrl, bmUrl, metricsUrl, cfg.logFile, cfg.capacityMB);
     }
     if (metaPid < 0) {
         std::cerr << "Failed to fork meta_service!" << std::endl;
+        munmap(sharedResults, shmSize);
+        return 1;
+    }
+    // Bind the coordinator only after meta_service is forked, so that perf, the metrics sampler and all
+    // client processes (forked below) inherit the worker nodes while meta_service keeps its own nodes.
+    if (!ApplyNumaBinding(workerNuma, cfg.numaMemPolicy, "coordinator/clients")) {
+        kill(metaPid, SIGTERM);
+        waitpid(metaPid, nullptr, 0);
         munmap(sharedResults, shmSize);
         return 1;
     }
@@ -1056,43 +1552,71 @@ int main(int argc, char *argv[])
     metricsSampler.Start();
 
     pid_t perfPid = -1;
-    if (cfg.perfEnable) {
-        perfPid = StartPerfOnMetaService(metaPid, cfg);
-        if (perfPid > 0) {
-            sleep(kPerfReadyWaitSec);
-            int perfStatus = 0;
-            pid_t r = waitpid(perfPid, &perfStatus, WNOHANG);
-            if (r == perfPid || r == -1) {
-                TermLog("[perf] perf exited early (perf installed? permissions?), profiling disabled\n");
-                perfPid = -1;
-            } else {
-                TermLog("[perf] profiling meta_service (pid=%d) -> %s\n", metaPid, kDefaultPerfDataFile);
-            }
-        } else {
-            TermLog("[perf] failed to fork perf process, profiling disabled\n");
-            perfPid = -1;
-        }
+    if (cfg.perfEnable && cfg.perfTarget == PerfTarget::kMeta) {
+        perfPid = StartPerfChecked({metaPid}, cfg);
     }
 
     std::cout << "\n[2/3] Forking " << cfg.processCount << " client processes..." << std::endl;
     std::vector<pid_t> clientPids;
+    std::vector<int> barrierFds;
     for (int i = 0; i < cfg.processCount; ++i) {
+        int controlSocket[bench::kBarrierSocketCount];
+        if (socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, controlSocket) != 0) {
+            std::cerr << "Failed to create client barrier channel: " << strerror(errno) << std::endl;
+            break;
+        }
         pid_t pid = fork();
         if (pid == 0) {
-            int ret = RunClient(cfg, i, &sharedResults[i], metaUrl, cfg.logFile);
+            SetProcessName(kClientProcNamePrefix + std::to_string(i), processTitle, processTitleSize);
+            close(controlSocket[bench::kBarrierParentEnd]);
+            for (int barrierFd : barrierFds) {
+                close(barrierFd);
+            }
+            int ret = RunClient(cfg, i, &sharedResults[i], metaUrl, cfg.logFile,
+                                controlSocket[bench::kBarrierClientEnd]);
+            close(controlSocket[bench::kBarrierClientEnd]);
             _exit(ret);
         }
+        close(controlSocket[bench::kBarrierClientEnd]);
         if (pid < 0) {
+            close(controlSocket[bench::kBarrierParentEnd]);
             std::cerr << "Failed to fork client " << i << "!" << std::endl;
+            break;
         } else {
             clientPids.push_back(pid);
+            barrierFds.push_back(controlSocket[bench::kBarrierParentEnd]);
         }
     }
 
+    // Clients are parked on the startup barrier here, so perf attaches before they issue any request.
+    if (cfg.perfEnable && cfg.perfTarget != PerfTarget::kMeta && !clientPids.empty()) {
+        std::vector<pid_t> targets = cfg.perfTarget == PerfTarget::kClient0
+                                         ? std::vector<pid_t>{clientPids.front()}
+                                         : clientPids;
+        perfPid = StartPerfChecked(targets, cfg);
+    }
+
     std::cout << "\n[3/3] Waiting for " << clientPids.size() << " clients to finish..." << std::endl;
+    bool clientsFailed = clientPids.size() != static_cast<size_t>(cfg.processCount);
+    if (!clientsFailed) {
+        clientsFailed = !bench::CoordinateClients(barrierFds);
+    }
+    if (clientsFailed) {
+        std::cerr << "Client coordination failed; aborting benchmark." << std::endl;
+        for (pid_t pid : clientPids) {
+            kill(pid, SIGTERM);
+        }
+    }
+    for (int barrierFd : barrierFds) {
+        close(barrierFd);
+    }
     for (pid_t pid : clientPids) {
         int status = 0;
-        waitpid(pid, &status, 0);
+        pid_t waited;
+        do {
+            waited = waitpid(pid, &status, 0);
+        } while (waited < 0 && errno == EINTR);
+        if (waited < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) clientsFailed = true;
     }
 
     metricsSampler.Stop();
@@ -1121,6 +1645,6 @@ int main(int argc, char *argv[])
     metricsSampler.PrintReport();
 
     munmap(sharedResults, shmSize);
-    std::cout << "Benchmark finished." << std::endl;
-    return 0;
+    std::cout << (clientsFailed ? "Benchmark failed." : "Benchmark finished.") << std::endl;
+    return clientsFailed || results.empty() ? 1 : 0;
 }
