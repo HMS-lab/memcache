@@ -1,0 +1,11 @@
+/.idea/
+/.vscode/
+
+*.egg-info/
+.pytest_cache/
+/.venv/
+/build/
+/venv/
+__pycache__/
+
+/traces.jsonl
