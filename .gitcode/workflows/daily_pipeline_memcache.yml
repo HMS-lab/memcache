@@ -2,7 +2,7 @@ name: daily_pipeline_memcache
 
 on:
   schedule:
-    - cron: "20 23 * * *"
+    - cron: "0 23 * * *"
 
 env:
   AK_ASCEND: ${{ secrets.AK_ASCEND }}
