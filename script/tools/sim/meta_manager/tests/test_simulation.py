@@ -85,7 +85,7 @@ def measured_metrics() -> dict[str, DataFrame]:
         RunConfig(
             MetaManagerConfig(((1, 65536),), max_water_level=100),
             detailed_stats=True,
-            memory_sample_every=2,
+            memory_sample_interval=2,
         ),
     )
 
@@ -204,7 +204,8 @@ def test_eviction_completes_after_each_allocation(policy: str) -> None:
                 min_water_level=20,
                 max_water_level=50,
                 eviction_policy=policy,
-            )
+            ),
+            memory_sample_interval=1,
         ),
     )
     summary = metrics["summary"].iloc[0]
@@ -223,7 +224,8 @@ def test_sampling_with_unequal_pools() -> None:
         (("model:a", 2 * BLOCK_SIZE) for _ in range(5)),
         RunConfig(
             MetaManagerConfig(((1, BLOCK_SIZE), (1, 16 * BLOCK_SIZE))),
-            memory_sample_every=2,
+            latency_sample_interval=2,
+            memory_sample_interval=2,
         ),
     )
     assert metrics["memory"]["reads"].tolist() == [0, 2, 4, 5]
@@ -235,13 +237,89 @@ def test_sampling_with_unequal_pools() -> None:
     assert "latencies" not in metrics
 
 
+@pytest.mark.parametrize("num_reads", [6, 7])
+def test_interval_reports_follow_replay_and_preserve_full_history(
+    num_reads: int, monkeypatch: MonkeyPatch, capsys: CaptureFixture[str]
+) -> None:
+    latency_windows: list[tuple[int, int, DataFrame]] = []
+    memory_windows: list[DataFrame] = []
+    pids: list[int] = []
+    finished = False
+    # Note: The highest RSS is at step zero to catch a dropped initial sample
+    rss = iter(value << 20 for value in (160, 140, 90, 95))
+    print_latencies = simulation.print_latencies
+    print_memory = simulation.print_memory
+
+    def observe_rss(pid: int) -> int:
+        pids.append(pid)
+        return next(rss)
+
+    def reads() -> Iterator[tuple[str, int]]:
+        nonlocal finished
+        for index in range(num_reads):
+            assert not capsys.readouterr().out
+            yield f"model:{index // 2}", BLOCK_SIZE
+        assert not capsys.readouterr().out
+        finished = True
+
+    def observe_latencies(frame: DataFrame, first: int, last: int) -> None:
+        assert finished and not Path(f"/proc/{pids[0]}").exists()
+        latency_windows.append((first, last, frame.copy()))
+        print_latencies(frame, first, last)
+
+    def observe_memory(frame: DataFrame) -> None:
+        assert finished and not Path(f"/proc/{pids[0]}").exists()
+        memory_windows.append(frame.copy())
+        print_memory(frame)
+
+    monkeypatch.setattr(simulation, "read_rss", observe_rss)
+    monkeypatch.setattr(simulation, "print_latencies", observe_latencies)
+    monkeypatch.setattr(simulation, "print_memory", observe_memory)
+    metrics = _simulate_reads(
+        reads(),
+        RunConfig(
+            MetaManagerConfig(((1, 65536),), max_water_level=100),
+            detailed_stats=True,
+            latency_sample_interval=2,
+            memory_sample_interval=3,
+        ),
+    )
+
+    expected_latency = [(1, 2), (3, 4), (5, 6)]
+    expected_memory = [[0, 3], [3, 6]]
+    if num_reads == 7:
+        expected_latency.append((7, 7))
+        expected_memory.append([6, 7])
+    assert [
+        (first, last) for first, last, _ in latency_windows
+    ] == expected_latency
+    assert [
+        frame["reads"].tolist() for frame in memory_windows
+    ] == expected_memory
+    for _, _, frame in latency_windows[:3]:
+        assert frame.index.value_counts().to_dict() == {
+            "lookup": 2,
+            "alloc": 1,
+            "write_finish": 1,
+            "evict_check": 1,
+            "read_finish": 1,
+        }
+    if num_reads == 7:
+        assert "read_finish" not in latency_windows[-1][2].index
+
+    assert metrics["memory"]["reads"].tolist() == [0, 3, 6, num_reads]
+    assert metrics["summary"].at[0, "rss_start_bytes"] == 160 << 20
+    assert metrics["summary"].at[0, "rss_max_bytes"] == 160 << 20
+    assert metrics["summary"].at[0, "rss_end_bytes"] == 95 << 20
+    assert metrics["summary"].at[0, "rss_delta_bytes"] == -65 << 20
+    assert metrics["latencies"].at["lookup", "count"] == num_reads
+
+
 @pytest.mark.parametrize("detailed", [False, True])
 def test_empty_workload_has_undefined_rates(
     detailed: bool, capsys: CaptureFixture[str]
 ) -> None:
-    metrics = _simulate_reads(
-        [], RunConfig(detailed_stats=detailed, memory_sample_every=0)
-    )
+    metrics = _simulate_reads([], RunConfig(detailed_stats=detailed))
     summary = metrics["summary"].iloc[0]
     assert summary["reads"] == summary["cached_keys"] == 0
     for field in (

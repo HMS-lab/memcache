@@ -6,7 +6,6 @@ set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
 python sim_random.py --pools 2:8MiB \
-                     --memory-sample-every 10 \
                      --memory-plot build/random_example.png \
                      --detailed-stats \
                      --progress-bar \

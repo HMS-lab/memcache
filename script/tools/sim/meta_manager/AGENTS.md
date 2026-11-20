@@ -22,10 +22,12 @@ sim_trace.py                    Reads from one JSONL conversation
 src/meta_manager_sim/
   cli/                          Shared CLI arguments and size parsers
   config.py                     Manager/run settings and RunConfig.from_args
-  workloads/random/             Seeded generator and random workload adapter
-  workloads/sequential/         Consecutive keys with one fixed block size
-  workloads/trace/              JSONL reader and trace workload adapter
-  simulation.py                 Workload replay, RSS samples and tables
+  workloads/
+    random_workload.py          Seeded random reads
+    sequential_workload.py      Consecutive keys with one fixed block size
+    trace_workload.py           Trace reads with per-model block sizes
+    tools/                      Random generator and JSONL trace reader
+  simulation.py                 Replay, measurement history and report windows
   metrics/                      RSS reading, summaries and plot export
   native/
     build.py                    Incremental standalone CMake build
@@ -33,12 +35,14 @@ src/meta_manager_sim/
     src/                        Command loop, manager adapter and local shim
       native_key.h              Native key formatting and SHA-256
 examples/                       Bash examples and bundled trace input
+tools/heap_sources.py            Heaptrack peak-memory totals by source location
 tests/                          Pytest unit and native integration tests
 pyproject.toml                  Runtime dependencies and tool settings
 ```
 
-Use [README.md](README.md) for the CLI, defaults and examples. CLI defaults come
-from `cli/arguments.py`; programmatic defaults in `config.py` can differ.
+Use [README.md](README.md) for setup and examples. The current arguments and
+defaults are defined in `cli/arguments.py` and `config.py`; programmatic manager
+defaults can differ from CLI defaults.
 
 ## Simulation contract
 
@@ -81,6 +85,20 @@ from `cli/arguments.py`; programmatic defaults in `config.py` can differ.
   P99.99, all in nanoseconds except count. Use all samples and pandas' linear
   interpolation, independently of the RSS sampling interval. Timing history
   consumes Python memory only when detailed stats are enabled.
+- `--latency-sample-interval N` groups timing reports by completed reads;
+  `--memory-sample-interval N` samples RSS every N completed reads and enables
+  reports between adjacent samples. Both default to `0`, meaning final output
+  only. A latency interval does not enable collection without `--detailed-stats`.
+- Retain one timing dictionary per read: hits and misses produce different sets
+  of operations, so slicing individual operation arrays would misalign windows.
+  Keep all RSS samples, including step zero and the final snapshot. The final
+  snapshot can repeat the last sampled read count; retain it in the history but
+  do not print a zero-read memory interval.
+- Print interval reports only after replay and worker shutdown, so they do not
+  interrupt the progress bar. Latency and memory windows are independent and
+  include a final partial interval. Each window uses only its own observations;
+  the final summary and plots use the full history. Never reset MetaManager
+  between reporting windows.
 - `lookup` timings cover all reads and `alloc` covers every miss, including
   failed allocations. `read_finish` covers hits, `write_finish` covers
   successful allocations and `evict_check` includes waiting for eviction and
@@ -91,10 +109,14 @@ from `cli/arguments.py`; programmatic defaults in `config.py` can differ.
   come from native operations. A sampled RSS maximum is not a transient peak.
 - Heaptrack is optional. Keep its capture and matching executable together;
   let Heaptrack handle instrumentation and analysis. Do not add custom malloc
-  hooks, class-size estimates, capture parsers or profiler backend frameworks.
+  hooks, class-size estimates, raw capture parsers or profiler backend
+  frameworks.
 - Build DataFrames after worker shutdown. Preserve integer counters and byte
   counts; format percentages and MiB on display copies. Undefined rates stay
   `NaN` and print as `n/a`. Detailed tables are absent when collection is off.
+  Public `print_latencies` and `print_memory` functions in `metrics/summary.py`
+  accept DataFrames; keep formatting there rather than importing private
+  summary helpers into `simulation.py`.
 - Plots are the simulator's only file export. JSONL is internal IPC; Heaptrack
   produces its own capture. Do not reintroduce JSON/CSV result export.
 
@@ -142,8 +164,22 @@ bash examples/trace_example.sh
 
 The trace example enables `--profile` and requires Heaptrack on PATH. Examples
 save their plots in `build/`; profiling captures go in `build/profiles/`.
-The sequential example defaults to a million reads; the override above keeps
+The sequential example defaults to 10,000 reads; the override above keeps
 the run short.
+
+To inspect peak-memory sources, pass a capture path printed by the simulator:
+
+```bash
+python tools/heap_sources.py /path/to/capture.zst
+```
+
+This tool requires `heaptrack_print`. It reads Heaptrack's text report, sums
+peak sizes by a selected project `file:line`, and prints descending KiB totals.
+The checkout root comes from the script's fixed location; there is no root
+argument. Virtual environments and installed packages are excluded. Prefer the
+first project caller outside `mmc_ref.h`, with the first wrapper frame as a
+fallback. This is a source breakdown of Heaptrack's report, not an RSS or
+recursive object-size measurement.
 
 Native code rebuilds automatically before a simulation. To build it alone:
 
@@ -164,8 +200,8 @@ Install development tools only when needed:
 python -m pip install black isort pycodestyle clang-format==18.1.8
 ```
 
-`bash format.sh` formats the entrypoints, `src/` and `tests/`, including the
-protected workloads. For agent changes, run its individual tools only on
+`bash format.sh` formats the entrypoints, `src/`, `tests/` and `tools/`, including
+the protected workloads. For agent changes, run its individual tools only on
 edited, unprotected files:
 
 ```bash
@@ -189,6 +225,9 @@ python -m pip install pytest
 MPLBACKEND=Agg python -m pytest -q
 ```
 
+Both `pytest` and `python -m pytest` must work. Import standalone tools by file
+path rather than relying on the launcher's import path.
+
 Tests marked `native` build/run the real standalone worker, including the Bash
 examples. The Heaptrack test and profiled trace example skip when Heaptrack is
 missing; unprofiled trace CLI coverage still runs.
@@ -206,15 +245,22 @@ Keep coverage focused:
 - `test_config.py`: size/group parsing and CLI-to-config conversion
 - `test_metrics.py`: RSS units, exact integer totals, signed RSS changes,
   aggregation and percentiles from individual latency samples, display
-  formatting and the actual coordinates exported in plots
+  formatting, public interval printers and the actual coordinates exported in
+  plots
 - `test_simulation.py`: real hits/misses, allocation failures, prefix/size
   breakdowns, per-read timing replies and buffer clearing, disabled timing
-  collection, sampling, unequal pools, both eviction policies, empty workloads
-  and cleanup after an input failure; a small C++ harness checks native key
-  conversion against the previous Python format
+  collection, deferred interval reports, partial and exact windows, complete
+  measurement history including step zero, unequal pools, both eviction
+  policies, empty workloads and cleanup after an input failure; a small C++
+  harness checks native key conversion against the previous Python format
 - `test_examples.py`: all three Bash examples, trace line selection and plot
-  export; all three entrypoints support help without build tools
-- `test_profile.py`: optional real Heaptrack capture and native-PID sampling
+  export; all three entrypoints and the Heaptrack tool support help without
+  external tools
+- `test_profile.py`: optional real Heaptrack capture, native-PID sampling and
+  the source-breakdown tool on the same capture
+- `test_heap_sources.py`: project-source grouping, dependency filtering,
+  wrapper fallback, final-entry handling, section boundaries and the positional
+  capture argument; stub only `heaptrack_print`, not MetaManager
 
 Prefer deterministic workloads and accounting invariants to exact timing/RSS
 values, arbitrary output wording or particular eviction victims. Do not mock
@@ -222,5 +268,7 @@ MetaManager, repeat the same native scenario across modules, test argparse or
 pandas themselves, or retain tests for removed APIs. Reuse a native result
 when several assertions concern the same run. Keep large traces and profiler
 benchmarks out of the suite; inspect plots manually when changing rendering.
-Override the sequential example's million-read default in tests.
+Override the sequential example's read count in tests. Keep `heap_sources.py`
+parser checks independent of Heaptrack installation; real capture checks
+belong with the optional profile test.
 Report exactly which checks ran and any optional skips.

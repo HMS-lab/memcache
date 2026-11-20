@@ -29,15 +29,23 @@ def _add_manager_arguments(parser: ArgumentParser) -> None:
 
 def _add_simulator_arguments(parser: ArgumentParser) -> None:
     # Metrics and output
-    parser.add_argument(
-        "--memory-sample-every",
-        type=int,
-        default=1,
-        help="0 means initial/final only",
-    )
-    parser.add_argument("--memory-plot", type=Path)
     parser.add_argument("--detailed-stats", action="store_true")
+    parser.add_argument("--memory-plot", type=Path)
     parser.add_argument("--profile", action="store_true")
+
+    # Sampling intervals
+    parser.add_argument(
+        "--latency-sample-interval",
+        type=int,
+        default=0,
+        help="0 means final only",
+    )
+    parser.add_argument(
+        "--memory-sample-interval",
+        type=int,
+        default=0,
+        help="0 means final only",
+    )
 
     # Utility
     parser.add_argument("--progress-bar", action="store_true")

@@ -4,7 +4,7 @@
 from collections.abc import Iterator
 from pathlib import Path
 
-from .trace_reader import TraceReader
+from .tools import TraceReader
 
 
 class TraceWorkload:

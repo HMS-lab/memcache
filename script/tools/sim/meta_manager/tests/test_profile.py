@@ -3,6 +3,7 @@
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ from meta_manager_sim.metrics import read_rss
 from meta_manager_sim.simulation import _simulate_reads
 
 pytestmark = pytest.mark.native
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_heaptrack_profiles_the_native_worker(
@@ -29,8 +31,7 @@ def test_heaptrack_profiles_the_native_worker(
 
     monkeypatch.setattr(simulation, "read_rss", observe)
     metrics = _simulate_reads(
-        [("profile-key", 4096), ("profile-key", 4096)],
-        RunConfig(profile=True, memory_sample_every=0),
+        [("profile-key", 4096), ("profile-key", 4096)], RunConfig(profile=True)
     )
     assert metrics["summary"].at[0, "hits"] == 1
     assert (metrics["memory"]["rss_bytes"] > 0).all()
@@ -48,3 +49,19 @@ def test_heaptrack_profiles_the_native_worker(
             timeout=30,
         )
         assert "MmcMetaManager" in analysis.stdout
+        sources = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "tools/heap_sources.py"),
+                str(capture),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        )
+        rows = [line.split(maxsplit=2) for line in sources.stdout.splitlines()]
+        assert rows and all(unit == "KiB" for _, unit, _ in rows)
+        assert all(
+            source.startswith(str(ROOT.parents[3])) for _, _, source in rows
+        )

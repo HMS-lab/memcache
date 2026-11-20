@@ -8,7 +8,13 @@ from typing import cast
 from pandas import DataFrame
 
 from .config import RunConfig
-from .metrics import plot_memory, read_rss, render_summary, summarize_metrics
+from .metrics import plot_memory, read_rss
+from .metrics.summary import (
+    print_latencies,
+    print_memory,
+    render_summary,
+    summarize_metrics,
+)
 from .native import NativeProcess
 
 """ ----------------------------------------------------------------------- """
@@ -22,7 +28,8 @@ def _initialize_manager(
         "init",
         config={
             **asdict(config.manager_cfg),
-            # Note: Convert pool tuples to the native format (overwrite)
+            # Note: Convert pool tuples to the native format
+            # (overwrite `config.manager_cfg.pools`)
             "pools": [
                 {"count": count, "capacity_bytes": capacity}
                 for count, capacity in config.manager_cfg.pools
@@ -36,16 +43,16 @@ def _request_reads(
     process: NativeProcess,
     reads: Iterable[tuple[str, int]],
     snapshot_init: dict[str, object],
-    sample_interval: int,
+    config: RunConfig,
 ) -> tuple[
-    dict[str, object], list[tuple[int, int, int]], dict[str, list[int]]
+    dict[str, object], list[dict[str, list[int]]], list[tuple[int, int, int]]
 ]:
-    samples: list[tuple[int, int, int]] = []
-    latencies: dict[str, list[int]] = {}
+    latencies: list[dict[str, list[int]]] = []
+    memory_samples: list[tuple[int, int, int]] = []
 
     def _sample(progress: dict[str, object]) -> None:
         # Note: Use the C++ PID even when Heaptrack launches the process
-        samples.append(
+        memory_samples.append(
             (
                 cast(int, progress["reads"]),
                 read_rss(cast(int, snapshot_init["pid"])),
@@ -59,32 +66,56 @@ def _request_reads(
     for reads_completed, read in enumerate(reads, start=1):
         progress = process.request("read", reads=[read])
 
-        # Keep per-operation timing samples for later aggregation
-        for operation, values in cast(
-            dict[str, list[int]], progress.pop("latencies", {})
-        ).items():
-            latencies.setdefault(operation, []).extend(values)
+        # Note: Hits and misses produce different sets of timings,
+        # so keep one dictionary per read to slice by read count
+        if config.detailed_stats:
+            latencies.append(
+                cast(dict[str, list[int]], progress.pop("latencies"))
+            )
 
-        if sample_interval and reads_completed % sample_interval == 0:
+        if (
+            config.memory_sample_interval
+            and reads_completed % config.memory_sample_interval == 0
+        ):
             _sample(progress)
 
     # Collect the final state and RSS before the native process shuts down
     snapshot_final = process.request("snapshot")
     _sample(cast(dict[str, object], snapshot_final["progress"]))
 
-    return snapshot_final, samples, latencies
+    return snapshot_final, latencies, memory_samples
+
+
+def _memory_frame(samples: list[tuple[int, int, int]]) -> DataFrame:
+    return DataFrame.from_records(
+        samples, columns=["reads", "rss_bytes", "cached_keys"]
+    )
+
+
+def _latency_frame(latencies: list[dict[str, list[int]]]) -> DataFrame:
+    return (
+        DataFrame.from_records(
+            (
+                (operation, duration)
+                for timings in latencies
+                for operation, values in timings.items()
+                for duration in values
+            ),
+            columns=["operation", "latency_ns"],
+        )
+        .set_index("operation")
+        .astype("uint64")
+    )
 
 
 def _build_metrics(
     snapshot: dict[str, object],
-    samples: list[tuple[int, int, int]],
-    latencies: dict[str, list[int]],
+    latencies: list[dict[str, list[int]]],
+    memory_samples: list[tuple[int, int, int]],
 ) -> dict[str, DataFrame]:
     metrics = {
         "summary": DataFrame([snapshot["progress"]], dtype="uint64"),
-        "memory": DataFrame.from_records(
-            samples, columns=["reads", "rss_bytes", "cached_keys"]
-        ),
+        "memory": _memory_frame(memory_samples),
         "pools": DataFrame(
             cast(list[dict[str, int]], snapshot["pools"]),
             columns=["rank", "capacity_bytes", "used_bytes", "padding_bytes"],
@@ -126,18 +157,7 @@ def _build_metrics(
         metrics["allocations"] = by_size.sort_index()
 
         # Individual durations, grouped by operation during summarization
-        metrics["latencies"] = (
-            DataFrame.from_records(
-                (
-                    (operation, duration)
-                    for operation, values in latencies.items()
-                    for duration in values
-                ),
-                columns=["operation", "latency_ns"],
-            )
-            .set_index("operation")
-            .astype("uint64")
-        )
+        metrics["latencies"] = _latency_frame(latencies)
 
     return metrics
 
@@ -148,13 +168,13 @@ def _simulate_reads(
     with NativeProcess(config.profile) as process:
         # Initialize MetaManager and replay reads sequentially
         snapshot_init = _initialize_manager(process, config)
-        snapshot_final, samples, latencies = _request_reads(
-            process, reads, snapshot_init, config.memory_sample_every
+        snapshot_final, latencies, memory_samples = _request_reads(
+            process, reads, snapshot_init, config
         )
 
         profile_path = process.close()
 
-    metrics = _build_metrics(snapshot_final, samples, latencies)
+    metrics = _build_metrics(snapshot_final, latencies, memory_samples)
     metrics["summary"] = metrics["summary"].assign(
         detailed_stats=config.detailed_stats,
         profile_path=str(profile_path) if profile_path else None,
@@ -162,6 +182,23 @@ def _simulate_reads(
 
     # Aggregate rates, memory statistics and native operation latencies
     summarize_metrics(metrics)
+
+    # Print latency statistics for each separate read interval
+    if config.latency_sample_interval:
+        for start in range(0, len(latencies), config.latency_sample_interval):
+            window = latencies[start : start + config.latency_sample_interval]
+            print_latencies(
+                _latency_frame(window), start + 1, start + len(window)
+            )
+
+    # Print memory statistics between consecutive RSS samples
+    if config.memory_sample_interval:
+        for index in range(1, len(memory_samples)):
+            # Note: The final snapshot may repeat the last sampled read count
+            if memory_samples[index - 1][0] != memory_samples[index][0]:
+                print_memory(
+                    _memory_frame(memory_samples[index - 1 : index + 1])
+                )
 
     return metrics
 
@@ -173,14 +210,15 @@ def run_simulation(
     reads: Iterable[tuple[str, int]], config: RunConfig
 ) -> None:
     metrics = _simulate_reads(reads, config)
+    print("======== SUMMARY ========")
     render_summary(metrics)
 
-    # Save RSS/cached-key plots against completed reads
+    # Save "RSS/cached-key against completed reads" plots
     if config.memory_plot:
         plot_memory(metrics["memory"], config.memory_plot)
         print(f"Saved memory plot at: {config.memory_plot}")
 
-    # Output the Heaptrack capture path if profiling was enabled
+    # Output the Heaptrack capture path
     profile_path = metrics["summary"].at[0, "profile_path"]
     if profile_path:
         print(f"Saved Heaptrack capture at: {profile_path}")

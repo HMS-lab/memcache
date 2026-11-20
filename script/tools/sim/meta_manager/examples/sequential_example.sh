@@ -6,6 +6,8 @@ set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
 python sim_sequential.py --pools 1:10GiB,2:4GiB \
+                         --latency-sample-interval 1000 \
+                         --memory-sample-interval 1000 \
                          --progress-bar \
                          --detailed-stats \
                          --num-reads 10000 \

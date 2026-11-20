@@ -19,10 +19,11 @@ class MetaManagerConfig:
 @dataclass(frozen=True)
 class RunConfig:
     manager_cfg: MetaManagerConfig = MetaManagerConfig()
-    memory_sample_every: int = 1
-    memory_plot: Path | None = None
     detailed_stats: bool = False
+    memory_plot: Path | None = None
     profile: bool = False
+    latency_sample_interval: int = 0
+    memory_sample_interval: int = 0
     progress_bar: bool = False
 
     @staticmethod
@@ -36,9 +37,10 @@ class RunConfig:
                 eviction_policy=args.eviction_policy,
                 lru_shards=args.lru_shards,
             ),
-            memory_sample_every=args.memory_sample_every,
-            memory_plot=args.memory_plot,
             detailed_stats=args.detailed_stats,
+            memory_plot=args.memory_plot,
             profile=args.profile,
+            latency_sample_interval=args.latency_sample_interval,
+            memory_sample_interval=args.memory_sample_interval,
             progress_bar=args.progress_bar,
         )

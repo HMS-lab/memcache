@@ -18,7 +18,11 @@ from meta_manager_sim.metrics import (
     render_summary,
     summarize_metrics,
 )
-from meta_manager_sim.metrics.summary import _summarize_latencies
+from meta_manager_sim.metrics.summary import (
+    _summarize_latencies,
+    print_latencies,
+    print_memory,
+)
 
 
 def test_rss_is_read_from_the_requested_pid_in_bytes(
@@ -110,6 +114,27 @@ def test_latency_summary_from_individual_samples() -> None:
     assert timings.loc["alloc"].drop("count").eq(7).all()
     for column in ("count", "total", "min", "max"):
         assert timings[column].dtype.kind in "iu"
+
+
+def test_interval_printers_preserve_raw_data(
+    capsys: CaptureFixture[str],
+) -> None:
+    memory = DataFrame({"reads": [3, 6], "rss_bytes": [3 << 20, 1 << 20]})
+    latencies = DataFrame(
+        {"latency_ns": [1000, 3000]},
+        index=["lookup", "lookup"],
+        dtype="uint64",
+    ).rename_axis("operation")
+    original_memory, original_latencies = memory.copy(), latencies.copy()
+
+    print_memory(memory)
+    print_latencies(latencies, 4, 6)
+    output = capsys.readouterr().out
+    assert "Memory [reads 3 to 6]" in output
+    assert "Timings [ns, reads 4 to 6]" in output
+    assert "MiB" in output and "p99.99" in output
+    assert_frame_equal(memory, original_memory)
+    assert_frame_equal(latencies, original_latencies)
 
 
 def test_plot_exports_rss_and_cached_keys_against_reads(

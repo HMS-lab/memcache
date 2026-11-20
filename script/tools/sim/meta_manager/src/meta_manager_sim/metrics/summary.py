@@ -159,3 +159,33 @@ def render_summary(metrics: dict[str, DataFrame]) -> None:
             if not frame.empty
         )
     )
+
+
+def print_latencies(
+    latencies: DataFrame, first_read: int, last_read: int
+) -> None:
+    summary = _summarize_latencies(latencies)
+    summary = summary.drop(columns=["total", "min", "max"])
+
+    print(
+        f"\nTimings [ns, reads {first_read} to {last_read}]\n"
+        f"{_table_to_str(summary)}",
+        flush=True,
+    )
+
+
+def print_memory(memory: DataFrame) -> None:
+    summary = DataFrame(index=[0])
+
+    _summarize_memory(summary, memory)
+    summary = summary / (1 << 20)
+    summary.columns = summary.columns.str.replace("_bytes", "_MiB")
+
+    first_read = memory["reads"].iloc[0]
+    last_read = memory["reads"].iloc[-1]
+
+    print(
+        f"\nMemory [reads {first_read} to {last_read}]\n"
+        f"{_table_to_str(summary, vertical=True)}",
+        flush=True,
+    )

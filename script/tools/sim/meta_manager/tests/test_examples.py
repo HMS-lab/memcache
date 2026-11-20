@@ -99,9 +99,15 @@ def test_examples_and_trace_cli(
 
 
 @pytest.mark.parametrize(
-    "entry", ["sim_random.py", "sim_sequential.py", "sim_trace.py"]
+    "entry",
+    [
+        "sim_random.py",
+        "sim_sequential.py",
+        "sim_trace.py",
+        "tools/heap_sources.py",
+    ],
 )
-def test_help_without_build_tools(entry: str, tmp_path: Path) -> None:
+def test_help_without_external_tools(entry: str, tmp_path: Path) -> None:
     result = subprocess.run(
         [sys.executable, str(ROOT / entry), "--help"],
         cwd=tmp_path,
@@ -111,4 +117,7 @@ def test_help_without_build_tools(entry: str, tmp_path: Path) -> None:
         timeout=30,
     )
     assert result.returncode == 0, result.stderr
-    assert "--pools" in result.stdout and "--memory-plot" in result.stdout
+    if entry == "tools/heap_sources.py":
+        assert "capture" in result.stdout
+    else:
+        assert "--pools" in result.stdout and "--memory-plot" in result.stdout

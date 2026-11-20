@@ -39,7 +39,8 @@ def main() -> None:
     )
 
     if config.progress_bar:
-        # Note: The number of reads is not predetermined
+        # Note: The number of reads is not predetermined,
+        # hence the conversion to a list
         reads = tqdm(list(reads))
 
     run_simulation(reads, config)

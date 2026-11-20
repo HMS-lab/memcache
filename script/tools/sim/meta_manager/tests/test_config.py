@@ -41,12 +41,15 @@ def test_from_args() -> None:
             "lru",
             "--lru-shards",
             "8",
-            "--memory-sample-every",
+            "--latency-sample-interval",
+            "25",
+            "--memory-sample-interval",
             "100",
             "--memory-plot",
             "build/test.png",
             "--detailed-stats",
             "--profile",
+            "--progress-bar",
         ]
     )
     assert RunConfig.from_args(args) == RunConfig(
@@ -58,10 +61,12 @@ def test_from_args() -> None:
             eviction_policy="lru",
             lru_shards=8,
         ),
-        memory_sample_every=100,
+        latency_sample_interval=25,
+        memory_sample_interval=100,
         memory_plot=Path("build/test.png"),
         detailed_stats=True,
         profile=True,
+        progress_bar=True,
     )
 
 

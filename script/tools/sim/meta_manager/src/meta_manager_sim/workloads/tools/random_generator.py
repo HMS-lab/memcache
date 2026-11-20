@@ -17,7 +17,8 @@ class RandomGenerator:
         hot_block_fraction: float = 0.2,
         hot_read_probability: float = 0.8,
     ) -> Iterator[tuple[int, int]]:
-        # Reset the seeded generator for reproducible calls
+        # Note: Create a new seeded generator for
+        # each request to ensure reproducibility
         rng = random.Random(self._seed)
 
         # Define the hot block range and assign each block a fixed size
@@ -26,8 +27,8 @@ class RandomGenerator:
             list(size_weights), list(size_weights.values()), k=num_blocks
         )
 
-        # Note: The first condition avoids choosing an empty cold range
         for _ in range(num_reads):
+            # Note: The first condition avoids choosing an empty cold range
             block_id = (
                 rng.randrange(num_hot_blocks)
                 if num_hot_blocks == num_blocks

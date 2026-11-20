@@ -3,7 +3,7 @@
 
 from collections.abc import Iterator
 
-from .random_generator import RandomGenerator
+from .tools import RandomGenerator
 
 
 class RandomWorkload:
