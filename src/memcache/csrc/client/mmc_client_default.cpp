@@ -22,6 +22,7 @@
 #include "mmc_ptracer.h"
 #include "mmc_client_metric_manager.h"
 #include "mmc_bandwidth_collector.h"
+#include "mmc_version.h"
 
 #include <algorithm>
 #include <chrono>
@@ -87,13 +88,13 @@ std::mutex MmcClientDefault::gClientHandlerMtx;
 
 Result MmcClientDefault::Start(const mmc_client_config_t &config)
 {
-    MMC_LOG_TRACE("Starting client " << name_);
     stopping_.store(false, std::memory_order_release);
     std::lock_guard<std::mutex> guard(mutex_);
     if (started_) {
         MMC_LOG_TRACE("MetaService " << name_ << " already started");
         return MMC_OK;
     }
+    MMC_LOG_TRACE("Starting MemCache client " << name_ << ", " << LIB_VERSION);
     bmProxy_ = MmcBmProxyFactory::GetInstance("bmProxyDefault");
     MMC_ASSERT_LOG_AND_RETURN(bmProxy_ != nullptr, "bmProxy_ is nullptr", MMC_MALLOC_FAILED);
     rankId_ = bmProxy_->RankId();

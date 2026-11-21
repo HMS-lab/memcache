@@ -25,6 +25,7 @@
 #include "mmc_configuration.h"
 #include "mmc_smem_bm_helper.h"
 #include "mmc_local_service_default.h"
+#include "mmc_version.h"
 
 namespace ock {
 namespace mmc {
@@ -99,7 +100,6 @@ Result MmcLocalServiceDefault::ConnectMetaNetServer(const NetEngineOptions &netO
 
 Result MmcLocalServiceDefault::Start(const mmc_local_service_config_t &config)
 {
-    MMC_LOG_TRACE("Starting meta service " << name_);
     std::lock_guard<std::mutex> guard(mutex_);
     if (started_) {
         MMC_LOG_TRACE("MetaService " << name_ << " already started");
@@ -114,6 +114,7 @@ Result MmcLocalServiceDefault::Start(const mmc_local_service_config_t &config)
     if (options_.logFunc != nullptr) {
         ock::mmc::MmcOutLogger::Instance().SetExternalLogFunction(options_.logFunc);
     }
+    MMC_LOG_TRACE("Starting MemCache LocalService " << name_ << ", " << LIB_VERSION);
     MMC_RETURN_ERROR(InitBm(), "Failed to init bm of local service " << name_);
 
     metaNetClient_ = MetaNetClientFactory::GetInstance(this->options_.discoveryURL, "MetaClientCommon").Get();

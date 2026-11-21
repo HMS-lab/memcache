@@ -17,6 +17,7 @@
 #include <utility>
 
 #include "mmc_logger.h"
+#include "mmc_version.h"
 #include "mmc_ref.h"
 #include "mmc_client_metric_store.h"
 #include "mmc_meta_mgr_proxy.h"
@@ -73,6 +74,7 @@ Result MmcMetaService::Start(const mmc_meta_service_config_t &options)
         MMC_LOG_TRACE("MetaService " << name_ << " already started");
         return MMC_OK;
     }
+    MMC_LOG_TRACE("Starting MemCache MetaService " << name_ << ", " << LIB_VERSION);
     options_ = options;
     MMC_VALIDATE_RETURN(options.lruType == MMC_META_LRU_TYPE_LRU || options.lruType == MMC_META_LRU_TYPE_SHARDED_LRU,
                         "invalid param, lruType must be lru or sharded_lru", MMC_INVALID_PARAM);
