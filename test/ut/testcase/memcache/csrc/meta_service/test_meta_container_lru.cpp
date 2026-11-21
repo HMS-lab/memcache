@@ -533,6 +533,26 @@ protected:
     }
 };
 
+// DRAM 使用率低于或等于低水位时，普通 LRU 保留所有 key，淘汰回调次数为 0。
+TEST_F(TestEvictYield, EliminationSkipsAtOrBelowLowWatermark)
+{
+    constexpr size_t keyCount = 100;
+    constexpr uint16_t highWatermark = 90;
+    constexpr uint16_t lowWatermark = 80;
+    constexpr uint16_t belowLowWatermark = 60;
+    InsertKeys(keyCount);
+    std::atomic<size_t> evictCount{0};
+    auto moveFunc = MakeMoveFunc(evictCount);
+
+    for (const auto current : {belowLowWatermark, lowWatermark}) {
+        SCOPED_TRACE(testing::Message() << "current=" << current);
+        container->MultiLevelElimination(MakeWatermarks(highWatermark, lowWatermark), {MEDIA_DRAM}, {current},
+                                         moveFunc);
+        ASSERT_EQ(evictCount.load(), 0U);
+        ASSERT_EQ(container->GetKeyCount(MEDIA_DRAM), keyCount);
+    }
+}
+
 TEST_F(TestEvictYield, YieldDisabledByDefault)
 {
     const size_t numKeys = 100;

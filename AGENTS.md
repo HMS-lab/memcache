@@ -8,6 +8,7 @@
 
 ## 测试
 
+- 新增或修改 UT 时，在用例定义正上方用注释说明具体的测试场景和预期结果。
 - **全部 C++ UT**：`bash script/run_ut.sh`，执行 DEBUG 测试构建、运行 `output/bin/ut/test_mmc_test`，并生成 `output/coverage`。
 - **按名称过滤**：`bash script/run_ut.sh meta_service`，脚本会传递 `--gtest_filter=*meta_service*`。
 - 覆盖率门禁来自 `script/run_ut.sh`：`src/memcache` 行覆盖率不少于 70%，分支覆盖率不少于 40%。

@@ -957,12 +957,16 @@ curl "http://127.0.0.1:8000/batch_query_keys?keys=key_a,key_b"
 
 ### 作用
 
-删除指定业务 KV Cache key 及其关联数据。
+删除 MetaService 中指定业务 KV Cache key 的元数据，并按 `flags` 释放或降级关联数据。
+
+- **异步释放**：默认删除同步摘除索引，底层内存与已登记 SSD 副本后台异步释放（有活跃租约时等待释放或超时）。
+- **SSD 边界**：`aggregated` 仅异步尽力删已登记 SSD 副本（刷盘在途未登记不触发，失败仅告警）；`separated` 不删 UBS IO。
+- **客户端缓存**：通过 REST 删除不会主动通知各客户端清理进程内本地 GVA 追踪缓存。
 
 ### curl
 
 ```bash
-# 默认删除：同时删除元数据与所有层级的 blob
+# 默认删除：同步清索引，内存与已登记 SSD 副本异步释放
 curl -X DELETE "http://127.0.0.1:8000/key?key=demo_key"
 
 # 懒删除：key 只做 Demote，等待自然淘汰
@@ -1021,7 +1025,12 @@ curl -X DELETE "http://127.0.0.1:8000/key?key=demo_key&flags=2"
 
 ### 作用
 
-删除所有业务 KV Cache key 及其关联数据。
+清空 MetaService 当前管理的全部业务 KV Cache key 元数据，并异步释放关联数据。
+
+- **不支持 `flags`**：无懒删除或保留 SSD 选项，直接清除索引内全部 key（含已标记懒删除的 key）。
+- **异步释放**：返回 `success: true` 仅表示索引已清且后台任务已提交；有活跃租约时会等待释放或超时。
+- **SSD 边界**：`aggregated` 仅异步尽力删已登记 SSD 副本（刷盘在途未登记不触发，失败仅告警）；`separated` 不删 UBS IO。
+- **并发与缓存**：`lruType=sharded_lru` 下逐分片加锁清空（非全局原子）；不会通知各客户端清理本地 GVA 追踪缓存。
 
 ### curl
 

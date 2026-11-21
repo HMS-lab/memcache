@@ -226,13 +226,27 @@ virtual int Remove(const std::string &key, uint32_t flags = 0) = 0;
 
 **参数**
 
-- `key`：数据键（长度 < 256字节）。
-- `flags`：可选标志位，默认为 `0`（立即删除）。支持 `MMC_REMOVE_FLAG_LAZY`（值为 `1`），开启懒删除模式：key 不立即删除，而是标记为优先淘汰（多个懒删除 key 按首次懒删除先后顺序淘汰，先删先淘汰）；期间 Get/Exist/Query 等访问会恢复其正常热度并取消该标记；若因内存压力被淘汰并降级到更低层介质，则视为删除完成，在低层按普通数据对待；对已停泊为 SSD-only 的 key（如经 KEEP_SSD 删除或淘汰降级后）执行懒删除时（未同时置位 `KEEP_SSD`），因无内存层 LRU 可降级，退化为立即全量删除；分片 LRU（lruType=sharded_lru）模式下仍保证懒删除 key 优先于普通 key 淘汰；自动淘汰时同一分片内按首次懒删除先后淘汰，不同分片之间不保证全局 FIFO；碎片整理、强制释放等按候选列表处理的路径只保证懒删除 key 优先进入候选，候选之间的先后顺序不保证；支持 `MMC_REMOVE_FLAG_KEEP_SSD`（值为 `2`），仅释放内存层（HBM/DRAM）数据与元数据，key 的 SSD 副本（数据与元数据）保留，效果等同将该 key 从内存层淘汰降级为 SSD-only：后续 Get 仍可命中并从 SSD 回热；key 无 SSD 副本时等同于默认删除；`MMC_REMOVE_FLAG_LAZY` 与 `MMC_REMOVE_FLAG_KEEP_SSD` 同时置位时表示「内存层懒删除 + SSD 副本保留」：key 的内存层按懒删除优先淘汰，淘汰时只释放内存层，SSD 数据与元数据始终保留；key 仅有 SSD 副本时不执行删除并返回成功；key 仅有内存副本时等同于普通懒删除。
+- `key`：数据键，非空且长度 `<= 256` 字节。
+- `flags`：删除标志位，默认 `0`，含未知位返回 `MMC_INVALID_PARAM`：
+  - `0`（默认）：立即摘除索引，底层内存与已登记 SSD 副本在后台异步释放（有活跃租约时等待释放或超时）。
+  - `MMC_REMOVE_FLAG_LAZY`（`1`）：懒删除。不立即摘除索引，仅标记为优先淘汰（按首次懒删除先后顺序）。
+    - 期间 `GetInto`/`IsExist`/`GetKeyInfo`/`BatchAddLease` 等访问会恢复热度并取消标记。
+    - 淘汰降级到低层后按普通数据对待；SSD-only key（未置 `KEEP_SSD`）退化为默认删除。
+    - `lruType=sharded_lru` 下仅保证同分片内先后顺序，跨分片及候选列表路径不保证全局 FIFO。
+  - `MMC_REMOVE_FLAG_KEEP_SSD`（`2`）：仅释放内存层并保留 SSD 副本；无 SSD 副本时退化为默认删除。
+  - `MMC_REMOVE_FLAG_LAZY | MMC_REMOVE_FLAG_KEEP_SSD`（`3`）：内存层懒删除，淘汰时保留 SSD 副本；仅 SSD 副本时直接返回成功。
+
+**说明**
+
+- **UBS IO / SSD 删除边界**：仅对 MetaService 已登记的 `MEDIA_SSD` 副本发起异步尽力删除（失败仅告警、不重试）。
+  - `metadata_mode=aggregated`：已完成刷盘并回填元数据的 SSD 副本会异步删除；刷盘在途未登记时不触发 UBS IO 删除。
+  - `metadata_mode=separated`：MetaService 不登记 SSD 元数据，默认删除与 `KEEP_SSD` 均只清内存层，不删 UBS IO / SSD 数据。
+- **本地缓存**：返回 `0` 时清理本进程 GVA 追踪记录（含懒删除成功）。
 
 **返回值**
 
-- `0`：成功
-- 其他：失败
+- `0`：成功（不含后台异步释放与 SSD 删除结果）
+- 其他：负错误码（如 `MMC_INVALID_PARAM`、`MMC_UNMATCHED_KEY`）
 
 #### IsExist
 
@@ -340,16 +354,51 @@ virtual std::vector<int> BatchRemove(const std::vector<std::string> &keys, uint3
 
 **功能**
 
-批量删除。
+按顺序批量删除多个键（服务端逐 key 处理，不保证整批原子性）。
 
 **参数**
 
-- `keys`：数据键列表（每个键长度 < 256字节）。
-- `flags`：可选标志位，默认为 `0`（立即删除）。支持 `MMC_REMOVE_FLAG_LAZY`（值为 `1`），开启懒删除模式：key 不立即删除，而是标记为优先淘汰（多个懒删除 key 按首次懒删除先后顺序淘汰，先删先淘汰）；期间 Get/Exist/Query 等访问会恢复其正常热度并取消该标记；若因内存压力被淘汰并降级到更低层介质，则视为删除完成，在低层按普通数据对待；对已停泊为 SSD-only 的 key（如经 KEEP_SSD 删除或淘汰降级后）执行懒删除时（未同时置位 `KEEP_SSD`），因无内存层 LRU 可降级，退化为立即全量删除；分片 LRU（lruType=sharded_lru）模式下仍保证懒删除 key 优先于普通 key 淘汰；自动淘汰时同一分片内按首次懒删除先后淘汰，不同分片之间不保证全局 FIFO；碎片整理、强制释放等按候选列表处理的路径只保证懒删除 key 优先进入候选，候选之间的先后顺序不保证。
+- `keys`：数据键列表，每个键非空且长度 `<= 256` 字节；为空时直接返回空列表。
+- `flags`：删除标志位，默认 `0`，含义与 `Remove` 一致；含未知位时服务端逐 key 返回 `MMC_INVALID_PARAM`：
+  - `0`：立即摘除索引，底层内存与已登记 SSD 副本异步释放（有活跃租约时等待释放或超时）。
+  - `MMC_REMOVE_FLAG_LAZY`（`1`）：懒删除（优先淘汰，访问取消标记；SSD-only 退化为默认删除；详见 `Remove`）。
+  - `MMC_REMOVE_FLAG_KEEP_SSD`（`2`）：仅释放内存层并保留 SSD 副本；无 SSD 副本时退化为默认删除。
+  - `MMC_REMOVE_FLAG_LAZY | MMC_REMOVE_FLAG_KEEP_SSD`（`3`）：内存层懒删除，淘汰时保留 SSD 副本。
+
+**说明**
+
+- **SSD 边界**：`aggregated` 仅异步尽力删已登记 SSD 副本（刷盘在途未登记不触发）；`separated` 仅清内存层，不删 UBS IO。
+- **部分非法 key**：空串或超长（`> 256` 字节）key 本地过滤并填 `MMC_INVALID_PARAM`，不影响同批合法 key。
+- **本地缓存**：返回 `0` 的 key 会清理本进程 GVA 追踪记录（含懒删除成功）。
 
 **返回值**
 
-返回每个键对应的处理结果列表，每个元素 `0` 表示成功，负数表示失败。
+与 `keys` 等长的结果列表（`keys` 为空返回空列表）：
+
+- 单个元素 `0` 表示成功，负错误码表示失败（如 `MMC_INVALID_PARAM`、`MMC_UNMATCHED_KEY`）。
+- 客户端未初始化或整批 RPC 失败时，整个列表填同一负错误码（本地内存分配失败时全填 `-1`）。
+
+#### RemoveAll
+
+```c++
+virtual int RemoveAll() = 0;
+```
+
+**功能**
+
+清空 MetaService 当前管理的全部键值对元数据，并异步释放关联数据。
+
+**说明**
+
+- **不支持 `flags`**：无懒删除或保留 SSD 选项，直接清除索引内全部 key（含已标记懒删除的 key）。
+- **异步释放**：返回 `0` 仅表示索引已清、本进程 GVA 追踪已清且后台任务已提交；有活跃租约时会等待释放或超时。
+- **SSD 边界**：`aggregated` 仅异步尽力删已登记 SSD 副本（刷盘在途未登记不触发，失败仅告警）；`separated` 不删 UBS IO。
+- **并发语义**：`lruType=sharded_lru` 下逐分片加锁清空，不保证并发写入时的全局原子快照。
+
+**返回值**
+
+- `0`：清空请求完成（不含后台异步释放及 SSD 删除结果；客户端在 RPC 成功后即返回 `0`）
+- 其他：失败（客户端未初始化或 RPC 失败）
 
 #### BatchIsExist
 

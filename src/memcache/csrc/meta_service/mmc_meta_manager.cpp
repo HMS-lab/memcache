@@ -2960,15 +2960,13 @@ Result MmcMetaManager::UpdateConfig(uint64_t leaseTtlMs, uint16_t evictThreshold
                                                            << newLeaseTtlMs);
         defaultTtlMs_.store(newLeaseTtlMs, std::memory_order_relaxed);
     }
-    if (evictThresholdHigh_.load(std::memory_order_relaxed) != evictThresholdHigh) {
-        MMC_LOG_TRACE("meta evictThresholdHigh hot-reloaded from "
-                      << evictThresholdHigh_.load(std::memory_order_relaxed) << " to " << evictThresholdHigh);
-        evictThresholdHigh_.store(evictThresholdHigh, std::memory_order_relaxed);
-    }
-    if (evictThresholdLow_.load(std::memory_order_relaxed) != evictThresholdLow) {
-        MMC_LOG_TRACE("meta evictThresholdLow hot-reloaded from " << evictThresholdLow_.load(std::memory_order_relaxed)
-                                                                  << " to " << evictThresholdLow);
-        evictThresholdLow_.store(evictThresholdLow, std::memory_order_relaxed);
+    const auto newThresholds = PackEvictThresholds(evictThresholdHigh, evictThresholdLow);
+    const auto oldThresholds = evictThresholds_.load(std::memory_order_relaxed);
+    if (oldThresholds != newThresholds) {
+        MMC_LOG_TRACE("meta evict thresholds hot-reloaded from " << (oldThresholds >> kEvictThresholdShift) << "/"
+                                                                 << static_cast<uint16_t>(oldThresholds) << " to "
+                                                                 << evictThresholdHigh << "/" << evictThresholdLow);
+        evictThresholds_.store(newThresholds, std::memory_order_relaxed);
     }
     return MMC_OK;
 }

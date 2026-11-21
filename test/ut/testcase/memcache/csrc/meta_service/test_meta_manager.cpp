@@ -2245,6 +2245,47 @@ TEST_F(TestMmcMetaManager, UpdateConfigAppliesNewValues)
     metaMng->Stop();
 }
 
+// 写线程交替更新两组高低水位时，每次读取的所有非 SSD 介质都应采用同一组完整水位，SSD 水位为 {0, 0}。
+TEST_F(TestMmcMetaManager, UpdateConfigKeepsWatermarkSnapshotsConsistent)
+{
+    constexpr uint64_t defaultTtl = 2000U;
+    constexpr size_t readCount = 100000;
+    const std::pair<uint16_t, uint16_t> originalWatermark{90U, 80U};
+    const std::pair<uint16_t, uint16_t> updatedWatermark{50U, 40U};
+    const std::pair<uint16_t, uint16_t> ssdWatermark{0, 0};
+    auto metaMng = MmcMakeRef<MmcMetaManager>(defaultTtl, originalWatermark.first, originalWatermark.second);
+    std::atomic<bool> ready{false};
+    std::atomic<bool> stop{false};
+    bool updatesSucceeded = true;
+    std::thread updater([&] {
+        ready.store(true);
+        while (!stop.load()) {
+            if (metaMng->UpdateConfig(defaultTtl, updatedWatermark.first, updatedWatermark.second) != MMC_OK ||
+                metaMng->UpdateConfig(defaultTtl, originalWatermark.first, originalWatermark.second) != MMC_OK) {
+                updatesSucceeded = false;
+                break;
+            }
+        }
+    });
+    while (!ready.load()) {
+        std::this_thread::yield();
+    }
+
+    bool consistent = true;
+    for (size_t i = 0; i < readCount && consistent; ++i) {
+        const auto watermarks = metaMng->GetEvictWatermark();
+        const auto dramWatermark = watermarks[MEDIA_DRAM];
+        consistent = dramWatermark == originalWatermark || dramWatermark == updatedWatermark;
+        for (int media = 0; media < MEDIA_NONE; ++media) {
+            consistent = consistent && watermarks[media] == (media == MEDIA_SSD ? ssdWatermark : dramWatermark);
+        }
+    }
+    stop.store(true);
+    updater.join();
+    EXPECT_TRUE(updatesSucceeded);
+    EXPECT_TRUE(consistent) << "watermarks must come from one complete update across all memory media";
+}
+
 // PrefetchKeys with empty keys silently passes and returns MMC_OK
 TEST_F(TestMmcMetaManager, PrefetchKeys_EmptyKeys_ReturnsOk)
 {
