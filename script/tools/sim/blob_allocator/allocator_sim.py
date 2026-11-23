@@ -1,148 +1,49 @@
 #!/usr/bin/env python3
-# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
-# Licensed under Mulan PSL v2. See the repository LICENSE file.
-"""Standalone workloads and measurements for the real MemCache blob allocator."""
+# -*- coding: utf-8 -*-
 
 import argparse
-import csv
+import json
 import hashlib
 import importlib.util
-import json
+import math
 import os
 import random
-import re
-import shutil
 import subprocess
 import sys
 import sysconfig
-import tempfile
-from collections import Counter, OrderedDict
-from dataclasses import dataclass
-from decimal import Decimal
-from itertools import count
 from pathlib import Path
-
-TOOL = Path(__file__).resolve().parent
-ALIGNMENT = 4096
-MAX_SIZE = (1 << 64) - ALIGNMENT
-PERCENT = 100
-SIMULATION_DEFAULTS = {
-    'eviction_policy': 'random',
-    'reads_per_allocation': 4,
-    'hot_block_percent': 20,
-    'hot_read_percent': 80,
-}
-SIMULATION_COUNTERS = (
-    'eviction_cycles',
-    'evictions',
-    'evicted_reserved_bytes',
-    'reads',
-    'hot_reads',
-    'cold_reads',
-    'skipped_reads',
-    'hot_assignments',
-    'cold_assignments',
-)
+from collections import OrderedDict
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
 
 
-def size_value(text):
-    match = re.fullmatch(r'(\d+)(B|KiB|MiB|GiB|TiB)?', str(text).strip(), re.IGNORECASE)
-    if not match:
-        raise ValueError(f'Invalid size: {text}. Use integer bytes or binary units such as KiB.')
-    unit = (match[2] or 'B').lower()
-    size = int(match[1]) * 1024 ** ['b', 'kib', 'mib', 'gib', 'tib'].index(unit)
-    if not 0 < size <= MAX_SIZE:
-        raise ValueError('Size must be positive and must not overflow alignment.')
-    return size
-
-
-def distribution(text):
-    entries = [item.strip().split(':') for item in text.split(',')]
-    if any(len(item) not in (1, 2) for item in entries):
-        raise ValueError('Use SIZE or SIZE:PERCENT% for each entry.')
-    sizes = [size_value(item[0]) for item in entries]
-    if len(set(sizes)) != len(sizes):
-        raise ValueError('Duplicate block sizes are invalid.')
-    weighted = [len(item) == 2 for item in entries]
-    if any(weighted) and not all(weighted):
-        raise ValueError('Supply all percentages or omit all percentages.')
-    if all(weighted):
-        if any(not re.fullmatch(r'\d+(?:\.\d+)?%', item[1]) for item in entries):
-            raise ValueError('Each percentage must be a positive number followed by %.')
-        weights = [Decimal(item[1][:-1]) for item in entries]
-        if any(weight <= 0 for weight in weights) or sum(weights) != PERCENT:
-            raise ValueError('Positive percentages must total 100%.')
-    else:
-        weights = [Decimal(1)] * len(sizes)
-    total = sum(weights)
-    return sizes, [float(weight / total) for weight in weights]
-
-
-def align(size):
-    return (size + ALIGNMENT - 1) // ALIGNMENT * ALIGNMENT
-
-
-@dataclass(frozen=True)
-class Alloc:
-    request_id: int
-    size: int
-    phase: str = ''
-
-
-@dataclass(frozen=True)
-class Free:
-    request_id: int
-    phase: str = ''
-
-
-def operations(config):
-    rng = random.Random(config['seed'])
-    for index in count() if config['steps'] is None else range(config['steps']):
-        yield Alloc(
-            index,
-            rng.choices(config['sizes'], weights=config['weights'], k=1)[0],
-            'alloc',
-        )
-
-
-def build_native():
-    if not shutil.which('cmake'):
-        raise RuntimeError('CMake is missing. Install CMake 3.18 or newer before running a measurement.')
-    if importlib.util.find_spec('pybind11') is None:
-        raise RuntimeError('pybind11 is missing. Install it for the current Python interpreter.')
-    # A stable interpreter identity also separates virtual environments.
-
-    identity = sys.implementation.cache_tag + '-' + hashlib.sha256(sys.executable.encode()).hexdigest()[:12]
-    build = TOOL / 'build' / identity
+def _load_native_module():
+    script_dir = Path(__file__).resolve().parent
+    identity = hashlib.sha256(
+        f"{script_dir}:{sys.executable}:{sys.implementation.cache_tag}".encode()
+    ).hexdigest()[:12]
+    build_dir = script_dir / "build" / identity
     command = [
-        'cmake',
-        '-S',
-        str(TOOL),
-        '-B',
-        str(build),
-        '-DCMAKE_BUILD_TYPE=Release',
-        f'-DPython3_EXECUTABLE={sys.executable}',
+        "cmake", "-S", str(script_dir), "-B", str(build_dir),
+        "-DCMAKE_BUILD_TYPE=Release", f"-DPython3_EXECUTABLE={sys.executable}",
+        f"-DJSON_HEADERS={os.environ.get('BLOB_SIM_JSON_HEADERS', '')}",
     ]
-    headers = os.environ.get('BLOB_SIM_JSON_HEADERS')
-    # Clear stale explicit paths when the environment returns to automatic discovery.
-    command.append(f'-DJSON_HEADERS={headers or ""}')
-    python_headers = os.environ.get('BLOB_SIM_PYTHON_HEADERS')
+    python_headers = os.environ.get("BLOB_SIM_PYTHON_HEADERS")
     if python_headers:
-        command.append(f'-DPython3_INCLUDE_DIR={python_headers}')
+        command.append(f"-DPython3_INCLUDE_DIR={python_headers}")
     subprocess.run(command, check=True, stdout=sys.stderr)
     subprocess.run(
-        ['cmake', '--build', str(build), '--config', 'Release'],
-        check=True,
-        stdout=sys.stderr,
+        ["cmake", "--build", str(build_dir), "--target", "_allocator_sim_native", "--parallel", "2"],
+        check=True, stdout=sys.stderr,
     )
-    path = build / 'native' / ('_allocator_sim_native' + sysconfig.get_config_var('EXT_SUFFIX'))
+    path = build_dir / "native" / ("_allocator_sim_native" + sysconfig.get_config_var("EXT_SUFFIX"))
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
-    existing = sys.modules.get('_allocator_sim_native')
+    existing = sys.modules.get("_allocator_sim_native")
     if existing is not None:
         if existing.__binary_digest__ != digest:
-            raise RuntimeError('Native code changed. Start a new Python process before measurement.')
+            raise RuntimeError("Native code changed. Start a new Python process before measurement.")
         return existing
-    spec = importlib.util.spec_from_file_location('_allocator_sim_native', path)
+    spec = importlib.util.spec_from_file_location("_allocator_sim_native", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     module.__binary_digest__ = digest
@@ -150,797 +51,574 @@ def build_native():
     return module
 
 
-def histogram(ranges):
-    buckets = {}
-    exact = Counter()
-    for _, size in ranges:
-        if size <= 0:
-            raise RuntimeError('A free range has an invalid size.')
-        upper = ALIGNMENT
-        while upper < size:
-            upper *= 2
-        count, total = buckets.get(upper, (0, 0))
-        buckets[upper] = (count + 1, total + size)
-        exact[size] += 1
-    result = []
-    upper = ALIGNMENT
-    while buckets and upper <= max(buckets):
-        count, total = buckets.get(upper, (0, 0))
-        result.append(
-            {
-                'lower': 0 if upper == ALIGNMENT else upper // 2,
-                'upper': upper,
-                'count': count,
-                'bytes': total,
-            }
-        )
-        upper *= 2
-    return result, dict(sorted(exact.items()))
+PERCENT = 100.0
+
+UNIT_MULTIPLIERS = {
+    "b": 1,
+    "kib": 1024,
+    "kb": 1024,
+    "k": 1024,
+    "mib": 1024 ** 2,
+    "mb": 1024 ** 2,
+    "m": 1024 ** 2,
+    "gib": 1024 ** 3,
+    "gb": 1024 ** 3,
+    "g": 1024 ** 3,
+    "tib": 1024 ** 4,
+    "tb": 1024 ** 4,
+    "t": 1024 ** 4,
+}
 
 
-def percentage(numerator, denominator):
-    return PERCENT * numerator / denominator if denominator else None
+def parse_size(text: str) -> int:
+    s = text.strip().lower().replace("_", "")
+    num_part = ""
+    unit_part = ""
+    for ch in s:
+        if ch.isdigit() or ch == ".":
+            if unit_part:
+                raise ValueError(f"Invalid size format: {text}")
+            num_part += ch
+        elif not ch.isspace():
+            unit_part += ch
+    if not num_part:
+        raise ValueError(f"Invalid size value: {text}")
+    val = float(num_part)
+    if not unit_part:
+        return int(val)
+    if unit_part not in UNIT_MULTIPLIERS:
+        raise ValueError(f"Unknown unit '{unit_part}' in '{text}'")
+    return int(round(val * UNIT_MULTIPLIERS[unit_part]))
 
 
-class Measurement:
-    def __init__(self, native, capacity, enabled, *, track_request_ids=True):
-        self.allocator = native.Allocator(capacity, enabled)
-        self.requests = {}
-        self.seen = set() if track_request_ids else None
-        self.last_request_id = -1
-        self.counts = Counter(
-            {
-                key: 0
-                for key in (
-                    'attempts',
-                    'successes',
-                    'capacity_failures',
-                    'fragmentation_failures',
-                    'releases',
-                    'skipped_releases',
-                )
-            }
-        )
-        self.per_size = {}
-        self.requested = self.alignment_waste = self.max_padding = 0
-        self.samples = []
-        self.histogram_history = []
-        self.reserved = 0
+def format_human(num_bytes: int) -> str:
+    if num_bytes == 0:
+        return "0 B"
+    units = ["B", "KiB", "MiB", "GiB", "TiB"]
+    idx = 0
+    val = float(num_bytes)
+    while val >= 1024.0 and idx < len(units) - 1:
+        val /= 1024.0
+        idx += 1
+    if idx == 0:
+        return f"{num_bytes} B"
+    return f"{val:.2f} {units[idx]}"
 
-    def sample(self, index, phase='', detailed=False, history_index=None):
-        state = self.allocator.snapshot(detailed)
-        state['free'] = state['capacity'] - state['reserved']
-        state['requested'] = self.requested
-        state['alignment_waste'] = self.alignment_waste
-        state['max_value_alignment_padding'] = self.max_padding
-        if detailed:
-            ranges = state['ranges']
-            state['free'] = sum(size for _, size in ranges)
-            state['largest_free'] = max((size for _, size in ranges), default=0)
-            state['free_range_count'] = len(ranges)
-            state['histogram'], state['exact_size_histogram'] = histogram(ranges)
-            previous_end = 0
-            for address, size in ranges:
-                if address < previous_end or address + size > state['capacity']:
-                    raise RuntimeError('Free ranges overlap or exceed capacity.')
-                previous_end = address + size
-        if (
-            sum(info['reserved'] for record in self.requests.values() if record is not None for _, info in [record])
-            != state['reserved']
-        ):
-            raise RuntimeError('Live blocks disagree with reserved bytes.')
-        if (
-            state['reserved'] + state['free'] != state['capacity']
-            or self.reserved != state['reserved']
-            or self.requested + state['internal_bytes'] != state['reserved']
-            or self.alignment_waste + self.max_padding != state['internal_bytes']
-        ):
-            raise RuntimeError('Allocator accounting is inconsistent.')
-        state['internal_percent'] = percentage(state['internal_bytes'], state['reserved'])
-        state['external_percent'] = percentage(state['free'] - state['largest_free'], state['free'])
-        state['occupancy_percent'] = percentage(state['reserved'], state['capacity'])
-        state['operation_index'] = index
-        state['phase'] = phase
-        scalar = {key: value for key, value in state.items() if not isinstance(value, (dict, list))}
-        scalar.update(
-            {
-                key: self.counts[key]
-                for key in (
-                    'attempts',
-                    'successes',
-                    'capacity_failures',
-                    'fragmentation_failures',
-                    'releases',
-                    'skipped_releases',
-                )
-            }
-        )
-        self.samples.append(scalar)
-        if history_index is not None:
-            self.histogram_history.append({'operation_index': history_index, 'histogram': state['histogram']})
-        return state
 
-    def apply(self, operation):
-        request_id = operation.request_id
-        if not isinstance(request_id, int) or request_id < 0:
-            raise ValueError('Request IDs must be nonnegative integers.')
-        if isinstance(operation, Alloc):
-            if self.seen is not None and request_id in self.seen:
-                raise ValueError('Duplicate allocation request ID.')
-            if self.seen is None and request_id <= self.last_request_id:
-                raise ValueError('Generated allocation request IDs must increase strictly.')
-            if not isinstance(operation.size, int) or not 0 < operation.size <= MAX_SIZE:
-                raise ValueError('Allocation size is invalid or alignment would overflow.')
-            if self.seen is not None:
-                self.seen.add(request_id)
-            self.last_request_id = request_id
-            size = operation.size
-            counts = self.per_size.setdefault(size, Counter(requested_bytes=0, successful_bytes=0, failed_bytes=0))
-            counts['attempts'] += 1
-            counts['requested_bytes'] += size
-            self.counts['attempts'] += 1
-            required = self.allocator.required_size(size)
-            handle = self.allocator.alloc(size)
-            if handle is None:
-                state = self.allocator.snapshot(False)
-                free = state['capacity'] - state['reserved']
-                if required > free:
-                    category = 'capacity_failures'
-                elif required > state['largest_free']:
-                    category = 'fragmentation_failures'
-                else:
-                    raise RuntimeError('Allocation failure contradicts free-space metrics.')
-                self.counts[category] += 1
-                counts[category] += 1
-                counts['failed_bytes'] += size
-                self.requests[request_id] = None
-            else:
-                info = self.allocator.blob_info(handle)
-                if info['requested'] != size or info['reserved'] < size:
-                    raise RuntimeError('Native allocation metadata is inconsistent.')
-                self.requests[request_id] = (handle, info)
-                self.requested += size
-                self.reserved += info['reserved']
-                aligned = self.allocator.align_size(size)
-                self.alignment_waste += aligned - size
-                self.max_padding += info['reserved'] - aligned
-                self.counts['successes'] += 1
-                counts['successes'] += 1
-                counts['successful_bytes'] += size
-        elif isinstance(operation, Free):
-            if request_id not in self.requests:
-                raise ValueError('Unknown request or double free.')
-            record = self.requests.pop(request_id)
-            if record is None:
-                self.counts['skipped_releases'] += 1
-                return
-            handle, info = record
-            self.allocator.free(handle)
-            self.requested -= info['requested']
-            self.reserved -= info['reserved']
-            aligned = self.allocator.align_size(info['requested'])
-            self.alignment_waste -= aligned - info['requested']
-            self.max_padding -= info['reserved'] - aligned
-            self.counts['releases'] += 1
+def format_bytes(num_bytes: int) -> str:
+    return f"{num_bytes:,} bytes ({format_human(num_bytes)})"
+
+
+def parse_block_sizes(spec: str) -> Tuple[List[int], List[float]]:
+    sizes: List[int] = []
+    weights: List[float] = []
+    parts = [p.strip() for p in spec.split(",") if p.strip()]
+    if not parts:
+        raise ValueError("Empty --block-sizes specification")
+    for part in parts:
+        if ":" in part:
+            sz_str, w_str = part.split(":", 1)
+            w_clean = w_str.strip().rstrip("%")
+            weight = float(w_clean)
         else:
-            raise TypeError('Unknown operation type.')
+            sz_str = part
+            weight = 1.0
+        sz = parse_size(sz_str)
+        if sz <= 0 or sz > (1 << 64) - 4096:
+            raise ValueError(f"Block size must be > 0: {part}")
+        if not math.isfinite(weight) or weight <= 0:
+            raise ValueError("Block weights must be finite and positive.")
+        sizes.append(sz)
+        weights.append(weight)
+    total_w = sum(weights)
+    if total_w <= 0:
+        raise ValueError("Sum of weights must be > 0")
+    norm_weights = [w * 100.0 / total_w for w in weights]
+    return sizes, norm_weights
 
 
-def run_workload(sequence, capacity, mode='4k-align', sample_every=1000):
-    """Build the adapter, then measure an iterable of Alloc and Free operations."""
-    if not isinstance(capacity, int) or not 0 < capacity <= MAX_SIZE or sample_every <= 0:
-        raise ValueError('Capacity and sample interval must be positive and valid.')
-    if mode not in ('4k-align', 'max-value-align'):
-        raise ValueError('Unknown mode. Use 4k-align or max-value-align.')
-    native = build_native()
-    modes = [mode == 'max-value-align']
-    measurements = {
-        ('max-value-align' if enabled else '4k-align'): Measurement(native, capacity, enabled) for enabled in modes
-    }
-    for measurement in measurements.values():
-        measurement.sample(0, 'initial', True)
-    index = 0
-    previous_phase = None
-    try:
-        for index, operation in enumerate(sequence, 1):
-            phase = operation.phase
-            if previous_phase is not None and phase != previous_phase:
-                for measurement in measurements.values():
-                    measurement.sample(index - 1, previous_phase, True)
-            for measurement in measurements.values():
-                measurement.apply(operation)
-                if index % sample_every == 0:
-                    measurement.sample(index, phase, True, history_index=index)
-            previous_phase = phase
-        return {
-            mode: {
-                'final': measurement.sample(index, 'final', True),
-                'counters': dict(measurement.counts),
-                'per_size': measurement.per_size,
-                'samples': measurement.samples,
-                'histogram_history': measurement.histogram_history,
-            }
-            for mode, measurement in measurements.items()
-        }
-    except Exception as error:
-        raise RuntimeError(f'Operation {index}: {error}') from error
+@dataclass
+class SizeStats:
+    size: int
+    attempts: int = 0
+    successes: int = 0
+    capacity_failures: int = 0
+    fragmentation_failures: int = 0
+    all_bytes: int = 0
+    success_bytes: int = 0
+    failed_bytes: int = 0
+
+
+@dataclass
+class LiveBlock:
+    handle: int
+    size: int
+    reserved_size: int
+    is_hot: bool
 
 
 class LiveBlocks:
-    """Track live blocks, fixed hot/cold groups, and least-recently-used order."""
+    def __init__(self, policy: str, rng: random.Random, evict_rng: Optional[random.Random] = None):
+        self.policy = policy.lower()
+        self.rng = rng
+        self.evict_rng = evict_rng if evict_rng is not None else rng
+        self.blocks: "OrderedDict[int, LiveBlock]" = OrderedDict()
+        self.hot_ids: List[int] = []
+        self.cold_ids: List[int] = []
+        self.hot_count = 0
+        self.cold_count = 0
 
-    def __init__(self):
-        self.order = OrderedDict()
-        self.ids = []
-        self.positions = {}
-        self.groups = {True: [], False: []}
-        self.group_positions = {}
+    def __len__(self) -> int:
+        return len(self.blocks)
 
-    def add(self, request_id, hot):
-        if request_id in self.order:
-            raise ValueError('The block is already live.')
-        self.positions[request_id] = len(self.ids)
-        self.ids.append(request_id)
-        self.group_positions[request_id] = len(self.groups[hot])
-        self.groups[hot].append(request_id)
-        self.order[request_id] = hot
+    def add(self, block: LiveBlock) -> None:
+        self.blocks[block.handle] = block
+        if block.is_hot:
+            self.hot_count += 1
+            self.hot_ids.append(block.handle)
+        else:
+            self.cold_count += 1
+            self.cold_ids.append(block.handle)
 
-    def touch(self, request_id):
-        if request_id not in self.order:
-            raise ValueError('Cannot read a block that is not live.')
-        self.order.move_to_end(request_id)
-        return self.order[request_id]
-
-    def remove(self, request_id):
-        if request_id not in self.order:
-            raise ValueError('Cannot remove a block that is not live.')
-        hot = self.order[request_id]
-        for ids, positions in ((self.ids, self.positions), (self.groups[hot], self.group_positions)):
-            position = positions.pop(request_id)
-            last = ids.pop()
-            if last != request_id:
-                ids[position] = last
-                positions[last] = position
-        del self.order[request_id]
-
-    def read_target(self, rng, hot_percent):
-        if not self.order:
+    def read_one(self, prefer_hot: bool) -> Optional[str]:
+        if not self.blocks:
             return None
-        hot = rng.randrange(PERCENT) < hot_percent
-        candidates = self.groups[hot] or self.groups[not hot]
-        return candidates[rng.randrange(len(candidates))]
-
-    def victim(self, policy, rng):
-        if not self.order:
-            raise RuntimeError('Eviction requires a live block.')
-        if policy == 'lru':
-            return next(iter(self.order))
-        return self.ids[rng.randrange(len(self.ids))]
-
-    def snapshot(self, requests):
-        if (
-            self.order.keys() != requests.keys()
-            or self.positions != {request_id: index for index, request_id in enumerate(self.ids)}
-            or self.positions.keys() != self.order.keys()
-            or self.group_positions
-            != {request_id: index for group in self.groups.values() for index, request_id in enumerate(group)}
-            or self.group_positions.keys() != self.order.keys()
-            or sum(len(group) for group in self.groups.values()) != len(self.order)
-            or any(self.order[request_id] != hot for hot, group in self.groups.items() for request_id in group)
-        ):
-            raise RuntimeError('Live blocks and access bookkeeping are inconsistent.')
-        return {'live_hot_blocks': len(self.groups[True]), 'live_cold_blocks': len(self.groups[False])}
-
-
-class Progress:
-    """Print progress to stderr at each new integer percentage."""
-
-    def __init__(self, stream=None):
-        self.stream = sys.stderr if stream is None else stream
-        self.interactive = self.stream.isatty()
-        self.percent = -1
-        self.active = False
-
-    def __call__(self, completed, total):
-        percent = PERCENT * completed // total
-        if percent <= self.percent:
-            return
-        self.percent = percent
-        self.active = self.interactive and percent < PERCENT
-        prefix = '\r' if self.interactive else ''
-        print(
-            f'{prefix}Progress: {percent:3d}% ({completed:,}/{total:,} allocation attempts)',
-            file=self.stream,
-            end='' if self.active else '\n',
-            flush=True,
-        )
-
-    def close(self):
-        if self.active:
-            print(file=self.stream, flush=True)
-            self.active = False
-
-
-def run_simulation(config, progress=None):
-    """Build and run allocation attempts with synchronous water-level eviction."""
-    config = {**SIMULATION_DEFAULTS, **config}
-    policy = config['eviction_policy']
-    if policy not in ('random', 'lru'):
-        raise ValueError('Unknown eviction policy. Use random or lru.')
-    reads = config['reads_per_allocation']
-    if type(reads) is not int or reads < 0:
-        raise ValueError('Reads per allocation must be a nonnegative integer.')
-    for key in ('hot_block_percent', 'hot_read_percent'):
-        if type(config[key]) is not int or not 0 <= config[key] <= PERCENT:
-            raise ValueError(f'{key} must be an integer from 0 through 100.')
-    low, high = config['min_water_level'], config['max_water_level']
-    if any(type(value) is not int for value in (low, high)) or not 0 <= low < high <= PERCENT:
-        raise ValueError('Water levels must be integers: 0 <= minimum < maximum <= 100.')
-    if config['steps'] <= 0 or config['sample_every'] <= 0:
-        raise ValueError('Counts must be positive.')
-    capacity = config['capacity']
-    if not isinstance(capacity, int) or not 0 < capacity <= MAX_SIZE:
-        raise ValueError('Capacity must be positive and valid.')
-    mode = config['mode']
-    if mode not in ('4k-align', 'max-value-align'):
-        raise ValueError('Unknown mode. Use 4k-align or max-value-align.')
-    measurement = Measurement(build_native(), capacity, mode == 'max-value-align', track_request_ids=False)
-    measurement.counts.update({key: 0 for key in SIMULATION_COUNTERS})
-    rng = random.Random(config['seed'])
-    group_rng = random.Random(f'{config["seed"]}:hot-groups')
-    read_rng = random.Random(f'{config["seed"]}:reads')
-    live = LiveBlocks()
-    index = allocation_index = read_index = 0
-    next_sample = config['sample_every']
-
-    def sample(phase, record_histogram=False):
-        state = measurement.sample(index, phase, True, history_index=allocation_index if record_histogram else None)
-        if record_histogram:
-            measurement.histogram_history[-1].update(phase=phase, occupancy_percent=state['occupancy_percent'])
-        state['allocation_index'] = allocation_index
-        state['eviction_policy'] = policy
-        state.update(live.snapshot(measurement.requests))
-        measurement.samples[-1].update(
-            {
-                key: state[key]
-                for key in (
-                    'allocation_index',
-                    'eviction_policy',
-                    'live_hot_blocks',
-                    'live_cold_blocks',
-                )
-            }
-        )
-        measurement.samples[-1].update({key: measurement.counts[key] for key in SIMULATION_COUNTERS})
-        return state
-
-    sample('initial')
-    if progress is not None:
-        progress(0, config['steps'])
-    try:
-        for operation in operations({**config, 'steps': None}):
-            allocation_index += 1
-            for read_index in range(1, reads + 1):
-                target = live.read_target(read_rng, config['hot_read_percent'])
-                if target is None:
-                    measurement.counts['skipped_reads'] += 1
-                else:
-                    if target not in measurement.requests:
-                        raise RuntimeError('The read target is not a live allocation.')
-                    hot = live.touch(target)
-                    measurement.counts['reads'] += 1
-                    measurement.counts['hot_reads' if hot else 'cold_reads'] += 1
-            read_index = 0
-            hot = group_rng.randrange(PERCENT) < config['hot_block_percent']
-            index += 1
-            measurement.apply(operation)
-            if measurement.requests[operation.request_id] is None:
-                del measurement.requests[operation.request_id]
-                if allocation_index >= config['steps']:
-                    largest = measurement.allocator.snapshot(False)['largest_free']
-                    if not any(
-                        weight > 0 and measurement.allocator.required_size(size) <= largest
-                        for size, weight in zip(config['sizes'], config['weights'], strict=True)
-                    ):
-                        raise RuntimeError('The upper water level is unreachable. No configured request can fit.')
-            else:
-                live.add(operation.request_id, hot)
-                measurement.counts['hot_assignments' if hot else 'cold_assignments'] += 1
-                if PERCENT * measurement.reserved >= high * capacity:
-                    record_histogram = allocation_index >= next_sample or allocation_index >= config['steps']
-                    sample('eviction-start', record_histogram)
-                    while PERCENT * measurement.reserved > low * capacity:
-                        request_id = live.victim(policy, rng)
-                        reserved = measurement.requests[request_id][1]['reserved']
-                        index += 1
-                        measurement.apply(Free(request_id, 'evict'))
-                        live.remove(request_id)
-                        measurement.counts['evictions'] += 1
-                        measurement.counts['evicted_reserved_bytes'] += reserved
-                    measurement.counts['eviction_cycles'] += 1
-                    sample('eviction-end', record_histogram)
-                    if record_histogram:
-                        next_sample = (allocation_index // config['sample_every'] + 1) * config['sample_every']
-                    if allocation_index >= config['steps']:
-                        break
-            if progress is not None and allocation_index < config['steps']:
-                progress(allocation_index, config['steps'])
+        if prefer_hot:
+            pools = (self.hot_ids, self.cold_ids) if self.hot_count > 0 else (self.cold_ids, self.hot_ids)
         else:
-            raise RuntimeError('The allocation stream ended before the final eviction.')
-        final = sample('final')
-        if progress is not None:
-            progress(config['steps'], config['steps'])
-        return {
-            mode: {
-                'final': final,
-                'counters': dict(measurement.counts),
-                'per_size': measurement.per_size,
-                'samples': measurement.samples,
-                'histogram_history': measurement.histogram_history,
-            }
-        }
-    except Exception as error:
-        context = f'Allocation attempt {allocation_index}, Operation {index}'
-        if read_index:
-            context += f', Read {read_index}'
-        raise RuntimeError(f'{context}: {error}') from error
+            pools = (self.cold_ids, self.hot_ids) if self.cold_count > 0 else (self.hot_ids, self.cold_ids)
+        for pool in pools:
+            while pool:
+                idx = self.rng.randrange(len(pool))
+                h = pool[idx]
+                blk = self.blocks.get(h)
+                if blk is None:
+                    pool[idx] = pool[-1]
+                    pool.pop()
+                    continue
+                if self.policy == "lru":
+                    self.blocks.move_to_end(h, last=True)
+                return "hot" if blk.is_hot else "cold"
+        return None
+
+    def pop_victim(self) -> Optional[LiveBlock]:
+        if not self.blocks:
+            return None
+        if self.policy in ("lru", "fifo"):
+            _, blk = self.blocks.popitem(last=False)
+        else:
+            keys = list(self.blocks.keys())
+            victim_key = self.evict_rng.choice(keys)
+            blk = self.blocks.pop(victim_key)
+        if blk.is_hot:
+            self.hot_count -= 1
+        else:
+            self.cold_count -= 1
+        return blk
 
 
-def parser():
-    result = argparse.ArgumentParser(
-        description='Measure the real C++ blob allocator.',
-    )
-    result.add_argument('--capacity', default='1GiB', help='Region size. Default: 1GiB.')
-    result.add_argument(
-        '--block-sizes',
-        '--block-size',
-        default='4KiB,64KiB,1MiB',
-        help='Request sizes and optional probabilities. Default: 4KiB,64KiB,1MiB.',
-    )
-    result.add_argument(
-        '--steps',
-        type=int,
-        default=100000,
-        help='Minimum allocation attempts. Finish at the next eviction, including both samples. Default: 100000.',
-    )
-    result.add_argument(
-        '--min-water-level',
-        type=int,
-        default=80,
-        help='Stop eviction at or below this percent. Default: 80. Use an integer without a percent sign.',
-    )
-    result.add_argument(
-        '--max-water-level',
-        type=int,
-        default=90,
-        help='Start eviction at or above this percent. Default: 90. Use an integer without a percent sign.',
-    )
-    result.add_argument(
-        '--eviction-policy',
-        choices=['random', 'lru'],
-        default=SIMULATION_DEFAULTS['eviction_policy'],
-        help='Evict a random block or the least recently used block. Default: random.',
-    )
-    result.add_argument(
-        '--reads-per-allocation',
-        type=int,
-        default=SIMULATION_DEFAULTS['reads_per_allocation'],
-        help='Synthetic reads before each allocation attempt. Default: 4. Use a nonnegative integer.',
-    )
-    result.add_argument(
-        '--hot-block-percent',
-        type=int,
-        default=SIMULATION_DEFAULTS['hot_block_percent'],
-        help='Hot assignment probability. Default: 20. Use an integer from 0 through 100, without a percent sign.',
-    )
-    result.add_argument(
-        '--hot-read-percent',
-        type=int,
-        default=SIMULATION_DEFAULTS['hot_read_percent'],
-        help='Hot group selection probability per read. Default: 80. Use an integer from 0 through 100.',
-    )
-    result.add_argument(
-        '--seed',
-        type=int,
-        default=42,
-        help='Seed for sizes, eviction targets, groups, and reads. Default: 42.',
-    )
-    result.add_argument(
-        '--mode',
-        choices=['4k-align', 'max-value-align'],
-        default='4k-align',
-        help='Alignment policy. Default: 4k-align.',
-    )
-    result.add_argument(
-        '--sample-every',
-        type=int,
-        default=1000,
-        help='At each interval multiple, sample before and after the next eviction. Default: 1000 allocation attempts.',
-    )
-    result.add_argument(
-        '--json-report-path',
-        type=Path,
-        help='Optional JSON destination. Default: no file.',
-    )
-    result.add_argument(
-        '--csv-report-path',
-        type=Path,
-        help='Optional CSV destination. Default: no file.',
-    )
-    return result
-
-
-def human_size(size):
-    units = ('B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB')
-    value = size
-    for unit in units:
-        if value < 1024 or unit == units[-1]:
-            return f'{value:.2f} {unit}' if unit != 'B' else f'{value} B'
-        value /= 1024
-    raise AssertionError('Unreachable size unit.')
-
-
-def readable_bytes(size):
-    return f'{size:,} bytes ({human_size(size)})'
-
-
-def print_table(headers, rows):
-    rows = [[str(cell) for cell in row] for row in rows]
-    widths = [max([len(header), *(len(row[index]) for row in rows)]) for index, header in enumerate(headers)]
-    for row in (headers, ['-' * width for width in widths], *rows):
-        print(
-            '  '.join(
-                f'{cell:<{width}}' if index == 0 else f'{cell:>{width}}'
-                for index, (cell, width) in enumerate(zip(row, widths, strict=True))
-            )
-        )
-
-
-def compact_size(size):
-    value, unit = human_size(size).split()
-    if '.' in value:
-        value = value.rstrip('0').rstrip('.')
-    return f'{value}{unit}'
-
-
-def compact_operations(count):
-    for exponent, suffix in enumerate(('', 'K', 'M', 'B', 'T')):
-        scale = 1000**exponent
-        if count < scale * 1000 or suffix == 'T':
-            whole, fraction = divmod(count, scale)
-            value = str(whole)
-            if fraction:
-                value += '.' + f'{fraction:0{3 * exponent}d}'.rstrip('0')
-            return f'{value}{suffix}'
-    raise AssertionError('Unreachable operation suffix.')
-
-
-def print_histogram_history(history, occupancy=None):
-    suffix = '' if occupancy is None else f' (at {occupancy}% occupancy)'
-    print(f'\nFree-range histogram over time{suffix}:')
-    if not history:
-        print('No interval samples.')
-        return
-    columns = [{bucket['upper']: bucket for bucket in sample['histogram']} for sample in history]
-    largest = max((upper for column in columns for upper in column), default=0)
-    rows = []
-    upper = ALIGNMENT
-    while upper <= largest:
-        upper_text = compact_size(upper)
-        unit = upper_text.lstrip('0123456789.')
-        upper_value = upper_text.removesuffix(unit)
-        lower_value = 0 if upper == ALIGNMENT else float(upper_value) / 2
-        row = [f'({lower_value:g},{upper_value}]{unit}']
-        for column in columns:
-            bucket = column.get(upper, {'count': 0, 'bytes': 0})
-            row.append(f'{bucket["count"]} ({compact_size(bucket["bytes"])})')
-        rows.append(row)
+def build_histogram_buckets(max_capacity: int) -> List[Tuple[int, int, str]]:
+    buckets = []
+    upper = 4096
+    lower = 0
+    while lower < max_capacity or upper <= 2 * 1024 * 1024 * 1024:
+        label = f"({format_human(lower)}, {format_human(upper)}]"
+        buckets.append((lower, upper, label))
+        lower = upper
         upper *= 2
-    print_table(['free ranges', *(compact_operations(sample['operation_index']) for sample in history)], rows)
+        if lower >= max(max_capacity, 2 * 1024 * 1024 * 1024):
+            break
+    return buckets
 
 
-def print_report(report):
-    configuration = dict(report['configuration'])
-    configuration['capacity'] = readable_bytes(configuration['capacity'])
-    for key in ('min_water_level', 'max_water_level', 'hot_block_percent', 'hot_read_percent'):
-        if key in configuration:
-            configuration[key] = f'{configuration[key]}%'
-    configuration['sizes'] = [readable_bytes(size) for size in configuration['sizes']]
-    configuration['weights'] = [
-        f'{human_size(size)} : {weight * PERCENT:.2f}%'
-        for size, weight in zip(
-            report['configuration']['sizes'],
-            report['configuration']['weights'],
-            strict=True,
-        )
-    ]
-    print('Configuration:')
-    print(json.dumps(configuration, indent=2, sort_keys=True))
-    for mode, outcome in report['modes'].items():
-        state = outcome['final']
-        print(f'\nMode: {mode}')
-        if 'eviction_policy' in state:
-            print(f'Eviction policy: {state["eviction_policy"]}')
-        print('\nCounters:')
-        print_table(
-            ['Counter', 'Value'],
-            [
-                (key.replace('_', ' '), readable_bytes(value) if key == 'evicted_reserved_bytes' else f'{value:,}')
-                for key, value in outcome['counters'].items()
-            ],
-        )
-        print('\nMemory:')
-        byte_metrics = (
-            ('capacity', 'Capacity'),
-            ('requested', 'Requested'),
-            ('reserved', 'Reserved'),
-            ('free', 'Free'),
-            ('internal_bytes', 'Internal fragmentation'),
-            ('alignment_waste', 'Alignment waste'),
-            ('max_value_alignment_padding', 'Max-value-align padding'),
-            ('largest_free', 'Largest free range'),
-        )
-        print_table(
-            ['Metric', 'Size'],
-            [(label, readable_bytes(state[key])) for key, label in byte_metrics],
-        )
-        print(f'Occupancy: {state["occupancy_percent"]:.2f}% (denominator: capacity bytes)')
-        print(f'Free ranges: {state["free_range_count"]:,}')
-        if 'live_hot_blocks' in state:
-            print(f'Live blocks: {state["live_hot_blocks"]:,} hot, {state["live_cold_blocks"]:,} cold')
-        for key, denominator in [
-            ('internal_percent', 'reserved bytes'),
-            ('external_percent', 'free bytes'),
-        ]:
-            value = state[key]
-            formatted = 'N/A' if value is None else f'{value:.2f}%'
-            label = 'Internal fragmentation' if key == 'internal_percent' else 'External fragmentation'
-            print(f'{label}: {formatted} (denominator: {denominator})')
-        print('\nAllocation attempts by size:')
-        categories = (
-            'attempts',
-            'successes',
-            'capacity_failures',
-            'fragmentation_failures',
-        )
-        print_table(
-            [
-                'Requested size',
-                'Attempts',
-                'Successes',
-                'Capacity failures',
-                'Fragmentation failures',
-            ],
-            [
-                [
-                    readable_bytes(int(size)),
-                    *(f'{counts.get(key, 0):,}' for key in categories),
-                ]
-                for size, counts in sorted(outcome['per_size'].items(), key=lambda item: int(item[0]))
-            ],
-        )
-        print('\nAllocation data by size (cumulative requested bytes, excludes padding):')
-        print_table(
-            ['Requested size', 'All attempts', 'Successful', 'Failed'],
-            [
-                [
-                    human_size(int(size)),
-                    *(human_size(counts[key]) for key in ('requested_bytes', 'successful_bytes', 'failed_bytes')),
-                ]
-                for size, counts in sorted(outcome['per_size'].items(), key=lambda item: int(item[0]))
-            ],
-        )
-        print('\nFree-range histogram:')
-        print_table(
-            [
-                'Range size (lower exclusive, upper inclusive)',
-                'Count',
-                'Actual free space',
-            ],
-            [
-                [
-                    f'({human_size(bucket["lower"])}, {human_size(bucket["upper"])}]',
-                    f'{bucket["count"]:,}',
-                    readable_bytes(bucket['bytes']),
-                ]
-                for bucket in state['histogram']
-            ],
-        )
-        history = outcome.get('histogram_history', [])
-        if 'eviction_policy' in state:
-            for phase, level in (('eviction-start', 'max_water_level'), ('eviction-end', 'min_water_level')):
-                print_histogram_history(
-                    [sample for sample in history if sample['phase'] == phase], report['configuration'][level]
-                )
+def compute_histogram(
+    ranges: List[Tuple[int, int]], buckets: List[Tuple[int, int, str]]
+) -> List[Tuple[str, int, int]]:
+    counts = [0] * len(buckets)
+    bytes_sum = [0] * len(buckets)
+    for _, sz in ranges:
+        if sz <= 0 or sz > (1 << 64) - 4096:
+            continue
+        if sz <= 4096:
+            idx = 0
         else:
-            print_histogram_history(history)
+            idx = int(math.ceil(math.log2(sz / 4096.0)))
+            if idx < 0:
+                idx = 0
+            elif idx >= len(buckets):
+                idx = len(buckets) - 1
+        counts[idx] += 1
+        bytes_sum[idx] += sz
+    return [(buckets[i][2], counts[i], bytes_sum[i]) for i in range(len(buckets))]
 
 
-def write_reports(report, json_path, csv_path):
-    """Prepare all requested files before publishing any report."""
-    paths = [path.resolve() for path in (json_path, csv_path) if path is not None]
-    if len(set(paths)) != len(paths):
-        raise ValueError('JSON and CSV destinations must differ.')
-    staged = []
-    try:
-        for path, kind in ((json_path, 'json'), (csv_path, 'csv')):
-            if path is None:
-                continue
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(
-                mode='w', encoding='utf-8', newline='', dir=path.parent, delete=False
-            ) as stream:
-                staged.append((Path(stream.name), path))
-                if kind == 'json':
-                    json.dump(report, stream, indent=2)
-                    stream.write('\n')
-                else:
-                    rows = [
-                        dict(mode=mode, **sample)
-                        for mode, outcome in report['modes'].items()
-                        for sample in outcome['samples']
-                    ]
-                    fields = sorted(set().union(*(row.keys() for row in rows)))
-                    writer = csv.DictWriter(stream, fieldnames=fields)
-                    writer.writeheader()
-                    writer.writerows(rows)
-        for temporary, destination in staged:
-            temporary.replace(destination)
-    finally:
-        for temporary, _ in staged:
-            temporary.unlink(missing_ok=True)
+def format_slab_summary(slab_stats: dict) -> str:
+    lines = []
+    lines.append("Slab Allocator Frame & Pool Summary:")
+    lines.append(f"  Frame size       : {format_bytes(slab_stats['frame_size'])}")
+    lines.append(
+        f"  Free full frames : {slab_stats['free_full_frames']:,} "
+        f"({format_bytes(slab_stats['free_full_frame_bytes'])})"
+    )
+    if slab_stats.get("free_tail_frame_bytes", 0) > 0:
+        lines.append(f"  Free tail frame  : 1 ({format_bytes(slab_stats['free_tail_frame_bytes'])})")
+    else:
+        lines.append("  Free tail frame  : 0 (0 bytes (0 B))")
+    lines.append("")
 
+    header = (
+        f"{'Slot size':<30}  {'Frames':>6}  {'Used slots':>12}  "
+        f"{'Free slots':>12}  {'Free space in pool':>30}  {'Frame tail waste':>26}"
+    )
+    lines.append(header)
+    lines.append("-" * len(header))
 
-def main(argv=None):
-    args = parser().parse_args(argv)
-    try:
-        sizes, weights = distribution(args.block_sizes)
-        capacity = size_value(args.capacity)
-        if args.steps <= 0 or args.sample_every <= 0:
-            raise ValueError('Counts must be positive.')
-        if not 0 <= args.min_water_level < args.max_water_level <= PERCENT:
-            raise ValueError('Water levels must satisfy 0 <= minimum < maximum <= 100.')
-        config = {
-            'capacity': capacity,
-            'sizes': sizes,
-            'weights': weights,
-            'steps': args.steps,
-            'min_water_level': args.min_water_level,
-            'max_water_level': args.max_water_level,
-            'seed': args.seed,
-            'workload': 'water-level',
-            'mode': args.mode,
-            'sample_every': args.sample_every,
-            **{key: getattr(args, key) for key in SIMULATION_DEFAULTS},
-        }
-        progress = Progress()
-        try:
-            modes = run_simulation(config, progress=progress)
-        finally:
-            progress.close()
-        report = {'configuration': config, 'modes': modes}
-        repo = TOOL.parents[3]
-        if shutil.which('git'):
-            revision = subprocess.run(
-                ['git', '-C', str(repo), 'rev-parse', 'HEAD'],
-                capture_output=True,
-                text=True,
-                check=False,
+    pools = slab_stats.get("pools", [])
+    if not pools:
+        lines.append("  (no active slab pools)")
+    else:
+        for p in pools:
+            slot_str = format_bytes(p["slot_size"])
+            free_str = format_bytes(p["free_bytes"])
+            waste_str = format_bytes(p["tail_waste_bytes"])
+            lines.append(
+                f"{slot_str:<30}  {p['active_frames']:>6,}  {p['allocated_slots']:>12,}  "
+                f"{p['free_slots']:>12,}  {free_str:>30}  {waste_str:>26}"
             )
-            report['source_revision'] = revision.stdout.strip() if revision.returncode == 0 else None
-        write_reports(report, args.json_report_path, args.csv_report_path)
+    return "\n".join(lines)
+
+
+def run_simulation(args: argparse.Namespace) -> dict:
+    capacity = parse_size(args.capacity)
+    sizes, weights = parse_block_sizes(args.block_sizes)
+    if capacity <= 0 or capacity > (1 << 64) - 4096:
+        raise ValueError("Capacity must be positive and must not overflow alignment.")
+    if args.steps <= 0 or args.sample_every <= 0 or args.reads_per_allocation < 0:
+        raise ValueError("Steps and sample interval must be positive. Read count must not be negative.")
+    if not 0 <= args.min_water_level < args.max_water_level <= PERCENT:
+        raise ValueError("Water levels must satisfy 0 <= minimum < maximum <= 100.")
+    if not all(0 <= value <= PERCENT for value in (args.hot_block_percent, args.hot_read_percent)):
+        raise ValueError("Hot block and read percentages must be between 0 and 100.")
+    workload_rng = random.Random(args.seed)
+    read_rng = random.Random(args.seed + 1)
+    evict_rng = random.Random(args.seed + 2)
+
+    native = _load_native_module()
+    sim = native.NativeAllocatorSim(capacity, args.mode)
+    live = LiveBlocks(args.eviction_policy, read_rng, evict_rng)
+    size_stats: Dict[int, SizeStats] = {sz: SizeStats(size=sz) for sz in sizes}
+
+    counters = {
+        "attempts": 0,
+        "successes": 0,
+        "capacity_failures": 0,
+        "fragmentation_failures": 0,
+        "releases": 0,
+        "skipped_releases": 0,
+        "eviction_cycles": 0,
+        "evictions": 0,
+        "evicted_reserved_bytes": 0,
+        "reads": 0,
+        "hot_reads": 0,
+        "cold_reads": 0,
+        "skipped_reads": 0,
+        "hot_assignments": 0,
+        "cold_assignments": 0,
+    }
+
+    high_bytes = int(capacity * (args.max_water_level / PERCENT))
+    low_bytes = int(capacity * (args.min_water_level / PERCENT))
+
+    samples = []
+    progress_step = max(1, args.steps // 100)
+
+    for step in range(1, args.steps + 1):
+        # Sprawdzenie progu ewakuacji (water-level) z uwzględnieniem odpadu ogonowego ramek
+        if sim.reserved_size() >= high_bytes and len(live) > 0:
+            counters["eviction_cycles"] += 1
+            while sim.reserved_size() > low_bytes and len(live) > 0:
+                victim = live.pop_victim()
+                if victim is None:
+                    break
+                if sim.release(victim.handle):
+                    counters["releases"] += 1
+                    counters["evictions"] += 1
+                    counters["evicted_reserved_bytes"] += victim.reserved_size
+                else:
+                    counters["skipped_releases"] += 1
+
+        # Odczyty symulujące ruch LRU
+        for _ in range(args.reads_per_allocation):
+            prefer_hot = (workload_rng.random() * PERCENT) < args.hot_read_percent
+            read_kind = live.read_one(prefer_hot)
+            if read_kind is None:
+                counters["skipped_reads"] += 1
+            else:
+                counters["reads"] += 1
+                if read_kind == "hot":
+                    counters["hot_reads"] += 1
+                else:
+                    counters["cold_reads"] += 1
+
+        # Losowanie rozmiaru i statusu hot (zawsze w tej samej kolejności niezależnie od sukcesu alokacji)
+        req_size = workload_rng.choices(sizes, weights=weights, k=1)[0]
+        is_hot = (workload_rng.random() * PERCENT) < args.hot_block_percent
+        st = size_stats[req_size]
+        st.attempts += 1
+        st.all_bytes += req_size
+        counters["attempts"] += 1
+
+        res = sim.alloc(req_size)
+        if res is not None:
+            handle, _, alloc_sz = res
+            if is_hot:
+                counters["hot_assignments"] += 1
+            else:
+                counters["cold_assignments"] += 1
+            live.add(LiveBlock(handle=handle, size=req_size, reserved_size=alloc_sz, is_hot=is_hot))
+            st.successes += 1
+            st.success_bytes += req_size
+            counters["successes"] += 1
+        else:
+            free_space = max(0, capacity - sim.reserved_size())
+            if free_space < req_size:
+                counters["capacity_failures"] += 1
+                st.capacity_failures += 1
+            else:
+                counters["fragmentation_failures"] += 1
+                st.fragmentation_failures += 1
+            st.failed_bytes += req_size
+
+        if args.sample_every > 0 and (step % args.sample_every == 0):
+            # W trybie slab nie pobieramy setek tysięcy wycinków w trakcie biegu
+            snap = sim.snapshot(include_segments=(args.mode != "slab"))
+            samples.append(snap)
+
+        if step % progress_step == 0 or step == args.steps:
+            pct = int(step * 100 / args.steps)
+            sys.stdout.write(f"\rProgress: {pct}% ({step:,}/{args.steps:,} allocation attempts)")
+            sys.stdout.flush()
+
+    sys.stdout.write("\n")
+
+    # Końcowy snapshot pamięci
+    final_snap = sim.snapshot(include_segments=(args.mode != "slab"))
+    cap = final_snap["capacity"]
+    req = final_snap["requested"]
+    res_bytes = final_snap["reserved"]
+    free_b = final_snap["free"]
+    int_frag = final_snap["internal_fragmentation"]
+    largest_free = final_snap["largest_free_range"]
+
+    occ_pct = (res_bytes * PERCENT / cap) if cap > 0 else 0.0
+    int_frag_pct = (int_frag * PERCENT / res_bytes) if res_bytes > 0 else 0.0
+    ext_frag_pct = ((free_b - largest_free) * PERCENT / free_b) if free_b > 0 else 0.0
+
+    config_info = {
+        "capacity": format_bytes(capacity),
+        "eviction_policy": args.eviction_policy,
+        "hot_block_percent": f"{int(args.hot_block_percent)}%",
+        "hot_read_percent": f"{int(args.hot_read_percent)}%",
+        "max_water_level": f"{int(args.max_water_level)}%",
+        "min_water_level": f"{int(args.min_water_level)}%",
+        "mode": args.mode,
+        "reads_per_allocation": args.reads_per_allocation,
+        "sample_every": args.sample_every,
+        "seed": args.seed,
+        "sizes": [format_bytes(sz) for sz in sizes],
+        "steps": args.steps,
+        "weights": [f"{format_human(sz)} : {w:.2f}%" for sz, w in zip(sizes, weights)],
+        "workload": args.workload,
+    }
+
+    report = {
+        "configuration": config_info,
+        "counters": counters,
+        "memory": {
+            "capacity": cap,
+            "requested": req,
+            "reserved": res_bytes,
+            "free": free_b,
+            "internal_fragmentation": int_frag,
+            "alignment_waste": final_snap["alignment_waste"],
+            "max_value_align_padding": final_snap["max_value_align_padding"],
+            "frame_tail_waste": final_snap["frame_tail_waste"],
+            "largest_free_range": largest_free,
+            "occupancy_percent": occ_pct,
+            "free_ranges": final_snap["free_ranges_count"],
+            "hot_live_blocks": live.hot_count,
+            "cold_live_blocks": live.cold_count,
+            "internal_fragmentation_percent": int_frag_pct,
+            "external_fragmentation_percent": ext_frag_pct,
+        },
+        "size_stats": [
+            {
+                "size": sz,
+                "attempts": size_stats[sz].attempts,
+                "successes": size_stats[sz].successes,
+                "capacity_failures": size_stats[sz].capacity_failures,
+                "fragmentation_failures": size_stats[sz].fragmentation_failures,
+                "all_bytes": size_stats[sz].all_bytes,
+                "success_bytes": size_stats[sz].success_bytes,
+                "failed_bytes": size_stats[sz].failed_bytes,
+            }
+            for sz in sizes
+        ],
+    }
+
+    if args.mode == "slab":
+        report["slab_summary"] = final_snap["slab_stats"]
+    else:
+        buckets = build_histogram_buckets(capacity)
+        hist = compute_histogram(final_snap["free_ranges"], buckets)
+        report["free_range_histogram"] = [
+            {"range": label, "count": cnt, "bytes": b_sum} for label, cnt, b_sum in hist
+        ]
+
+    return report
+
+
+def print_report(report: dict) -> None:
+    cfg = report["configuration"]
+    c = report["counters"]
+    m = report["memory"]
+
+    print("Configuration:")
+    print(json.dumps(cfg, indent=2))
+    print(f"\nMode: {cfg['mode']}")
+    print(f"Eviction policy: {cfg['eviction_policy']}\n")
+
+    print("Counters:")
+    print(f"{'Counter':<22}  {'Value':>34}")
+    print(f"{'-' * 22}  {'-' * 34}")
+    rows = [
+        ("attempts", f"{c['attempts']:,}"),
+        ("successes", f"{c['successes']:,}"),
+        ("capacity failures", f"{c['capacity_failures']:,}"),
+        ("fragmentation failures", f"{c['fragmentation_failures']:,}"),
+        ("releases", f"{c['releases']:,}"),
+        ("skipped releases", f"{c['skipped_releases']:,}"),
+        ("eviction cycles", f"{c['eviction_cycles']:,}"),
+        ("evictions", f"{c['evictions']:,}"),
+        ("evicted reserved bytes", format_bytes(c["evicted_reserved_bytes"])),
+        ("reads", f"{c['reads']:,}"),
+        ("hot reads", f"{c['hot_reads']:,}"),
+        ("cold reads", f"{c['cold_reads']:,}"),
+        ("skipped reads", f"{c['skipped_reads']:,}"),
+        ("hot assignments", f"{c['hot_assignments']:,}"),
+        ("cold assignments", f"{c['cold_assignments']:,}"),
+    ]
+    for name, val in rows:
+        print(f"{name:<22}  {val:>34}")
+
+    print("\nMemory:")
+    print(f"{'Metric':<23}  {'Size':>34}")
+    print(f"{'-' * 23}  {'-' * 34}")
+    mem_rows = [
+        ("Capacity", format_bytes(m["capacity"])),
+        ("Requested", format_bytes(m["requested"])),
+        ("Reserved", format_bytes(m["reserved"])),
+        ("Free", format_bytes(m["free"])),
+        ("Internal fragmentation", format_bytes(m["internal_fragmentation"])),
+        ("Alignment waste", format_bytes(m["alignment_waste"])),
+        ("Max-value-align padding", format_bytes(m["max_value_align_padding"])),
+    ]
+    if cfg["mode"] == "slab":
+        mem_rows.append(("Frame tail waste", format_bytes(m["frame_tail_waste"])))
+    mem_rows.append(("Largest free range", format_bytes(m["largest_free_range"])))
+
+    for name, val in mem_rows:
+        print(f"{name:<23}  {val:>34}")
+
+    print(f"Occupancy: {m['occupancy_percent']:.2f}% (denominator: capacity bytes)")
+    print(f"Free ranges: {m['free_ranges']:,}")
+    print(f"Live blocks: {m['hot_live_blocks']:,} hot, {m['cold_live_blocks']:,} cold")
+    print(f"Internal fragmentation: {m['internal_fragmentation_percent']:.2f}% (denominator: reserved bytes)")
+    print(f"External fragmentation: {m['external_fragmentation_percent']:.2f}% (denominator: free bytes)\n")
+
+    print("Allocation attempts by size:")
+    print(
+        f"{'Requested size':<30}  {'Attempts':>8}  {'Successes':>9}  "
+        f"{'Capacity failures':>17}  {'Fragmentation failures':>22}"
+    )
+    print(f"{'-' * 30}  {'-' * 8}  {'-' * 9}  {'-' * 17}  {'-' * 22}")
+    for st in report["size_stats"]:
+        sz_str = format_bytes(st["size"])
+        print(
+            f"{sz_str:<30}  {st['attempts']:>8,}  {st['successes']:>9,}  "
+            f"{st['capacity_failures']:>17,}  {st['fragmentation_failures']:>22,}"
+        )
+
+    print("\nAllocation data by size (cumulative requested bytes, excludes padding):")
+    print(f"{'Requested size':<14}  {'All attempts':>12}  {'Successful':>10}  {'Failed':>10}")
+    print(f"{'-' * 14}  {'-' * 12}  {'-' * 10}  {'-' * 10}")
+    for st in report["size_stats"]:
+        print(
+            f"{format_human(st['size']):<14}  {format_human(st['all_bytes']):>12}  "
+            f"{format_human(st['success_bytes']):>10}  {format_human(st['failed_bytes']):>10}"
+        )
+    print("")
+
+    # W trybie slab drukujemy podsumowanie ramek i pul zamiast histogramu wycinków
+    if cfg["mode"] == "slab" and "slab_summary" in report:
+        print(format_slab_summary(report["slab_summary"]))
+    elif "free_range_histogram" in report:
+        print("Free-range histogram:")
+        print(f"{'Range size (lower exclusive, upper inclusive)':<45}  {'Count':>6}  {'Actual free space':>30}")
+        print(f"{'-' * 45}  {'-' * 6}  {'-' * 30}")
+        for h in report["free_range_histogram"]:
+            print(f"{h['range']:<45}  {h['count']:>6,}  {format_bytes(h['bytes']):>30}")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Blob Allocator Simulator (Best-Fit & Slab)")
+    parser.add_argument("--capacity", type=str, required=True, help="Total capacity, e.g. 50GiB, 100GiB")
+    parser.add_argument(
+        "--block-sizes",
+        type=str,
+        required=True,
+        help="Comma-separated block sizes with optional weights, e.g. 4KiB:20%%,4MiB:80%%",
+    )
+    parser.add_argument("--steps", type=int, default=100000, help="Number of allocation attempts")
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["4k-align", "max-value-align", "slab"],
+        default="4k-align",
+        help="Allocator mode",
+    )
+    parser.add_argument(
+        "--eviction-policy",
+        type=str,
+        choices=["lru", "fifo", "random"],
+        default="lru",
+        help="Eviction policy",
+    )
+    parser.add_argument("--max-water-level", type=float, default=95.0, help="High water mark percentage")
+    parser.add_argument("--min-water-level", type=float, default=90.0, help="Low water mark percentage")
+    parser.add_argument("--hot-block-percent", type=float, default=20.0, help="Percentage of hot blocks")
+    parser.add_argument("--hot-read-percent", type=float, default=80.0, help="Percentage of reads targeting hot blocks")
+    parser.add_argument("--reads-per-allocation", type=int, default=4, help="Reads per allocation attempt")
+    parser.add_argument("--sample-every", type=int, default=100000, help="Snapshot interval in steps")
+    parser.add_argument("--seed", type=int, default=123, help="Random seed")
+    parser.add_argument("--workload", type=str, default="water-level", help="Workload mode")
+    parser.add_argument("--json-report-path", type=str, default=None, help="Optional path to save JSON report")
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    try:
+        report = run_simulation(args)
+        if args.json_report_path:
+            with open(args.json_report_path, "w", encoding="utf-8") as f:
+                json.dump(report, f, indent=2)
         print_report(report)
         return 0
-    except (
-        ValueError,
-        RuntimeError,
-        OSError,
-        subprocess.CalledProcessError,
-        ImportError,
-    ) as error:
-        print(f'Measurement aborted: {error}', file=sys.stderr)
+    except (ValueError, RuntimeError, OSError, ImportError, subprocess.CalledProcessError) as error:
+        print(f"Measurement aborted: {error}", file=sys.stderr)
         return 1
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())
