@@ -1037,8 +1037,8 @@ struct PendingOperation {
     double start{0};
 };
 
-void Worker(bench::AsyncTransport &transport, const BenchConfig &cfg, const PreparedKeys &keys, ThreadStats &stats,
-            int tid, uint32_t rank)
+void WorkerWithPreparedKeys(bench::AsyncTransport &transport, const BenchConfig &cfg, const PreparedKeys &keys,
+                            ThreadStats &stats, int tid, uint32_t rank)
 {
     bench::CompletionQueue queue;
     std::unordered_map<uint32_t, PendingOperation> pending;
@@ -1177,6 +1177,14 @@ void Worker(bench::AsyncTransport &transport, const BenchConfig &cfg, const Prep
             it = pending.erase(it);
         }
     }
+}
+
+// Preserve the original interface for in-process tests. Production clients prepare keys before START.
+[[maybe_unused]] void Worker(bench::AsyncTransport &transport, const BenchConfig &cfg, ThreadStats &stats,
+                             int tid, uint32_t rank)
+{
+    const PreparedKeys keys = PrepareKeys(cfg, rank);
+    WorkerWithPreparedKeys(transport, cfg, keys, stats, tid, rank);
 }
 
 void WriteResult(ProcessResult &out, const ThreadStats &stats, double durationSec, int rank, int pid)
@@ -1385,7 +1393,7 @@ int RunClient(const BenchConfig &cfg, int clientIndex, ProcessResult *resultSlot
     }
     double startUs = NowUs();
     for (int t = 0; t < cfg.threadCount; ++t) {
-        workers.emplace_back(Worker, std::ref(transport), std::ref(cfg), std::cref(keys),
+        workers.emplace_back(WorkerWithPreparedKeys, std::ref(transport), std::ref(cfg), std::cref(keys),
                              std::ref(threadStats[static_cast<size_t>(t)]), t, rank);
     }
     for (auto &w : workers)
