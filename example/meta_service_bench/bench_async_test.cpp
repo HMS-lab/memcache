@@ -39,8 +39,40 @@ void Check(bool condition)
 {
     if (!condition) throw std::runtime_error("async benchmark assertion failed");
 }
+
+void RunChildReapingTest()
+{
+    pid_t child = fork();
+    Check(child >= 0);
+    if (child == 0) {
+        _exit(EXIT_SUCCESS);
+    }
+    Check(ReapChildren({child}));
+    Check(waitpid(child, nullptr, WNOHANG) == -1 && errno == ECHILD);
+
+    int channel[bench::kBarrierSocketCount];
+    Check(socketpair(AF_UNIX, SOCK_SEQPACKET, 0, channel) == 0);
+    child = fork();
+    Check(child >= 0);
+    if (child == 0) {
+        close(channel[bench::kBarrierParentEnd]);
+        signal(SIGTERM, SIG_IGN);
+        Check(bench::SendBarrierMessage(channel[bench::kBarrierClientEnd], bench::BarrierMessage::READY));
+        while (true) {
+            pause();
+        }
+    }
+    close(channel[bench::kBarrierClientEnd]);
+    Check(bench::ReceiveBarrierMessage(channel[bench::kBarrierParentEnd], bench::BarrierMessage::READY));
+    close(channel[bench::kBarrierParentEnd]);
+    constexpr int immediateTimeoutSec = 0;
+    Check(!ReapChildren({child}, SIGTERM, immediateTimeoutSec));
+    Check(waitpid(child, nullptr, WNOHANG) == -1 && errno == ECHILD);
+}
+
 int main()
 {
+    RunChildReapingTest();
     constexpr int testOperations = 8;
     constexpr int testDepth = 4;
     constexpr int allPut = 100;

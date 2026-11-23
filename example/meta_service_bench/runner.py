@@ -6,6 +6,8 @@ Usage: python3 runner.py [--config config.yml] [-p 8 -t 2 ...]
 """
 import argparse
 import codecs
+import contextlib
+import ctypes
 import json
 import os
 import re
@@ -14,6 +16,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -123,26 +126,99 @@ def build_command(cfg, args):
     return cmd
 
 
+PROCESS_STOP_TIMEOUT_SECONDS = 30
+PROCESS_POLL_SECONDS = 0.05
+
+
+def enable_child_subreaper():
+    """Adopt orphaned descendants on Linux so this runner can reap them."""
+    pr_set_child_subreaper = 36
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(pr_set_child_subreaper, 1, 0, 0, 0) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error))
+
+
+@contextlib.contextmanager
+def interrupt_on_sigterm():
+    """Give SIGTERM the same cleanup path as Ctrl+C."""
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    def interrupt(signum, frame):
+        raise KeyboardInterrupt
+
+    previous = signal.signal(signal.SIGTERM, interrupt)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
+def signal_process_group(process, signum):
+    try:
+        os.killpg(process.pid, signum)
+    except ProcessLookupError:
+        pass
+
+
+def stop_process_group(process):
+    """Stop one private process group and reap its leader and adopted descendants."""
+    def reap_descendants(block=False):
+        while True:
+            try:
+                pid, _ = os.waitpid(-process.pid, 0 if block else os.WNOHANG)
+            except ChildProcessError:
+                return
+            except InterruptedError:
+                continue
+            if pid == 0:
+                return
+
+    signal_process_group(process, signal.SIGTERM)
+    deadline = time.monotonic() + PROCESS_STOP_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        # Let Popen reap its own child before reaping adopted grandchildren.
+        if process.poll() is not None:
+            reap_descendants()
+        try:
+            os.killpg(process.pid, 0)
+        except ProcessLookupError:
+            process.wait()
+            return
+        time.sleep(PROCESS_POLL_SECONDS)
+    signal_process_group(process, signal.SIGKILL)
+    process.wait()
+    reap_descendants(block=True)
+
+
 def run(cmd, cwd, on_profile=None):
     """Run the command, echoing its output live. Returns (exit_code, output)."""
     chunks = []
+    enable_child_subreaper()
     decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
     control, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
-    with control, child, selectors.DefaultSelector() as watcher:
+    with control, child, selectors.DefaultSelector() as watcher, interrupt_on_sigterm():
         command = list(cmd)
         inherited = ()
         if on_profile is not None:
             command += ["--profile-control-fd", str(child.fileno())]
             inherited = (child.fileno(),)
         with subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                              pass_fds=inherited) as proc:
+                              pass_fds=inherited, start_new_session=True) as proc:
             child.close()
             watcher.register(proc.stdout, selectors.EVENT_READ, "output")
             if on_profile is not None:
                 watcher.register(control, selectors.EVENT_READ, "control")
+            group_stopped = False
             try:
                 while watcher.get_map():
-                    for key, _ in watcher.select():
+                    # An orphan may hold stdout/control open after the coordinator exits.
+                    if proc.poll() is not None and not group_stopped:
+                        stop_process_group(proc)
+                        group_stopped = True
+                    for key, _ in watcher.select(PROCESS_POLL_SECONDS):
                         if key.data == "output":
                             data = os.read(proc.stdout.fileno(), 65536)
                             text = decoder.decode(data, final=not data)
@@ -163,9 +239,9 @@ def run(cmd, cwd, on_profile=None):
                             watcher.unregister(control)
                         else:
                             control.sendall({b"R": b"S", b"D": b"T"}[message[:1]])
-            except BaseException:
-                proc.kill()
-                raise
+            finally:
+                if not group_stopped:
+                    stop_process_group(proc)
         return proc.returncode, "".join(chunks)
 
 
@@ -415,7 +491,9 @@ def start_offcpu(cfg, perf_data, target_pids):
     try:
         handle = open(path, "w")
         try:
-            process = subprocess.Popen(command, stdout=handle, stderr=subprocess.PIPE, text=True)
+            enable_child_subreaper()
+            process = subprocess.Popen(command, stdout=handle, stderr=subprocess.PIPE, text=True,
+                                       start_new_session=True)
         except OSError:
             handle.close()
             raise
@@ -448,25 +526,28 @@ def stop_offcpu(offcpu_handle):
     try:
         if process.poll() is None:
             try:
-                process.send_signal(signal.SIGINT)
+                signal_process_group(process, signal.SIGINT)
             except ProcessLookupError:
                 offcpu_handle["valid"] = False
         else:
             offcpu_handle["valid"] = False
-        _, errors = process.communicate(timeout=60)
+        _, errors = process.communicate(timeout=PROCESS_STOP_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired:
-        process.kill()
+        signal_process_group(process, signal.SIGKILL)
         _, errors = process.communicate()
         offcpu_handle["valid"] = False
         print("Warning: off-CPU tool did not stop, profile dropped", file=sys.stderr)
     except BaseException:
-        process.kill()
+        signal_process_group(process, signal.SIGKILL)
         process.communicate()
         offcpu_handle["valid"] = False
         raise
     finally:
-        offcpu_handle["file"].close()
-        offcpu_handle["stopped"] = True
+        try:
+            stop_process_group(process)
+        finally:
+            offcpu_handle["file"].close()
+            offcpu_handle["stopped"] = True
     if process.returncode != 0:
         offcpu_handle["valid"] = False
     if errors.strip():

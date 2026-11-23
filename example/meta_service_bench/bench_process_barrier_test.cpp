@@ -249,6 +249,25 @@ void RunFailedHookTest(bench::BarrierMessage arrival, bench::BarrierMessage rele
     close(channel[bench::kBarrierParentEnd]);
     close(channel[bench::kBarrierClientEnd]);
 }
+
+void RunCancellationTest()
+{
+    Channel channel = CreateChannel();
+    volatile sig_atomic_t stopSignal = SIGTERM;
+    Check(!bench::ReceiveBarrierMessage(channel[bench::kBarrierParentEnd], bench::BarrierMessage::START,
+                                        &stopSignal));
+    bool hookCalled = false;
+    Check(!bench::CoordinateClients({channel[bench::kBarrierParentEnd]}, [&] {
+        hookCalled = true;
+        return true;
+    }, {}, &stopSignal));
+    Check(!hookCalled);
+    Check(!bench::WaitForBarrier(channel[bench::kBarrierParentEnd], bench::BarrierMessage::READY,
+                                bench::BarrierMessage::START, &stopSignal));
+    CheckNoMessage(channel[bench::kBarrierClientEnd]);
+    close(channel[bench::kBarrierParentEnd]);
+    close(channel[bench::kBarrierClientEnd]);
+}
 } // namespace
 
 int main()
@@ -260,6 +279,7 @@ int main()
     RunExitTest(false);
     RunExitTest(true);
     RunClosedWaitingClientTest();
+    RunCancellationTest();
     RunFailedHookTest(bench::BarrierMessage::READY, bench::BarrierMessage::START);
     RunFailedHookTest(bench::BarrierMessage::DRAINED, bench::BarrierMessage::TEARDOWN);
     std::cout << "Process barrier tests passed\n";

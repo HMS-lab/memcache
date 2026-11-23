@@ -14,6 +14,7 @@
 #define MEMCACHE_BENCH_PROCESS_BARRIER_H
 
 #include <cerrno>
+#include <csignal>
 #include <functional>
 #include <poll.h>
 #include <sys/socket.h>
@@ -35,25 +36,51 @@ inline bool SendBarrierMessage(int socketFd, BarrierMessage message)
     return sent == static_cast<ssize_t>(sizeof(message));
 }
 
-inline bool ReceiveBarrierMessage(int socketFd, BarrierMessage expected)
+inline bool BarrierCancelled(const volatile sig_atomic_t *stopSignal)
 {
+    return stopSignal != nullptr && *stopSignal != 0;
+}
+
+inline bool ReceiveBarrierMessage(int socketFd, BarrierMessage expected,
+                                  const volatile sig_atomic_t *stopSignal = nullptr)
+{
+    // Poll when cancellation is enabled, even if the signal reaches another thread.
+    constexpr int cancellationPollMs = 100;
+    if (stopSignal != nullptr) {
+        pollfd watcher{socketFd, POLLIN, 0};
+        while (true) {
+            if (BarrierCancelled(stopSignal)) {
+                return false;
+            }
+            int ready = poll(&watcher, 1, cancellationPollMs);
+            if (ready > 0) {
+                break;
+            }
+            if (ready < 0 && errno != EINTR) {
+                return false;
+            }
+        }
+    }
     BarrierMessage message{};
     ssize_t received;
     do {
         received = recv(socketFd, &message, sizeof(message), 0);
-    } while (received < 0 && errno == EINTR);
+    } while (received < 0 && errno == EINTR && !BarrierCancelled(stopSignal));
     return received == static_cast<ssize_t>(sizeof(message)) && message == expected;
 }
 
-inline bool WaitForBarrier(int socketFd, BarrierMessage arrival, BarrierMessage release)
+inline bool WaitForBarrier(int socketFd, BarrierMessage arrival, BarrierMessage release,
+                           const volatile sig_atomic_t *stopSignal = nullptr)
 {
-    return SendBarrierMessage(socketFd, arrival) && ReceiveBarrierMessage(socketFd, release);
+    return !BarrierCancelled(stopSignal) && SendBarrierMessage(socketFd, arrival) &&
+           ReceiveBarrierMessage(socketFd, release, stopSignal);
 }
 
 // The parent watches every channel, including clients already waiting for release.
 // EOF or an unexpected message aborts coordination instead of stranding peers.
 inline bool CoordinateBarrier(const std::vector<int> &socketFds, BarrierMessage arrival, BarrierMessage release,
-                              const std::function<bool()> &beforeRelease = {})
+                              const std::function<bool()> &beforeRelease = {},
+                              const volatile sig_atomic_t *stopSignal = nullptr)
 {
     std::vector<pollfd> watchers;
     for (int socketFd : socketFds) {
@@ -61,8 +88,12 @@ inline bool CoordinateBarrier(const std::vector<int> &socketFds, BarrierMessage 
     }
     std::vector<bool> arrived(socketFds.size(), false);
     size_t remaining = socketFds.size();
+    constexpr int cancellationPollMs = 100;
     while (remaining != 0) {
-        int ready = poll(watchers.data(), watchers.size(), -1);
+        if (BarrierCancelled(stopSignal)) {
+            return false;
+        }
+        int ready = poll(watchers.data(), watchers.size(), stopSignal == nullptr ? -1 : cancellationPollMs);
         if (ready < 0) {
             if (errno == EINTR) {
                 continue;
@@ -74,7 +105,7 @@ inline bool CoordinateBarrier(const std::vector<int> &socketFds, BarrierMessage 
                 continue;
             }
             if ((watchers[i].revents & (POLLERR | POLLNVAL | POLLHUP)) != 0 || arrived[i] ||
-                !ReceiveBarrierMessage(watchers[i].fd, arrival)) {
+                !ReceiveBarrierMessage(watchers[i].fd, arrival, stopSignal)) {
                 return false;
             }
             arrived[i] = true;
@@ -82,7 +113,7 @@ inline bool CoordinateBarrier(const std::vector<int> &socketFds, BarrierMessage 
         }
     }
     // All clients are parked here. Run lifecycle actions before any client is released.
-    if (beforeRelease && !beforeRelease()) {
+    if (BarrierCancelled(stopSignal) || (beforeRelease && !beforeRelease()) || BarrierCancelled(stopSignal)) {
         return false;
     }
     for (int socketFd : socketFds) {
@@ -94,12 +125,13 @@ inline bool CoordinateBarrier(const std::vector<int> &socketFds, BarrierMessage 
 }
 
 inline bool CoordinateClients(const std::vector<int> &socketFds, const std::function<bool()> &beforeStart = {},
-                              const std::function<bool()> &beforeTeardown = {})
+                              const std::function<bool()> &beforeTeardown = {},
+                              const volatile sig_atomic_t *stopSignal = nullptr)
 {
     // On failure the caller must close all parent endpoints and reap/stop its children.
     return !socketFds.empty() &&
-           CoordinateBarrier(socketFds, BarrierMessage::READY, BarrierMessage::START, beforeStart) &&
-           CoordinateBarrier(socketFds, BarrierMessage::DRAINED, BarrierMessage::TEARDOWN, beforeTeardown);
+           CoordinateBarrier(socketFds, BarrierMessage::READY, BarrierMessage::START, beforeStart, stopSignal) &&
+           CoordinateBarrier(socketFds, BarrierMessage::DRAINED, BarrierMessage::TEARDOWN, beforeTeardown, stopSignal);
 }
 } // namespace bench
 

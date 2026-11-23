@@ -153,9 +153,26 @@ constexpr int kMpolBind = 2;
 constexpr const char *kMetaServiceProcName = "meta_service";
 constexpr const char *kClientProcNamePrefix = "bench_client_";
 constexpr const char *kCoordinatorProcName = "bench_coord";
+constexpr int kChildStopTimeoutSec = 5;
+constexpr int kChildPollIntervalMs = 50;
+constexpr int kSignalExitCodeBase = 128;
 
 
 int gTermFd = STDERR_FILENO;
+volatile sig_atomic_t gStopSignal = 0;
+
+void HandleStopSignal(int signalNumber)
+{
+    gStopSignal = signalNumber;
+}
+
+bool InstallStopHandlers()
+{
+    struct sigaction action{};
+    action.sa_handler = HandleStopSignal;
+    sigemptyset(&action.sa_mask);
+    return sigaction(SIGINT, &action, nullptr) == 0 && sigaction(SIGTERM, &action, nullptr) == 0;
+}
 
 enum class NumaMemPolicy : int { kNone = 0, kPreferred, kBind };
 
@@ -242,6 +259,70 @@ void TermLog(const char *fmt, ...)
             return;
         }
     }
+}
+
+void PrepareChildProcess(pid_t parentPid)
+{
+    struct sigaction action{};
+    action.sa_handler = SIG_DFL;
+    sigemptyset(&action.sa_mask);
+    // Children must not inherit the coordinator's cancellation-only handlers.
+    if (sigaction(SIGINT, &action, nullptr) < 0 || sigaction(SIGTERM, &action, nullptr) < 0 ||
+        prctl(PR_SET_PDEATHSIG, SIGKILL) < 0) {
+        TermLog("Failed to configure child process cleanup: %s\n", strerror(errno));
+        _exit(EXIT_FAILURE);
+    }
+    // The parent may have exited between fork() and prctl().
+    if (getppid() != parentPid) {
+        _exit(EXIT_FAILURE);
+    }
+}
+
+bool ReapChildren(const std::vector<pid_t> &pids, int terminationSignal = 0,
+                  int timeoutSeconds = kChildStopTimeoutSec)
+{
+    std::vector<pid_t> remaining = pids;
+    bool success = true;
+    bool stopping = terminationSignal != 0;
+    if (stopping) {
+        for (pid_t pid : remaining) {
+            kill(pid, terminationSignal);
+        }
+    }
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeoutSeconds);
+    while (!remaining.empty()) {
+        if (gStopSignal != 0 && !stopping) {
+            for (pid_t pid : remaining) {
+                kill(pid, SIGTERM);
+            }
+            stopping = true;
+        }
+        for (auto it = remaining.begin(); it != remaining.end();) {
+            int status = 0;
+            pid_t result = waitpid(*it, &status, WNOHANG);
+            if (result == *it || (result < 0 && errno != EINTR)) {
+                success = success && result > 0 && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+                it = remaining.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        if (remaining.empty()) {
+            break;
+        }
+        if (std::chrono::steady_clock::now() >= deadline) {
+            TermLog("Child shutdown timed out; killing %zu remaining processes\n", remaining.size());
+            for (pid_t pid : remaining) {
+                kill(pid, SIGKILL);
+            }
+            for (pid_t pid : remaining) {
+                while (waitpid(pid, nullptr, 0) < 0 && errno == EINTR) {}
+            }
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(kChildPollIntervalMs));
+    }
+    return success;
 }
 
 void RedirectLogsToFile(const std::string &logFile)
@@ -1130,10 +1211,12 @@ pid_t StartPerfOnPids(const std::vector<pid_t> &pids, const BenchConfig &cfg)
 {
     std::string pidList = JoinPids(pids);
     std::string freqStr = std::to_string(cfg.perfFreq);
+    const pid_t parentPid = getpid();
     pid_t pid = fork();
     if (pid != 0) {
         return pid;
     }
+    PrepareChildProcess(parentPid);
     execlp("perf", "perf", "record", "-F", freqStr.c_str(), "-g", "-p", pidList.c_str(), "-o", kDefaultPerfDataFile,
            nullptr);
     TermLog("[perf] failed to launch perf: %s\n", strerror(errno));
@@ -1150,7 +1233,10 @@ pid_t StartPerfChecked(const std::vector<pid_t> &pids, const BenchConfig &cfg)
     }
     sleep(kPerfReadyWaitSec);
     int perfStatus = 0;
-    pid_t reaped = waitpid(perfPid, &perfStatus, WNOHANG);
+    pid_t reaped;
+    do {
+        reaped = waitpid(perfPid, &perfStatus, WNOHANG);
+    } while (reaped < 0 && errno == EINTR);
     if (reaped == perfPid || reaped == -1) {
         TermLog("[perf] perf exited early (perf installed? permissions? ulimit -n?), profiling disabled\n");
         return -1;
@@ -1165,23 +1251,18 @@ void StopPerf(pid_t perfPid)
     if (perfPid <= 0) {
         return;
     }
-    kill(perfPid, SIGINT);
-    for (int i = 0; i < kPerfStopTimeoutSec; ++i) {
-        int status = 0;
-        pid_t r = waitpid(perfPid, &status, WNOHANG);
-        if (r == perfPid || r == -1) {
-            return;
-        }
-        sleep(1);
-    }
-    kill(perfPid, SIGKILL);
-    int status = 0;
-    waitpid(perfPid, &status, 0);
+    ReapChildren({perfPid}, SIGINT, kPerfStopTimeoutSec);
 }
 
 int RunMetaService(const std::string &metaUrl, const std::string &bmUrl, const std::string &metricsUrl,
                    const std::string &logFile, uint64_t capacityMB)
 {
+    // Block before Start() creates threads so every service thread inherits the mask.
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGTERM);
+    sigaddset(&mask, SIGINT);
+    pthread_sigmask(SIG_BLOCK, &mask, nullptr);
     RedirectLogsToFile(logFile);
 
     mmc_meta_service_config_t cfg{};
@@ -1216,11 +1297,6 @@ int RunMetaService(const std::string &metaUrl, const std::string &bmUrl, const s
     }
     TermLog("[meta_service] Started at %s\n", metaUrl.c_str());
 
-    sigset_t mask;
-    sigemptyset(&mask);
-    sigaddset(&mask, SIGTERM);
-    sigaddset(&mask, SIGINT);
-    pthread_sigmask(SIG_BLOCK, &mask, nullptr);
     int sig = 0;
     sigwait(&mask, &sig);
 
@@ -1494,6 +1570,10 @@ int main(int argc, char *argv[])
     BenchConfig cfg;
     if (!ParseArgs(argc, argv, cfg))
         return 1;
+    if (!InstallStopHandlers()) {
+        std::cerr << "Failed to install shutdown handlers: " << strerror(errno) << std::endl;
+        return 1;
+    }
 
     if (cfg.profileControlFd >= 0 && fcntl(cfg.profileControlFd, F_SETFD, FD_CLOEXEC) < 0) {
         std::cerr << "Invalid profile control descriptor: " << strerror(errno) << std::endl;
@@ -1571,8 +1651,10 @@ int main(int argc, char *argv[])
     std::memset(sharedResults, 0, shmSize);
 
     std::cout << "[1/3] Starting meta_service process..." << std::endl;
+    const pid_t coordinatorPid = getpid();
     pid_t metaPid = fork();
     if (metaPid == 0) {
+        PrepareChildProcess(coordinatorPid);
         if (cfg.profileControlFd >= 0) {
             close(cfg.profileControlFd);
         }
@@ -1590,8 +1672,7 @@ int main(int argc, char *argv[])
     // Bind the coordinator only after meta_service is forked, so that perf, the metrics sampler and all
     // client processes (forked below) inherit the worker nodes while meta_service keeps its own nodes.
     if (!ApplyNumaBinding(workerNuma, cfg.numaMemPolicy, "coordinator/clients")) {
-        kill(metaPid, SIGTERM);
-        waitpid(metaPid, nullptr, 0);
+        ReapChildren({metaPid}, SIGTERM);
         munmap(sharedResults, shmSize);
         return 1;
     }
@@ -1607,6 +1688,9 @@ int main(int argc, char *argv[])
     std::vector<pid_t> clientPids;
     std::vector<int> barrierFds;
     for (int i = 0; i < cfg.processCount; ++i) {
+        if (gStopSignal != 0) {
+            break;
+        }
         int controlSocket[bench::kBarrierSocketCount];
         if (socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, controlSocket) != 0) {
             std::cerr << "Failed to create client barrier channel: " << strerror(errno) << std::endl;
@@ -1614,6 +1698,7 @@ int main(int argc, char *argv[])
         }
         pid_t pid = fork();
         if (pid == 0) {
+            PrepareChildProcess(coordinatorPid);
             if (cfg.profileControlFd >= 0) {
                 close(cfg.profileControlFd);
             }
@@ -1639,6 +1724,9 @@ int main(int argc, char *argv[])
     }
 
     const auto startProfiling = [&]() {
+        if (gStopSignal != 0) {
+            return false;
+        }
         // Every client has finished warmup and transport setup and is waiting for START.
         std::vector<pid_t> targets = clientPids;
         if (cfg.perfTarget == PerfTarget::kMeta) {
@@ -1659,7 +1747,7 @@ int main(int argc, char *argv[])
             sent = send(cfg.profileControlFd, request.data(), request.size(), MSG_NOSIGNAL);
         } while (sent < 0 && errno == EINTR);
         return sent == static_cast<ssize_t>(request.size()) &&
-               bench::ReceiveBarrierMessage(cfg.profileControlFd, bench::BarrierMessage::START);
+               bench::ReceiveBarrierMessage(cfg.profileControlFd, bench::BarrierMessage::START, &gStopSignal);
     };
     const auto stopProfiling = [&]() {
         if (perfPid <= 0) {
@@ -1675,14 +1763,14 @@ int main(int argc, char *argv[])
         // Ask the runner to freeze its collection before releasing any client to disconnect.
         bool runnerStopped = cfg.profileControlFd < 0 ||
                              bench::WaitForBarrier(cfg.profileControlFd, bench::BarrierMessage::DRAINED,
-                                                   bench::BarrierMessage::TEARDOWN);
+                                                   bench::BarrierMessage::TEARDOWN, &gStopSignal);
         return runnerStopped;
     };
 
     std::cout << "\n[3/3] Waiting for " << clientPids.size() << " clients to finish..." << std::endl;
     bool clientsFailed = clientPids.size() != static_cast<size_t>(cfg.processCount);
     if (!clientsFailed) {
-        clientsFailed = !bench::CoordinateClients(barrierFds, startProfiling, finishProfiling);
+        clientsFailed = !bench::CoordinateClients(barrierFds, startProfiling, finishProfiling, &gStopSignal);
     }
     // Also stop an active recorder if coordination failed before every client drained.
     stopProfiling();
@@ -1691,27 +1779,20 @@ int main(int argc, char *argv[])
     }
     if (clientsFailed) {
         std::cerr << "Client coordination failed; aborting benchmark." << std::endl;
-        for (pid_t pid : clientPids) {
-            kill(pid, SIGTERM);
-        }
     }
     for (int barrierFd : barrierFds) {
         close(barrierFd);
     }
-    for (pid_t pid : clientPids) {
-        int status = 0;
-        pid_t waited;
-        do {
-            waited = waitpid(pid, &status, 0);
-        } while (waited < 0 && errno == EINTR);
-        if (waited < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) clientsFailed = true;
+    // Reap every child even when an earlier child failed or shutdown was interrupted.
+    if (!ReapChildren(clientPids, clientsFailed ? SIGTERM : 0)) {
+        clientsFailed = true;
     }
 
     metricsSampler.Stop();
 
-    kill(metaPid, SIGTERM);
-    int metaStatus = 0;
-    waitpid(metaPid, &metaStatus, 0);
+    if (!ReapChildren({metaPid}, SIGTERM)) {
+        clientsFailed = true;
+    }
 
     std::vector<ProcessResult> results;
     for (int i = 0; i < cfg.processCount; ++i) {
@@ -1729,5 +1810,5 @@ int main(int argc, char *argv[])
 
     munmap(sharedResults, shmSize);
     std::cout << (clientsFailed ? "Benchmark failed." : "Benchmark finished.") << std::endl;
-    return clientsFailed || results.empty() ? 1 : 0;
+    return gStopSignal != 0 ? kSignalExitCodeBase + gStopSignal : (clientsFailed || results.empty() ? 1 : 0);
 }

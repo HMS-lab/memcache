@@ -11,6 +11,18 @@ Each client process retains its `MetaNetClient` connection for registration, war
 
 All processes finish registration, validated warmup, and async connection setup before the coordinator releases the startup barrier. Once a process drains its workload, it stops its timer and waits at the teardown barrier with its clients connected. Clients disconnect only after every process has drained its requests, including dependent Updates. Both barriers are outside workload measurement. Setup errors, failed warmup, or a client exiting before a barrier completes abort the run and release waiting peers.
 
+Ctrl+C and SIGTERM request cleanup of clients, MetaService, and perf. The coordinator waits for its
+children, retries interrupted waits, and kills and reaps children that exceed the shutdown timeout.
+Native children also receive a parent-death signal if the coordinator exits unexpectedly. MetaService
+blocks shutdown signals before creating service threads so its main thread can perform graceful shutdown.
+
+The Python runner uses private process groups for the benchmark and off-CPU collector. It acts as a
+Linux child subreaper, adopts orphaned descendants, and stops and reaps those groups on completion,
+errors, Ctrl+C, and SIGTERM. This prevents exited descendants from remaining as `<defunct>` processes
+when a coordinator or collector wrapper exits early. Killing the runner itself with SIGKILL bypasses
+cleanup; its remaining children must then be reaped by the system's parent process. Existing zombies
+from older runs can only be reaped by their current parent; rerunning the updated benchmark cannot remove them.
+
 ## Build and verify
 
 From the repository root, use the supported build entrypoint:
