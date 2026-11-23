@@ -37,8 +37,8 @@ vllm_ascend                       0.14.0rc2.dev68+gf55ded242 /vllm-workspace/vll
 在线安装：
 
 ```shell
-pip install memfabric_hybrid==1.1.5
-pip install memcache_hybrid==1.1.5
+pip install memfabric_hybrid==1.3.1 --force-reinstall --no-deps
+pip install memcache_hybrid==1.3.1 --force-reinstall --no-deps
 ```
 
 如果因网络原因无法在线安装，可以在 [PyPI · The Python Package Index](https://pypi.org/) 下载安装包离线安装。

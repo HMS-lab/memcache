@@ -186,6 +186,11 @@ struct MmcLocalMemlInitInfo {
     uint64_t capacity_;
 };
 
+struct StorageOptions {
+    bool storageEnabled{false};
+    bool ssdMetadataSeparated{false};
+};
+
 union MmcOperateIdUnion {
     uint64_t operateId_;
     struct {

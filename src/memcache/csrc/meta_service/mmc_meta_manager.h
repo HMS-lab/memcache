@@ -27,7 +27,6 @@
 
 #include "mmc_defrag_evict.h"
 #include "mmc_global_allocator.h"
-#include "mmc_storage_mode.h"
 #include "mmc_mem_obj_meta.h"
 #include "mmc_meta_container.h"
 #include "mmc_meta_backup_mgr.h"
@@ -138,9 +137,10 @@ public:
                             uint32_t evictYieldDurationUs = 100,
                             uint32_t lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT,
                             MetaLruType lruType = MetaLruType::LRU)
-        : defaultTtlMs_(defaultTtl == 0 ? MMC_DATA_TTL_MS : defaultTtl), evictThresholdHigh_(evictThresholdHigh),
-          evictThresholdLow_(evictThresholdLow), extConfig_(extConfig), evictYieldInterval_(evictYieldInterval),
-          evictYieldDurationUs_(evictYieldDurationUs), lruShardCount_(lruShardCount), lruType_(lruType)
+        : defaultTtlMs_(defaultTtl == 0 ? MMC_DATA_TTL_MS : defaultTtl),
+          evictThresholds_(PackEvictThresholds(evictThresholdHigh, evictThresholdLow)), extConfig_(extConfig),
+          evictYieldInterval_(evictYieldInterval), evictYieldDurationUs_(evictYieldDurationUs),
+          lruShardCount_(lruShardCount), lruType_(lruType)
     {}
     // evictYieldInterval: number of evicted objects between yields (0=disabled, default=0)
     // evictYieldDurationUs: sleep duration per yield in microseconds (default=100us)
@@ -291,8 +291,9 @@ public:
                  std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList, bool enableMaxValueMode = false);
 
     Result Mount(const std::vector<MmcLocation> &locs, const std::vector<MmcLocalMemlInitInfo> &localMemInitInfos,
-                 std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList, bool storageEnabled,
+                 std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList, const StorageOptions &storageOptions,
                  bool enableMaxValueMode = false);
+
     /**
      * @brief unmount the mempool contributor at given location
      * @param loc          [in] location of the mem pool contributor to be unmounted
@@ -458,13 +459,16 @@ public:
 
     std::vector<std::pair<uint16_t, uint16_t>> GetEvictWatermark() const
     {
+        // Use one snapshot for the high/low pair and all memory media in this eviction check.
+        const auto thresholds = evictThresholds_.load(std::memory_order_relaxed);
+        const std::pair<uint16_t, uint16_t> watermark{static_cast<uint16_t>(thresholds >> kEvictThresholdShift),
+                                                      static_cast<uint16_t>(thresholds)};
         std::vector<std::pair<uint16_t, uint16_t>> result(MEDIA_NONE);
         for (int i = 0; i < MEDIA_NONE; i++) {
             if (i == MEDIA_SSD) {
                 continue;
             }
-            result[i] = {evictThresholdHigh_.load(std::memory_order_relaxed),
-                         evictThresholdLow_.load(std::memory_order_relaxed)};
+            result[i] = watermark;
         }
         return result;
     }
@@ -518,13 +522,14 @@ public:
         return !ssdEnabledRanks_.empty();
     }
 
-    /**
-     * @brief 设置 SSD 元数据管理模式
-     * @param mode             [in] 初始化时确定的元数据管理模式
-     */
-    void SetSsdMetadataMode(SsdMetadataMode mode)
+    Result ValidateSsdMetadataSeparation(bool separated) const
     {
-        ssdMetadataMode_ = mode;
+        if (ssdMetadataSeparationResolved_.load(std::memory_order_acquire) && IsSsdMetadataSeparated() != separated) {
+            MMC_LOG_ERROR("SSD metadata separation mismatch, current=" << IsSsdMetadataSeparated()
+                                                                       << ", reported=" << separated);
+            return MMC_INVALID_PARAM;
+        }
+        return MMC_OK;
     }
 
     /**
@@ -532,7 +537,7 @@ public:
      */
     bool IsSsdMetadataSeparated() const
     {
-        return ssdMetadataMode_ == MMC_SSD_METADATA_SEPARATED;
+        return ssdMetadataSeparated_.load(std::memory_order_acquire);
     }
 
     /**
@@ -843,6 +848,13 @@ private:
                        MmcMemMetaDesc &objMeta, bool attachReadLease = true);
 
 private:
+    static constexpr uint32_t kEvictThresholdShift = 16;
+
+    static constexpr uint32_t PackEvictThresholds(uint16_t high, uint16_t low)
+    {
+        return (static_cast<uint32_t>(high) << kEvictThresholdShift) | low;
+    }
+
     std::mutex mutex_;
     bool started_ = false;
     // 常规淘汰（CheckAndEvict）与碎片强制淘汰（ForceEvictForFragmentation）共用单飞行标志：
@@ -854,9 +866,8 @@ private:
     // std::unordered_set<std::string> evictMap_;
     // ReadWriteLock evictMapLock_;
 
-    std::atomic<uint64_t> defaultTtlMs_; /* default ttl in milliseconds */
-    std::atomic<uint16_t> evictThresholdHigh_;
-    std::atomic<uint16_t> evictThresholdLow_;
+    std::atomic<uint64_t> defaultTtlMs_;    /* default ttl in milliseconds */
+    std::atomic<uint32_t> evictThresholds_; /* high in upper 16 bits, low in lower 16 bits */
     std::atomic<uint16_t> defragEvictThreshold_{static_cast<uint16_t>(DEFRAG_EVICT_WASTE_PERCENT_THRESHOLD)};
     MmcMetaExtConfig extConfig_;
     uint32_t evictYieldInterval_;   /* GC eviction yield interval (0=disabled) */
@@ -875,8 +886,9 @@ private:
     MmcThreadPoolPtr removeThreadPool_;
     // EraseIf 并行执行专用池：线程数按 shard 数对齐（上限 kShardLruPoolMax）
     MmcThreadPoolPtr shardLruThreadPool_;
-    // 由 MetaService 冷启动配置统一设置。
-    SsdMetadataMode ssdMetadataMode_{MMC_SSD_METADATA_AGGREGATED};
+    // Set by the first successful storage registration and fixed for this manager's lifetime.
+    std::atomic<bool> ssdMetadataSeparated_{false};
+    std::atomic<bool> ssdMetadataSeparationResolved_{false};
     std::unordered_set<uint32_t> ssdEnabledRanks_;
     mutable std::mutex ssdMutex_;
 };

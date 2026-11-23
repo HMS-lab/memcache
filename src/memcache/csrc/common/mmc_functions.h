@@ -14,13 +14,18 @@
 #define MEM_FABRIC_HYBRID_SMEM_COMMON_FUNC_H
 
 #include <algorithm>
+#include <arpa/inet.h>
 #include <climits>
 #include <cstddef>
 #include <cstdint>
 #include <dlfcn.h>
+#include <ifaddrs.h>
 #include <iomanip>
+#include <net/if.h>
+#include <netinet/in.h>
 #include <sstream>
 #include <string>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include "mmc_types.h"
 #include "mmc_logger.h"
@@ -279,6 +284,110 @@ template<typename T>
 inline void SetBits(T &value, T mask)
 {
     value |= mask;
+}
+
+/**
+ * @brief Identify virtual or non-business network interfaces to exclude from the local IP fallback.
+ * @param name Interface name, such as eth0, docker0, vethxxxx, or br-xxxx.
+ * @return true if the interface should be skipped.
+ */
+inline bool IsVirtualNetDeviceName(const std::string &name)
+{
+    static const char *const kVirtualPrefixes[] = {"lo",  "docker",  "veth", "br-",   "tun",  "tap",
+                                                   "cni", "flannel", "cali", "virbr", "kube", "dummy"};
+    for (const auto *prefix : kVirtualPrefixes) {
+        const std::string p(prefix);
+        if (name.compare(0, p.size(), p) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * @brief Find an available local IP on Linux, for example when backend_id is not configured.
+ *
+ * Use getifaddrs() to enumerate local interface addresses (via netlink RTM_GETADDR).
+ * Each ifaddrs list entry includes the interface name, flags, and address. Select as follows:
+ *   1. Skip down, loopback, and common virtual interfaces (see IsVirtualNetDeviceName).
+ *   2. Prefer IPv4; fall back to IPv6 only if no IPv4 exists (skip link-local, loopback, and unspecified addresses).
+ *   3. Prefer eth0 among otherwise equal candidates; use the first available interface if eth0 is absent.
+ *
+ * @return An address such as "192.168.0.55" or "fd00::1", or an empty string if none is found.
+ * @note Containers with net=host use the host address; separate network namespaces use the container address.
+ *       Multiple instances on the same machine still share a value, as required for a shared backendId.
+ */
+inline std::string TryFindLinuxFirstIp()
+{
+    struct ifaddrs *ifap = nullptr;
+    if (getifaddrs(&ifap) != 0) {
+        MMC_LOG_DEBUG("TryFindLinuxFirstIp: getifaddrs failed");
+        return std::string();
+    }
+
+    std::string firstIpv4;
+    std::string eth0Ipv4;
+    std::string firstIpv6;
+    std::string eth0Ipv6;
+
+    for (auto *ifa = ifap; ifa != nullptr; ifa = ifa->ifa_next) {
+        if (ifa->ifa_addr == nullptr) {
+            continue;
+        }
+        const int family = ifa->ifa_addr->sa_family;
+        if (family != AF_INET && family != AF_INET6) {
+            continue;
+        }
+        if ((ifa->ifa_flags & IFF_UP) == 0 || (ifa->ifa_flags & IFF_LOOPBACK) != 0) {
+            continue;
+        }
+        const std::string devName = (ifa->ifa_name != nullptr) ? ifa->ifa_name : "";
+        if (IsVirtualNetDeviceName(devName)) {
+            continue;
+        }
+
+        char buf[INET6_ADDRSTRLEN] = {0};
+        if (family == AF_INET) {
+            auto *addr4 = reinterpret_cast<struct sockaddr_in *>(ifa->ifa_addr);
+            if (inet_ntop(AF_INET, &addr4->sin_addr, buf, sizeof(buf)) == nullptr) {
+                continue;
+            }
+            if (firstIpv4.empty()) {
+                firstIpv4 = buf;
+            }
+            if (eth0Ipv4.empty() && devName == "eth0") {
+                eth0Ipv4 = buf;
+            }
+            continue;
+        }
+
+        auto *addr6 = reinterpret_cast<struct sockaddr_in6 *>(ifa->ifa_addr);
+        const struct in6_addr *in6 = &addr6->sin6_addr;
+        if (IN6_IS_ADDR_LINKLOCAL(in6) || IN6_IS_ADDR_LOOPBACK(in6) || IN6_IS_ADDR_UNSPECIFIED(in6)) {
+            continue;
+        }
+        if (inet_ntop(AF_INET6, in6, buf, sizeof(buf)) == nullptr) {
+            continue;
+        }
+        if (firstIpv6.empty()) {
+            firstIpv6 = buf;
+        }
+        if (eth0Ipv6.empty() && devName == "eth0") {
+            eth0Ipv6 = buf;
+        }
+    }
+    freeifaddrs(ifap);
+
+    if (!eth0Ipv4.empty()) {
+        return eth0Ipv4;
+    }
+    if (!firstIpv4.empty()) {
+        return firstIpv4;
+    }
+    if (!eth0Ipv6.empty()) {
+        return eth0Ipv6;
+    }
+    return firstIpv6;
 }
 
 } // namespace mmc

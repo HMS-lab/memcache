@@ -83,11 +83,11 @@ vllm-ascend官方镜像中已安装memcache及其配套，可通过如下方式�
 pip list | grep mem
 ```
 
-目前推荐的稳定版本为1.1.5，安装命令为：
+The recommended stable version is 1.3.1. Install it with:
 
 ```shell
-pip install memfabric_hybrid==1.1.5
-pip install memcache_hybrid==1.1.5
+pip install memfabric_hybrid==1.3.1 --force-reinstall --no-deps
+pip install memcache_hybrid==1.3.1 --force-reinstall --no-deps
 ```
 
 如果因网络原因无法在线安装，可以在 [PyPI · The Python Package Index](https://pypi.org/) 下载安装包离线安装。

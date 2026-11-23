@@ -8,6 +8,7 @@
 
 ## Testing
 
+- When adding or modifying a unit test, add a comment directly above the test definition describing the specific scenario and expected result.
 - **All C++ Unit Tests (UT)**: `bash script/run_ut.sh` — performs a DEBUG build, executes `output/bin/ut/test_mmc_test`, and generates coverage reports in `output/coverage`.
 - **Filter by Name**: `bash script/run_ut.sh meta_service` — the script will pass the `--gtest_filter=*meta_service*` argument.
 - Coverage Thresholds (enforced via `script/run_ut.sh`): At least 70% line coverage and 40% branch coverage for the `src/memcache` directory.

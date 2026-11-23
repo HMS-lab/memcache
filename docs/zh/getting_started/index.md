@@ -16,4 +16,4 @@
 * [特性指南](../user_guide/feature_guide/DRAM+SSD多级池化/特性介绍.md)：多级池化、异步刷盘、集群扩缩容等特性说明。
 * [部署指南](../user_guide/deployment_guide/怎么部署一个memcache的HA集群-etcd方案.md)：HA 主备高可用、UBSIO-CSI、集群扩缩容等部署方案。
 * [模型教程](tutorials/models/DSV4-Flash+A2单机.md)：DSV4-Flash、GLM 系列等端到端部署案例。
-* [常见问题](FAQ.md)：部署与运行时问题排查。
+* [Frequently asked questions](FAQ/index.md): Deployment and runtime troubleshooting.

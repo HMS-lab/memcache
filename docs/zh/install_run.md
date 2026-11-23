@@ -56,7 +56,7 @@ After a successful build, the run package is placed in `output/`, and the wheel 
 
 ### Install MemFabric
 
-MemCache depends on MemFabric, which must be installed first. See the [MemFabric installation guide](https://gitcode.com/Ascend/memfabric_hybrid/blob/develop/docs/zh/installation.md).
+MemCache depends on MemFabric, which must be installed first. See the [MemFabric installation guide](https://memfabric-hybrid.readthedocs.io/zh-cn/latest/wiki/quick_start/installation/).
 
 ### Install MemCache
 

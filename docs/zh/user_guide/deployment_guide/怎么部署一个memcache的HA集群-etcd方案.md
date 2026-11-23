@@ -92,8 +92,8 @@ ls /usr/local/memfabric_hybrid/latest/etcd/lib64/libetcd_client_v3.so
 │   └── libhcom.so
 ├── logs
 │   └── logs
-└── memfabric_hybrid-1.0.0_linux_aarch64.run  # 请修改为实际路径和文件名
-└── memcache_hybrid-1.0.0_linux_aarch64.run   # 请修改为实际路径和文件名
+└── memfabric_hybrid-1.3.1_linux_aarch64.run  # Replace with the actual path and filename
+└── memcache_hybrid-1.3.1_linux_aarch64.run   # Replace with the actual path and filename
 ```
 
 ### 2.1 配置文件
@@ -101,8 +101,8 @@ ls /usr/local/memfabric_hybrid/latest/etcd/lib64/libetcd_client_v3.so
 先往config目录下拷贝一份配置文件模板（配置文件可以通过安装run包方式获取）
 
 ```shell
-bash memfabric_hybrid-1.0.0_linux_aarch64.run  # 请修改为实际路径和文件名
-bash memcache_hybrid-1.0.0_linux_aarch64.run   # 请修改为实际路径和文件名
+bash memfabric_hybrid-1.3.1_linux_aarch64.run  # Replace with the actual path and filename
+bash memcache_hybrid-1.3.1_linux_aarch64.run   # Replace with the actual path and filename
 cp -rf /usr/local/memcache_hybrid/latest/config/* /home/meta/config
 ```
 
@@ -312,8 +312,8 @@ spec:
           args:
             - |
               source /usr/local/Ascend/ascend-toolkit/set_env.sh && \
-              bash /home/meta/memfabric_hybrid-1.0.0_linux_aarch64.run && \
-              bash /home/meta/memcache_hybrid-1.0.0_linux_aarch64.run && \
+              bash /home/meta/memfabric_hybrid-1.3.1_linux_aarch64.run && \
+              bash /home/meta/memcache_hybrid-1.3.1_linux_aarch64.run && \
               echo "install end." && \
               sleep 20 && \
               exec /usr/local/memcache_hybrid/latest/aarch64-linux/bin/mmc_meta_service

@@ -540,6 +540,26 @@ protected:
     }
 };
 
+// At or below the low DRAM watermark, normal LRU retains all keys and invokes no eviction callbacks.
+TEST_F(TestEvictYield, EliminationSkipsAtOrBelowLowWatermark)
+{
+    constexpr size_t keyCount = 100;
+    constexpr uint16_t highWatermark = 90;
+    constexpr uint16_t lowWatermark = 80;
+    constexpr uint16_t belowLowWatermark = 60;
+    InsertKeys(keyCount);
+    std::atomic<size_t> evictCount{0};
+    auto moveFunc = MakeMoveFunc(evictCount);
+
+    for (const auto current : {belowLowWatermark, lowWatermark}) {
+        SCOPED_TRACE(testing::Message() << "current=" << current);
+        container->MultiLevelElimination(MakeWatermarks(highWatermark, lowWatermark), {MEDIA_DRAM}, {current},
+                                         moveFunc);
+        ASSERT_EQ(evictCount.load(), 0U);
+        ASSERT_EQ(container->GetKeyCount(MEDIA_DRAM), keyCount);
+    }
+}
+
 TEST_F(TestEvictYield, YieldDisabledByDefault)
 {
     const size_t numKeys = 100;

@@ -16,7 +16,7 @@
 
 【NPU驱动固件】：最低要求为25.5.1 [下载地址](https://www.hiascend.com/hardware/firmware-drivers/old/community?product=4&model=32&cann=All&driver=Ascend+HDK+25.5.1)
 
-【OS PAGESIZE】：使用命令 `getconf PAGESIZE` 查询系统页大小，结果为4K方可使用memcache。若查询结果为64K，需要考虑更换OS。
+**OS PAGESIZE**: Run `getconf PAGESIZE` to check the system page size. A 64K page size requires MemCache/MemFabric 1.3.1 or later.
 
 ## 部署
 
@@ -34,11 +34,11 @@ vllm-ascend官方镜像中已安装memcache及其配套，可通过如下方式�
 pip list | grep mem
 ```
 
-目前推荐的稳定版本为1.1.5，安装命令为：
+The recommended stable version is 1.3.1. Install it with:
 
 ```shell
-pip install memfabric_hybrid==1.1.5
-pip install memcache_hybrid==1.1.5
+pip install memfabric_hybrid==1.3.1 --force-reinstall --no-deps
+pip install memcache_hybrid==1.3.1 --force-reinstall --no-deps
 ```
 
 如果因网络原因无法在线安装，可以在 [PyPI · The Python Package Index](https://pypi.org/) 下载安装包离线安装。

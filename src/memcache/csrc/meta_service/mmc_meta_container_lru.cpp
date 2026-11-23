@@ -678,8 +678,9 @@ public:
 
             uint16_t high = evictWatermarks[mediaType].first;
             uint16_t low = evictWatermarks[mediaType].second;
-            if (high == 0) {
-                MMC_LOG_WARN("Skip eviction for mediaType=" << mediaType << ", evictThresholdHigh is 0");
+            if (high == 0 || nowThreshold <= low) {
+                MMC_LOG_WARN("Skip eviction for mediaType=" << mediaType << ", high=" << high << ", low=" << low
+                                                            << ", current=" << nowThreshold);
                 continue;
             }
 

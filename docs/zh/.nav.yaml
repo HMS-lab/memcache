@@ -23,12 +23,12 @@ nav:
               - A3 4机PD分离: getting_started/tutorials/models/GLM-5.2+A3-4机PD分离.md
       - 评测教程:
           - 多轮对话参考测试: getting_started/tutorials/evaluation/多轮对话参考测试.md
-      - 常见问题: getting_started/FAQ.md
   - 用户指南:
       - 特性指南:
           - 多级池化:
               - 特性介绍: user_guide/feature_guide/DRAM+SSD多级池化/特性介绍.md
               - 配置指南: user_guide/feature_guide/DRAM+SSD多级池化/配置指南.md
+              - Remote shared storage: user_guide/feature_guide/DRAM+SSD多级池化/对接远端共享存储.md
               - Kubernetes配置示例: user_guide/feature_guide/DRAM+SSD多级池化/Kubernetes配置示例.md
               - UBSIO-K8s-CSI-Raw-Block解决方案: user_guide/feature_guide/DRAM+SSD多级池化/UBSIO-K8s-CSI-Raw-Block解决方案.md
               - 多级池化GLM-5.2+A3-4机PD分离: user_guide/feature_guide/DRAM+SSD多级池化/多级池化GLM-5.2+A3-4机PD分离.md
@@ -67,6 +67,16 @@ nav:
           - C++ API: memcache_c++_api.md
           - Python API: memcache_python_api.md
           - RESTful API: memcache_restful_api.md
+  - FAQ:
+      - Overview: getting_started/FAQ/index.md
+      - "1. HalMemCreate fails (ret: 6)": getting_started/FAQ/halmemcreate.md
+      - 2. Store initialization fails: getting_started/FAQ/store_init_failed.md
+      - 3. Cross-node HOST_RDMA data inconsistency: getting_started/FAQ/host_rdma_data_consistency.md
+      - 4. Pool size mismatch causes AddVaInfo failed: getting_started/FAQ/pool_size_mismatch.md
+      - 5. Frequent HA master switches: getting_started/FAQ/ha_master_switch.md
+      - 6. Mixing MemCache and MemFabric Python environments: getting_started/FAQ/python_env_mismatch.md
+      - 7. Lease expiration during inference: getting_started/FAQ/lease_expired.md
+      - 8. Memory pool initialization reports AutoRanking failed: getting_started/FAQ/auto_ranking_failed.md
   - 社区:
       - 社区首页: community/index.md
       - 版本规划: community/Roadmap.md

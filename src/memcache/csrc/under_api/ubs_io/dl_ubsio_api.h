@@ -40,6 +40,7 @@ using ubsio_batch_get_lengthFunc = int32_t (*)(const char **, uint32_t, size_t *
 using UbsioBatchStatFunc = int32_t (*)(const char **, uint32_t, UbsioKvBatchStat *, uint32_t);
 using ubsio_batch_free_addressFunc = int32_t (*)(void **, uint32_t);
 using ubsio_get_resource_infoFunc = int32_t (*)(UbsioResourceInfo *);
+using UbsioGetUnderFsTypeFunc = int32_t (*)(UbsioUnderFsType *);
 
 // UBS IO metadata event callback types (C ABI for cross-so stability)
 enum UbsioMetaEventTypeC {
@@ -75,6 +76,14 @@ public:
     static void CleanupLibrary();
 
     static Result UbsioClientInit(int32_t deviceId, const std::string &confPath = "");
+
+    static inline Result UbsioGetUnderFsType(UbsioUnderFsType &type)
+    {
+        if (pUbsioGetUnderFsType == nullptr) {
+            return MMC_NOT_INITIALIZED;
+        }
+        return pUbsioGetUnderFsType(&type);
+    }
 
     static inline Result UbsioPut(const char *key, void *buf, size_t length, uint32_t flags)
     {
@@ -241,6 +250,7 @@ private:
     static ubsio_register_meta_event_callbackFunc pUbsioRegisterMetaEventCallback;
     static ubsio_kv_cache_exitFunc pUbsioKvCacheExit;
     static ubsio_get_resource_infoFunc pUbsioGetResourceInfo;
+    static UbsioGetUnderFsTypeFunc pUbsioGetUnderFsType;
     static ubsio_scan_keyFunc pUbsioKvCacheScanKey;
     static ubsio_free_scan_key_resultFunc pUbsioKvCacheFreeScanKeyResult;
 };

@@ -264,3 +264,189 @@ TEST_F(TestUbsIoProxy, BatchStatReturnsSizesAndPerKeyResults)
     EXPECT_EQ(results.back(), MMC_UNMATCHED_KEY);
     EXPECT_EQ(sizes.back(), 0U);
 }
+
+namespace {
+template<typename Tag, typename Tag::Type member>
+struct MetadataProxyAccessor {
+    friend typename Tag::Type MetadataMember(Tag)
+    {
+        return member;
+    }
+};
+struct MetadataQuerySymbol {
+    using Type = UbsioGetUnderFsTypeFunc *;
+    friend Type MetadataMember(MetadataQuerySymbol);
+};
+struct MetadataInitSymbol {
+    using Type = ubsio_client_initFunc *;
+    friend Type MetadataMember(MetadataInitSymbol);
+};
+struct MetadataCallbackSymbol {
+    using Type = ubsio_register_meta_event_callbackFunc *;
+    friend Type MetadataMember(MetadataCallbackSymbol);
+};
+struct MetadataExitSymbol {
+    using Type = ubsio_kv_cache_exitFunc *;
+    friend Type MetadataMember(MetadataExitSymbol);
+};
+template struct MetadataProxyAccessor<MetadataQuerySymbol, &DlUbsioApi::pUbsioGetUnderFsType>;
+template struct MetadataProxyAccessor<MetadataInitSymbol, &DlUbsioApi::pUbsioClientInit>;
+template struct MetadataProxyAccessor<MetadataCallbackSymbol, &DlUbsioApi::pUbsioRegisterMetaEventCallback>;
+template struct MetadataProxyAccessor<MetadataExitSymbol, &DlUbsioApi::pUbsioKvCacheExit>;
+UbsioMetaEventCallbackC gMetadataCallback = nullptr;
+void *gMetadataContext = nullptr;
+UbsioUnderFsType gUnderFsType = UBSIO_UNDERFS_NONE;
+Result gMetadataQueryResult = MMC_OK;
+bool gMetadataInitAttempted = false;
+size_t gMetadataExitCount = 0;
+constexpr uint32_t kMetadataEventCount = 1;
+
+void SendMetadataDelete(const std::string &key)
+{
+    UbsioMetaEventC event{UBSIO_META_DELETE_C, key.c_str(), static_cast<uint32_t>(key.size())};
+    if (gMetadataCallback != nullptr) {
+        gMetadataCallback(gMetadataContext, &event, kMetadataEventCount);
+    }
+}
+
+int32_t MetadataInit(int32_t)
+{
+    gMetadataInitAttempted = true;
+    return MMC_OK;
+}
+
+int32_t MetadataQuery(UbsioUnderFsType *type)
+{
+    if (type == nullptr) {
+        return MMC_INVALID_PARAM;
+    }
+    *type = gUnderFsType;
+    return gMetadataQueryResult;
+}
+
+int32_t MetadataRegisterCallback(UbsioMetaEventCallbackC callback, void *context)
+{
+    EXPECT_FALSE(gMetadataInitAttempted);
+    gMetadataCallback = callback;
+    gMetadataContext = context;
+    return MMC_OK;
+}
+
+void MetadataExit()
+{
+    ++gMetadataExitCount;
+    gMetadataCallback = nullptr;
+    gMetadataContext = nullptr;
+}
+
+void InstallMetadataProxyStubs()
+{
+    *MetadataMember(MetadataInitSymbol{}) = MetadataInit;
+    *MetadataMember(MetadataQuerySymbol{}) = MetadataQuery;
+    *MetadataMember(MetadataCallbackSymbol{}) = MetadataRegisterCallback;
+    *MetadataMember(MetadataExitSymbol{}) = MetadataExit;
+    gMetadataQueryResult = MMC_OK;
+    gMetadataInitAttempted = false;
+    gMetadataExitCount = 0;
+}
+
+} // namespace
+
+TEST(MetadataProxyTest, RegistersDeleteCallbackForAllUnderFsTypes)
+{
+    for (auto type :
+         {UBSIO_UNDERFS_NONE, UBSIO_UNDERFS_CEPH, UBSIO_UNDERFS_HDFS, UBSIO_UNDERFS_LOCAL, UBSIO_UNDERFS_SHARED}) {
+        const bool separated = type == UBSIO_UNDERFS_SHARED;
+        ASSERT_EQ(DlUbsioApi::LoadLibrary(), MMC_OK);
+        InstallMetadataProxyStubs();
+        gUnderFsType = type;
+        MmcUbsIoProxy proxy("metadata_events");
+        std::vector<std::vector<std::string>> batches;
+        proxy.SetMetaEventCallback([&](int type, const std::vector<std::string> &keys) {
+            EXPECT_EQ(type, UBSIO_META_DELETE_C);
+            batches.push_back(keys);
+        });
+        EXPECT_EQ(proxy.InitUbsIo(), MMC_OK);
+        EXPECT_EQ(proxy.IsSsdMetadataSeparated(), separated);
+        EXPECT_NE(gMetadataCallback, nullptr);
+        SendMetadataDelete("runtime");
+        ASSERT_EQ(batches.size(), kMetadataEventCount);
+        EXPECT_EQ(batches.front(), (std::vector<std::string>{"runtime"}));
+        proxy.SetMetaEventCallback(nullptr);
+        proxy.DestroyUbsIo();
+        EXPECT_FALSE(proxy.IsSsdMetadataSeparated());
+        EXPECT_EQ(gMetadataExitCount, kMetadataEventCount);
+    }
+}
+
+TEST(MetadataProxyTest, InitializesWithoutMetaEventCallback)
+{
+    for (auto type : {UBSIO_UNDERFS_NONE, UBSIO_UNDERFS_LOCAL, UBSIO_UNDERFS_SHARED}) {
+        ASSERT_EQ(DlUbsioApi::LoadLibrary(), MMC_OK);
+        InstallMetadataProxyStubs();
+        gUnderFsType = type;
+        MmcUbsIoProxy proxy("metadata_no_callback");
+        EXPECT_EQ(proxy.InitUbsIo(), MMC_OK);
+        EXPECT_TRUE(proxy.IsReady());
+        EXPECT_TRUE(gMetadataInitAttempted);
+        EXPECT_EQ(proxy.IsSsdMetadataSeparated(), type == UBSIO_UNDERFS_SHARED);
+        EXPECT_EQ(gMetadataCallback, nullptr);
+        EXPECT_EQ(gMetadataContext, nullptr);
+        proxy.DestroyUbsIo();
+        EXPECT_EQ(gMetadataExitCount, kMetadataEventCount);
+    }
+}
+
+TEST(MetadataProxyTest, QueryFailureUsesDefaultAggregatedMetadata)
+{
+    for (const auto queryResult : {MMC_ERROR, MMC_NOT_INITIALIZED}) {
+        ASSERT_EQ(DlUbsioApi::LoadLibrary(), MMC_OK);
+        InstallMetadataProxyStubs();
+        gUnderFsType = UBSIO_UNDERFS_SHARED;
+        gMetadataQueryResult = queryResult;
+        if (queryResult == MMC_NOT_INITIALIZED) {
+            *MetadataMember(MetadataQuerySymbol{}) = nullptr;
+        }
+        MmcUbsIoProxy proxy("metadata_failure");
+        bool callbackInvoked = false;
+        proxy.SetMetaEventCallback([&](int, const std::vector<std::string> &) { callbackInvoked = true; });
+        EXPECT_EQ(proxy.InitUbsIo(), MMC_OK);
+        EXPECT_TRUE(proxy.IsReady());
+        EXPECT_FALSE(proxy.IsSsdMetadataSeparated());
+        EXPECT_FALSE(callbackInvoked);
+        EXPECT_NE(gMetadataCallback, nullptr);
+        EXPECT_EQ(gMetadataExitCount, 0U);
+        SendMetadataDelete("runtime");
+        EXPECT_TRUE(callbackInvoked);
+        proxy.SetMetaEventCallback(nullptr);
+        proxy.DestroyUbsIo();
+        EXPECT_EQ(gMetadataExitCount, kMetadataEventCount);
+    }
+}
+
+TEST(MetadataProxyTest, UnknownUnderFsTypeUsesAggregatedMetadata)
+{
+    constexpr auto beyondRange = static_cast<UbsioUnderFsType>(UBSIO_UNDERFS_BUTT + 1);
+    for (auto unknownType : {UBSIO_UNDERFS_BUTT, beyondRange}) {
+        ASSERT_EQ(DlUbsioApi::LoadLibrary(), MMC_OK);
+        InstallMetadataProxyStubs();
+        gUnderFsType = unknownType;
+        UbsioUnderFsType type = UBSIO_UNDERFS_LOCAL;
+        EXPECT_EQ(DlUbsioApi::UbsioGetUnderFsType(type), MMC_OK);
+        EXPECT_EQ(type, unknownType);
+        MmcUbsIoProxy proxy("unknown_underfs_type");
+        std::vector<std::string> deletedKeys;
+        proxy.SetMetaEventCallback([&](int, const std::vector<std::string> &keys) {
+            deletedKeys.insert(deletedKeys.end(), keys.begin(), keys.end());
+        });
+        EXPECT_EQ(proxy.InitUbsIo(), MMC_OK);
+        EXPECT_TRUE(proxy.IsReady());
+        EXPECT_FALSE(proxy.IsSsdMetadataSeparated());
+        SendMetadataDelete("runtime");
+        EXPECT_EQ(deletedKeys, (std::vector<std::string>{"runtime"}));
+        proxy.SetMetaEventCallback(nullptr);
+        proxy.DestroyUbsIo();
+        EXPECT_FALSE(proxy.IsReady());
+        EXPECT_EQ(gMetadataExitCount, kMetadataEventCount);
+    }
+}

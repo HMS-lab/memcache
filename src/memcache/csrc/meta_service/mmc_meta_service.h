@@ -57,17 +57,17 @@ public:
     // bm            Base addresses of the memory pools; same length as mediaType.
     // capacity      Pool capacities; same length as mediaType.
     // blobList      Existing blocks supplied at registration for metadata recovery.
-    // storageEnabled Whether to enable the SSD storage pool.
+    // storageOptions Whether to enable the SSD storage pool and separate its metadata.
     // backendId     Node backendId, usually connection IP/domain. Ideally, LocalServices on the same machine
     // share one backendId. Used for 1) target selection at backendId granularity in node-affinity allocation;
     //               2) kvevent key storage/deletion events and broadcasts.
-    // enableMaxValueMode Whether to enable padding mode to address external fragmentation.
     // role          Node role: "writer" (for example, P, writes data) / "memory" (for example, D,
     //               contributes memory without writing). Node-affinity distribution tables are built by role
     //               to distribute writers' data evenly to memory nodes.
     Result BmRegister(uint32_t rank, std::vector<uint16_t> mediaType, std::vector<uint64_t> bm,
                       std::vector<uint64_t> capacity, std::vector<std::pair<std::string, MmcMemBlobDesc>> &blobList,
-                      bool storageEnabled = false, const std::string &backendId = "", const std::string &role = "");
+                      const StorageOptions &storageOptions = {}, const std::string &backendId = "",
+                      const std::string &role = "");
 
     Result BmUnregister(uint32_t rank, uint16_t mediaType);
 

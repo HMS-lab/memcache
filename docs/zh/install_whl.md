@@ -7,7 +7,6 @@ This guide explains how to install and use the wheel package. It is intended for
 The wheel package is published on [PyPI](https://pypi.org/project/memcache-hybrid/#files) and can be installed directly:
 
 ```bash
-# Install the latest version
 pip install memcache_hybrid
 ```
 
@@ -35,7 +34,7 @@ pip show memfabric_hybrid
 pip install memfabric_hybrid==1.0.8
 ```
 
-See the [MemFabric installation guide](https://gitcode.com/Ascend/memfabric_hybrid/blob/develop/docs/zh/installation.md) for details.
+See the [MemFabric installation guide](https://memfabric-hybrid.readthedocs.io/zh-cn/latest/wiki/quick_start/installation/) for details.
 
 ### Run the Software
 
@@ -138,7 +137,6 @@ Use environment variables to specify the configuration file paths.
 - Wheels include UBSIO disk management by default. To use SSDs, update the configuration and set this environment variable; see the SSD usage guide.
 
 ```bash
-export UBSIO_CONFIG_PATH=/usr/local/lib/python3.11/site-packages/memcache_hybrid/config/ubsio.conf
 export MMC_META_CONFIG_PATH=/usr/local/lib/python3.11/site-packages/memcache_hybrid/config/mmc-meta.conf
 export MMC_LOCAL_CONFIG_PATH=/usr/local/lib/python3.11/site-packages/memcache_hybrid/config/mmc-local.conf
 ```

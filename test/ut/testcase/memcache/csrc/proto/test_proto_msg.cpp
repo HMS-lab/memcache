@@ -99,25 +99,32 @@ TEST_F(TestProtoMsg, BlobDeleteRequest_MsgIdMatchesMetaNetClientRegistration)
 
 TEST_F(TestProtoMsg, BmRegisterRequestStorageEnabledRoundTrips)
 {
-    BmRegisterRequest request;
-    request.storageEnabled_ = true;
-
-    NetMsgPacker packer;
-    ASSERT_EQ(request.Serialize(packer), MMC_OK);
-    BmRegisterRequest decoded;
-    NetMsgUnpacker unpacker(packer.String());
-    ASSERT_EQ(decoded.Deserialize(unpacker), MMC_OK);
-
-    EXPECT_TRUE(decoded.storageEnabled_);
+    for (bool separated : {false, true}) {
+        BmRegisterRequest request;
+        request.backendId_ = "storage_backend";
+        request.role_ = "memory";
+        request.storageEnabled_ = true;
+        request.ssdMetadataSeparated_ = separated;
+        NetMsgPacker packer;
+        ASSERT_EQ(request.Serialize(packer), MMC_OK);
+        BmRegisterRequest decoded;
+        NetMsgUnpacker unpacker(packer.String());
+        ASSERT_EQ(decoded.Deserialize(unpacker), MMC_OK);
+        EXPECT_EQ(decoded.backendId_, request.backendId_);
+        EXPECT_EQ(decoded.role_, request.role_);
+        EXPECT_TRUE(decoded.storageEnabled_);
+        EXPECT_EQ(decoded.ssdMetadataSeparated_, separated);
+    }
 }
 
-TEST_F(TestProtoMsg, BmRegisterRequestKeepsOriginalPayloadLayout)
+TEST_F(TestProtoMsg, BmRegisterRequestRejectsPayloadWithoutMetadataSeparation)
 {
     NetMsgPacker packer;
     const int16_t msgVer = 0;
     const int16_t msgId = ML_BM_REGISTER_REQ;
     const uint32_t destRankId = 0;
-    const uint32_t rank = 9;
+    constexpr uint32_t registrationRank = 9;
+    const uint32_t rank = registrationRank;
     const std::string backendId = "legacy_backend";
     const std::string role = "memory";
     const std::vector<uint16_t> mediaTypes;
@@ -139,36 +146,7 @@ TEST_F(TestProtoMsg, BmRegisterRequestKeepsOriginalPayloadLayout)
 
     BmRegisterRequest decoded;
     NetMsgUnpacker unpacker(packer.String());
-    ASSERT_EQ(decoded.Deserialize(unpacker), MMC_OK);
-    EXPECT_EQ(decoded.rank_, rank);
-    EXPECT_EQ(decoded.backendId_, backendId);
-    EXPECT_EQ(decoded.role_, role);
-    EXPECT_TRUE(decoded.storageEnabled_);
-}
-
-TEST_F(TestProtoMsg, GetExternalConfigMessagesRoundTrip)
-{
-    constexpr int16_t getExternalConfigMsgId = 30;
-    GetExternalConfigRequest request;
-    NetMsgPacker requestPacker;
-    ASSERT_EQ(request.Serialize(requestPacker), MMC_OK);
-    GetExternalConfigRequest decodedRequest;
-    NetMsgUnpacker requestUnpacker(requestPacker.String());
-    ASSERT_EQ(decodedRequest.Deserialize(requestUnpacker), MMC_OK);
-    EXPECT_EQ(decodedRequest.msgId, ML_GET_EXTERNAL_CONFIG_REQ);
-
-    GetExternalConfigResponse response;
-    response.ret_ = MMC_OK;
-    response.ssdMetadataMode_ = MMC_SSD_METADATA_SEPARATED;
-    NetMsgPacker responsePacker;
-    ASSERT_EQ(response.Serialize(responsePacker), MMC_OK);
-    GetExternalConfigResponse decodedResponse;
-    NetMsgUnpacker responseUnpacker(responsePacker.String());
-    ASSERT_EQ(decodedResponse.Deserialize(responseUnpacker), MMC_OK);
-    EXPECT_EQ(decodedResponse.ret_, MMC_OK);
-    EXPECT_EQ(decodedResponse.ssdMetadataMode_, MMC_SSD_METADATA_SEPARATED);
-    EXPECT_EQ(static_cast<int16_t>(ML_GET_EXTERNAL_CONFIG_REQ), getExternalConfigMsgId);
-    EXPECT_EQ(static_cast<int16_t>(ML_GET_EXTERNAL_CONFIG_REQ), static_cast<int16_t>(ML_GET_EXTERNAL_CONFIG_RESP));
+    EXPECT_EQ(decoded.Deserialize(unpacker), MMC_ERROR);
 }
 
 TEST_F(TestProtoMsg, BatchStorageStatMessagesRoundTrip)
@@ -196,7 +174,6 @@ TEST_F(TestProtoMsg, BatchStorageStatMessagesRoundTrip)
     EXPECT_EQ(static_cast<int16_t>(LM_BATCH_STORAGE_STAT_REQ), batchStorageStatMsgId);
     EXPECT_EQ(static_cast<int16_t>(LM_BATCH_STORAGE_STAT_REQ), static_cast<int16_t>(LM_BATCH_STORAGE_STAT_RESP));
     EXPECT_NE(static_cast<int16_t>(LM_BATCH_STORAGE_STAT_REQ), static_cast<int16_t>(ML_PREFETCH_REQ));
-    EXPECT_NE(static_cast<int16_t>(ML_GET_EXTERNAL_CONFIG_REQ), static_cast<int16_t>(ML_EVICT_REQ));
 }
 
 // BatchQueryResponse oversized container guard

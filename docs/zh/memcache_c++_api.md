@@ -226,13 +226,27 @@ Delete the data object with the specified key.
 
 **parameter**
 
-- `key`: Data key (length < 256 bytes).
-- `flags`: Optional flags; default `0` deletes immediately. `MMC_REMOVE_FLAG_LAZY` (`1`) marks a key for priority eviction instead of deleting it immediately. Keys are evicted in the order they were first marked. Get/Exist/Query access restores normal recency and clears the mark. Demotion to a lower storage tier under memory pressure completes the deletion; the lower tier treats the data normally. For an SSD-only key (for example, after KEEP_SSD or eviction demotion), lazy deletion without KEEP_SSD becomes immediate full deletion because there is no memory LRU position to demote. With sharded LRU (`lruType=sharded_lru`), lazy keys still precede normal keys. Automatic eviction follows first-marked order within each shard, with no global FIFO guarantee across shards. Defragmentation and forced-release paths that process candidate lists only guarantee priority inclusion of lazy keys, not candidate order. `MMC_REMOVE_FLAG_KEEP_SSD` (`2`) releases only memory-tier (HBM/DRAM) data and metadata, retaining the SSD replica and its metadata. This demotes the key to SSD-only; a subsequent Get can still find it and rewarm it from SSD. Without an SSD replica, this is equivalent to default deletion. Setting both `MMC_REMOVE_FLAG_LAZY` and `MMC_REMOVE_FLAG_KEEP_SSD` requests lazy deletion of the memory tier while retaining the SSD replica: the memory tier receives priority eviction, and eviction releases only memory while preserving SSD data and metadata. An SSD-only key returns success without deletion; a key with only memory replicas behaves like ordinary lazy deletion.
+- `key`: Data key; must be nonempty and at most 256 bytes.
+- `flags`: Deletion flags; default `0`. Unknown bits return `MMC_INVALID_PARAM`:
+  - `0` (default): Remove the index entry immediately; release underlying memory and registered SSD replicas asynchronously in the background (wait for active leases to be released or expire).
+  - `MMC_REMOVE_FLAG_LAZY` (`1`): Lazy deletion. Keep the index entry and mark the key for priority eviction, ordered by its first lazy-deletion mark.
+    - Access through `GetInto`/`IsExist`/`GetKeyInfo`/`BatchAddLease` restores recency and clears the mark.
+    - Data demoted to a lower tier is treated normally. For SSD-only keys without `KEEP_SSD`, use default deletion.
+    - With `lruType=sharded_lru`, ordering is guaranteed only within each shard; there is no global FIFO guarantee across shards or candidate-list paths.
+  - `MMC_REMOVE_FLAG_KEEP_SSD` (`2`): Release only the memory tier and retain the SSD replica; without an SSD replica, use default deletion.
+  - `MMC_REMOVE_FLAG_LAZY | MMC_REMOVE_FLAG_KEEP_SSD` (`3`): Lazily delete the memory tier and retain the SSD replica during eviction; SSD-only keys return success immediately.
+
+**Notes**
+
+- **UBS IO / SSD deletion scope**: Asynchronously attempt deletion only for `MEDIA_SSD` replicas registered with MetaService (failures produce warnings without retries).
+  - `metadata_mode=aggregated`: Asynchronously delete SSD replicas whose flush has completed and whose metadata has been registered. In-flight flushes without registered metadata do not trigger UBS IO deletion.
+  - `metadata_mode=separated`: MetaService does not register SSD metadata. Default deletion and `KEEP_SSD` clear only the memory tier; UBS IO / SSD data is retained.
+- **Local cache**: A return value of `0` clears GVA tracking records in this process, including successful lazy deletion.
 
 **return value**
 
-- `0`: Success
-- Others: failed
+- `0`: Success (excludes background asynchronous release and SSD deletion results).
+- Otherwise: A negative error code, such as `MMC_INVALID_PARAM` or `MMC_UNMATCHED_KEY`.
 
 #### IsExist
 
@@ -340,16 +354,51 @@ virtual std::vector<int> BatchRemove(const std::vector<std::string> &keys, uint3
 
 **Function**
 
-Delete in bulk.
+Delete multiple keys in order. The server processes each key separately; the batch is not atomic.
 
 **parameter**
 
-- `keys`: List of data keys (each key length < 256 bytes).
-- `flags`: Optional flags; default `0` deletes immediately. `MMC_REMOVE_FLAG_LAZY` (`1`) marks a key for priority eviction instead of deleting it immediately. Keys are evicted in the order they were first marked. Get/Exist/Query access restores normal recency and clears the mark. Demotion to a lower storage tier under memory pressure completes the deletion; the lower tier treats the data normally. For an SSD-only key (for example, after KEEP_SSD or eviction demotion), lazy deletion without KEEP_SSD becomes immediate full deletion because there is no memory LRU position to demote. With sharded LRU (`lruType=sharded_lru`), lazy keys still precede normal keys. Automatic eviction follows first-marked order within each shard, with no global FIFO guarantee across shards. Defragmentation and forced-release paths that process candidate lists only guarantee priority inclusion of lazy keys, not candidate order.
+- `keys`: List of nonempty data keys, each at most 256 bytes. An empty input returns an empty list.
+- `flags`: Deletion flags; default `0`, with the same meaning as `Remove`. Unknown bits return `MMC_INVALID_PARAM` for each key on the server:
+  - `0`: Remove index entries immediately; release underlying memory and registered SSD replicas asynchronously (wait for active leases to be released or expire).
+  - `MMC_REMOVE_FLAG_LAZY` (`1`): Lazy deletion (priority eviction; access clears the mark; SSD-only keys use default deletion; see `Remove`).
+  - `MMC_REMOVE_FLAG_KEEP_SSD` (`2`): Release only the memory tier and retain the SSD replica; without an SSD replica, use default deletion.
+  - `MMC_REMOVE_FLAG_LAZY | MMC_REMOVE_FLAG_KEEP_SSD` (`3`): Lazily delete the memory tier and retain the SSD replica during eviction.
+
+**Notes**
+
+- **SSD scope**: `aggregated` asynchronously attempts deletion only for registered SSD replicas (in-flight, unregistered flushes do not trigger deletion); `separated` clears only memory and retains UBS IO data.
+- **Invalid keys in a batch**: Empty or oversized keys (> 256 bytes) are filtered locally and assigned `MMC_INVALID_PARAM`, without affecting valid keys in the batch.
+- **Local cache**: Keys with result `0` have their GVA tracking records cleared in this process, including successful lazy deletion.
 
 **return value**
 
-Returns a list of processing results corresponding to each key. Each element `0` represents success, and a negative number represents failure.
+A result list with the same length as `keys` (empty input returns an empty list):
+
+- Each `0` indicates success; a negative error code indicates failure, such as `MMC_INVALID_PARAM` or `MMC_UNMATCHED_KEY`.
+- If the client is uninitialized or the batch RPC fails, every entry contains the same negative error code (local memory allocation failure fills all entries with `-1`).
+
+#### RemoveAll
+
+```c++
+virtual int RemoveAll() = 0;
+```
+
+**Function**
+
+Clear all key-value metadata currently managed by MetaService and asynchronously release associated data.
+
+**Notes**
+
+- **No `flags` support**: There are no lazy-deletion or SSD-retention options. Clear every key from the index, including keys marked for lazy deletion.
+- **Asynchronous release**: A return value of `0` only means the index and this process's GVA tracking have been cleared and background tasks submitted. Active leases must be released or expire.
+- **SSD scope**: `aggregated` asynchronously attempts deletion only for registered SSD replicas (in-flight, unregistered flushes do not trigger deletion; failures only produce warnings); `separated` retains UBS IO data.
+- **Concurrency**: With `lruType=sharded_lru`, each shard is locked and cleared separately; a globally atomic snapshot is not guaranteed during concurrent writes.
+
+**Return value**
+
+- `0`: Clear request completed (excludes background asynchronous release and SSD deletion results; the client returns `0` once the RPC succeeds).
+- Otherwise: Failure (client uninitialized or RPC failed).
 
 #### BatchIsExist
 

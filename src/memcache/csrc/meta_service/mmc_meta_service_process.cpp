@@ -131,6 +131,7 @@ int MmcMetaServiceProcess::MainForPython()
     }
 
     MMC_AUDIT_LOG("Meta Service launched successfully");
+    std::cout << "Meta Service launched successfully" << std::endl;
     while (g_processExitRequested == 0) {
         std::this_thread::sleep_for(PROCESS_EXIT_POLL_INTERVAL);
         if (config_.haEnable && leaderElection_ != nullptr && metaService_ != nullptr) {

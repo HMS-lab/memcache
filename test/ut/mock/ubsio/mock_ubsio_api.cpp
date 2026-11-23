@@ -48,6 +48,15 @@ extern "C" int32_t UbsioKvCacheInit(int32_t deviceId)
     return 0;
 }
 
+extern "C" int32_t UbsioGetUnderFsType(UbsioUnderFsType *type)
+{
+    if (type == nullptr) {
+        return K_MOCK_UBSIO_ERROR;
+    }
+    *type = UBSIO_UNDERFS_SHARED;
+    return 0;
+}
+
 // 注册元数据事件回调
 extern "C" int32_t UbsioKvCacheRegisterMetaEventCallback(UbsioMetaEventCallbackC callback, void *context)
 {
