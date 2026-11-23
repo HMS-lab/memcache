@@ -129,6 +129,14 @@ and [pyroscope.ebpf configuration](https://grafana.com/docs/alloy/latest/referen
 
 Maximum logical concurrency is `processes × threads × queue depth`. Within a process, `threads × queue depth` must fit the transport's 16-bit send-queue capacity. Near the end of a run the window drains naturally. Poll mode consumes CPU continuously; wait mode sleeps only when its completion queue is empty.
 
+Warmup and Get keys use `bench_key_<64 lowercase hex characters>_<index>`. Measured Put keys use
+`bench_<64 lowercase hex characters>_p<rank>_t<thread>_<counter>`. All keys share the fixed hex segment
+`2e3f71ee82c2e0f4c0e5dbe107b92d368cc34dc724c15dee5862abec4d25f437`, which resembles SHA-256 text.
+Before warmup and the profiling/start barrier, each client precomputes all read keys and one complete
+Put prefix per worker. During the measured workload, Gets copy cached warmup keys and Puts append only
+the decimal counter to their cached worker prefix. The rank/thread/counter suffix keeps each Put key unique.
+No hashing or hex generation is performed.
+
 A logical Put is Alloc followed by Update, or BatchAlloc followed by BatchUpdate. Its slot remains occupied across both stages. Successful entries from partial batch allocation are updated, but any failed allocation or update makes the logical Put fail. Get performs a metadata RPC only. No data copy is timed or performed.
 
 ## Timing and results

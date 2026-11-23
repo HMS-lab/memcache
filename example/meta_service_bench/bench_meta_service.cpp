@@ -755,13 +755,43 @@ private:
     std::vector<MetricsSample> samples_;
 };
 
+// Fixed SHA-256-shaped text shared by all benchmark keys.
+constexpr char kKeyHexSegment[] = "2e3f71ee82c2e0f4c0e5dbe107b92d368cc34dc724c15dee5862abec4d25f437";
+
 inline std::string MakeKey(int index)
 {
-    return "bench_key_" + std::to_string(index);
+    return std::string("bench_key_") + kKeyHexSegment + "_" + std::to_string(index);
 }
-inline std::string MakePutKey(uint32_t rank, int tid, uint64_t counter)
+struct PreparedKeys {
+    std::vector<std::string> readKeys;
+    std::vector<std::string> putPrefixes;
+};
+
+PreparedKeys PrepareKeys(const BenchConfig &cfg, uint32_t rank)
 {
-    return "bench_p" + std::to_string(rank) + "_t" + std::to_string(tid) + "_" + std::to_string(counter);
+    PreparedKeys keys;
+    // With warmup disabled, preserve reads of the missing key at index zero.
+    const int readKeyCount = std::max(1, cfg.warmupKeyCount);
+    keys.readKeys.reserve(static_cast<size_t>(readKeyCount));
+    for (int index = 0; index < readKeyCount; ++index) {
+        keys.readKeys.push_back(MakeKey(index));
+    }
+    keys.putPrefixes.reserve(static_cast<size_t>(cfg.threadCount));
+    for (int tid = 0; tid < cfg.threadCount; ++tid) {
+        keys.putPrefixes.push_back(std::string("bench_") + kKeyHexSegment + "_p" + std::to_string(rank) +
+            "_t" + std::to_string(tid) + "_");
+    }
+    return keys;
+}
+
+inline std::string MakePutKey(const PreparedKeys &keys, int tid, uint64_t counter)
+{
+    constexpr size_t maxCounterDecimalDigits = 20;
+    const auto &prefix = keys.putPrefixes[static_cast<size_t>(tid)];
+    std::string key;
+    key.reserve(prefix.size() + maxCounterDecimalDigits);
+    key.append(prefix).append(std::to_string(counter));
+    return key;
 }
 inline double NowUs()
 {
@@ -926,7 +956,8 @@ struct PendingOperation {
     double start{0};
 };
 
-void Worker(bench::AsyncTransport &transport, const BenchConfig &cfg, ThreadStats &stats, int tid, uint32_t rank)
+void Worker(bench::AsyncTransport &transport, const BenchConfig &cfg, const PreparedKeys &keys, ThreadStats &stats,
+            int tid, uint32_t rank)
 {
     bench::CompletionQueue queue;
     std::unordered_map<uint32_t, PendingOperation> pending;
@@ -984,7 +1015,8 @@ void Worker(bench::AsyncTransport &transport, const BenchConfig &cfg, ThreadStat
             int size = batchDist(rng);
             operation.batch = size > 1;
             for (int key = 0; key < size; ++key) {
-                operation.keys.push_back(operation.put ? MakePutKey(rank, tid, putCounter++) : MakeKey(readDist(rng)));
+                operation.keys.push_back(operation.put ? MakePutKey(keys, tid, putCounter++) :
+                    keys.readKeys[static_cast<size_t>(readDist(rng))]);
             }
             ++issued;
             if (operation.put) {
@@ -1244,11 +1276,12 @@ int RunClient(const BenchConfig &cfg, int clientIndex, ProcessResult *resultSlot
     TermLog("[client %d] Connected, rank=%u, capacity=%llu MB\n", clientIndex, rank,
             static_cast<unsigned long long>(cfg.capacityMB));
 
+    const PreparedKeys keys = PrepareKeys(cfg, rank);
     int warmupStart = static_cast<int>(static_cast<int64_t>(clientIndex) * cfg.warmupKeyCount / cfg.processCount);
     int warmupEnd = static_cast<int>(static_cast<int64_t>(clientIndex + 1) * cfg.warmupKeyCount / cfg.processCount);
     int warmupPerClient = warmupEnd - warmupStart;
     for (int i = 0; i < warmupPerClient; ++i) {
-        std::string key = MakeKey(warmupStart + i);
+        const auto &key = keys.readKeys[static_cast<size_t>(warmupStart + i)];
         Result warmupRet = DoPut(*client.Get(), key, rank, cfg.blobSize);
         if (warmupRet != MMC_OK) {
             TermLog("[client %d] Warmup Put failed for %s: %d\n", clientIndex, key.c_str(), warmupRet);
@@ -1276,7 +1309,7 @@ int RunClient(const BenchConfig &cfg, int clientIndex, ProcessResult *resultSlot
     }
     double startUs = NowUs();
     for (int t = 0; t < cfg.threadCount; ++t) {
-        workers.emplace_back(Worker, std::ref(transport), std::ref(cfg),
+        workers.emplace_back(Worker, std::ref(transport), std::ref(cfg), std::cref(keys),
                              std::ref(threadStats[static_cast<size_t>(t)]), t, rank);
     }
     for (auto &w : workers)

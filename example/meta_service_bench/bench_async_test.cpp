@@ -74,7 +74,7 @@ int main()
             bench::AsyncTransportTest::Reply(transport, sequence, packer.String());
             return MMC_OK;
         });
-        Worker(transport, config, stats, 0, 0);
+        Worker(transport, config, PrepareKeys(config, 0), stats, 0, 0);
         Check(allocations == testOperations && updates == testOperations);
         Check(stats.successCount[kOpPut] == testOperations && stats.histogram[kOpPut].count == 0);
         Check(stats.histogram[kOpAlloc].count == testOperations && stats.submission[kOpUpdate].count == testOperations);
@@ -87,7 +87,7 @@ int main()
     config.opsPerThread = testOperations;
     config.putPercent = allPut;
     ThreadStats stats;
-    Worker(transport, config, stats, 0, 0);
+    Worker(transport, config, PrepareKeys(config, 0), stats, 0, 0);
     Check(stats.failureCount[kOpPut] == testOperations && stats.histogram[kOpAlloc].count == 0);
     Check(stats.submission[kOpAlloc].count == testOperations && stats.submission[kOpUpdate].count == 0);
     // Hold replies until the full window has been submitted, then complete in reverse order.
@@ -118,7 +118,7 @@ int main()
                 }
                 return MMC_OK;
             });
-        Worker(unorderedTransport, reads, readStats, 0, 0);
+        Worker(unorderedTransport, reads, PrepareKeys(reads, 0), readStats, 0, 0);
         Check(readStats.successCount[kOpGet] == testOperations);
         Check(readStats.histogram[kOpGet].count == testOperations);
     }
@@ -127,7 +127,7 @@ int main()
     bench::AsyncTransportTest::SetSend(silent, [](uint32_t, int16_t, const std::string &) { return MMC_OK; });
     config.rpcTimeoutMs = 0;
     ThreadStats timeoutStats;
-    Worker(silent, config, timeoutStats, 0, 0);
+    Worker(silent, config, PrepareKeys(config, 0), timeoutStats, 0, 0);
     Check(timeoutStats.timeouts[kOpAlloc] == testOperations);
     Check(timeoutStats.failureCount[kOpPut] == testOperations);
     Check(timeoutStats.histogram[kOpAlloc].count == 0);
@@ -161,7 +161,7 @@ int main()
     batches.putPercent = allPut;
     batches.minBatch = batches.maxBatch = testBatchSize;
     ThreadStats batchStats;
-    Worker(partial, batches, batchStats, 0, 0);
+    Worker(partial, batches, PrepareKeys(batches, 0), batchStats, 0, 0);
     Check(batchUpdates == testOperations && batchStats.failureCount[kOpPut] == testOperations);
     Check(batchStats.failureCount[kOpAlloc] == testOperations && batchStats.successCount[kOpUpdate] == testOperations);
 
@@ -172,7 +172,7 @@ int main()
         return MMC_OK;
     });
     ThreadStats disconnectedStats;
-    Worker(disconnected, config, disconnectedStats, 0, 0);
+    Worker(disconnected, config, PrepareKeys(config, 0), disconnectedStats, 0, 0);
     Check(disconnected.Failed() && disconnectedStats.failureCount[kOpPut] == 1);
 
     // Response arrival and submission return can overlap: never subtract the intervals.
@@ -192,7 +192,7 @@ int main()
     reads.putPercent = 0;
     reads.minBatch = reads.maxBatch = 1;
     ThreadStats timingStats;
-    Worker(delayedReturn, reads, timingStats, 0, 0);
+    Worker(delayedReturn, reads, PrepareKeys(reads, 0), timingStats, 0, 0);
     Check(timingStats.submission[kOpGet].totalUs > timingStats.histogram[kOpGet].totalUs);
     Check(timingStats.histogram[kOpGet].count == testOperations);
     AllocResponse malformed;
