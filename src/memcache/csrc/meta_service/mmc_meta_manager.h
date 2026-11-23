@@ -886,7 +886,7 @@ private:
     MmcThreadPoolPtr removeThreadPool_;
     // EraseIf 并行执行专用池：线程数按 shard 数对齐（上限 kShardLruPoolMax）
     MmcThreadPoolPtr shardLruThreadPool_;
-    // 由首次成功的存储注册确定，在当前 manager 生命周期内保持固定。
+    // Set by the first successful storage registration and fixed for this manager's lifetime.
     std::atomic<bool> ssdMetadataSeparated_{false};
     std::atomic<bool> ssdMetadataSeparationResolved_{false};
     std::unordered_set<uint32_t> ssdEnabledRanks_;

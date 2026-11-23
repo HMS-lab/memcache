@@ -816,7 +816,7 @@ Result MmcLocalServiceDefault::BlobDelete(const std::string &key, const MmcMemBl
 
 std::string MmcLocalServiceDefault::ResolveBackendId()
 {
-    // 优先级：显式配置（Python API / 配置文件）> 环境变量 > 本机 IP 兜底
+    // Priority: explicit configuration (Python API / configuration file) > environment variable > local IP fallback.
     if (options_.backendId[0] != '\0') {
         return std::string(options_.backendId);
     }
@@ -826,8 +826,8 @@ std::string MmcLocalServiceDefault::ResolveBackendId()
         return envBackendId;
     }
 
-    // 最后兜底：取本机第一个可用 IP。同一个节点的多个 LocalService 会得到同一个值，
-    // 正好满足「同机共享 backendId」的亲和分组语义，避免未配置时被排除在 local_first 分布表之外。
+    // Final fallback: use the first available local IP. LocalServices on the same node get the same value,
+    // preserving backendId affinity groups and avoiding exclusion from the local_first distribution table.
     std::string localIp = TryFindLinuxFirstIp();
     if (!localIp.empty()) {
         MMC_LOG_INFO("backend_id is not set in config/env, fallback to local ip "
@@ -836,8 +836,8 @@ std::string MmcLocalServiceDefault::ResolveBackendId()
         return localIp;
     }
 
-    // 走到这里说明「配置 / 环境变量 / 本机 IP 兜底」全部失效。LocalService 侧看不到 MetaService 的
-    // alloc_strategy，无法判断当前是否为 local_first，因此只提示风险，不做校验。
+    // Configuration, environment variable, and local IP fallback have all failed. LocalService cannot inspect
+    // the MetaService alloc_strategy to determine whether local_first is active, so only warn about the risk.
     MMC_LOG_WARN("backend_id is not set in config/env and the local-ip fallback also found no usable address; "
                  "backend_id will be empty. If MetaService is running with alloc_strategy=local_first, this rank "
                  "will not appear in the write distribution: it stays writable, but is starved by priority and "

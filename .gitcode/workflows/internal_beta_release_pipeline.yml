@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       build_type:
-        description: '待转测的b版本号，比如：b010'
+        description: 'Internal beta build number to submit for testing, e.g. b010'
         required: true
 env:
   build_type: ${{ inputs.build_type }}
@@ -26,68 +26,68 @@ stages:
           image: swr.cn-north-4.myhuaweicloud.com/memfabric-hybrid/memfabric-hybrid_arm:memfabric_version_v5
         if: ${{ contains(env.PIP_EXECUTOR, atomgit.actor) }}
         steps:
-          - name: 源码准备
+          - name: Prepare source
             uses: checkout
             with:
               ref: ${{ atomgit.ref }}
               submodules: recursive
 
-          - name: 编译打包
+          - name: Build and package
             run: |
               set -ex
 
-              # 创建构建输出目录
+              # Create the build output directory
               mkdir -p ${WORKSPACE}/BeiMing_output
 
-              # 支持 Python 3.10 ~ 3.13 多版本 wheel 构建
+              # Build wheels for Python 3.10 through 3.13
               python_multi_versions=("cp310-cp310" "cp311-cp311" "cp312-cp312" "cp313-cp313")
 
               for item_version in "${python_multi_versions[@]}"; do
                 (
-                  # 设置当前构建的 Python 环境
+                  # Set the Python environment for this build
                   export PYTHON_HOME=/opt/python/${item_version}
                   export PATH=/opt/python/${item_version}/bin:/usr/bin:$PATH
 
-                  # 升级构建工具链
+                  # Upgrade the build toolchain
                   pip3 install --upgrade pip
                   pip3 install --upgrade setuptools wheel
-                  pip3 install pybind11==3.0.1   # 固定版本确保 ABI 兼容
+                  pip3 install pybind11==3.0.1   # Pin the version for ABI compatibility
                   pip3 install auditwheel --force-reinstall
 
-                  # 验证 Python 环境
+                  # Verify the Python environment
                   python3 --version
                   which pip3
 
-                  # 执行构建脚本
+                  # Run the build script
                   cd ${WORKSPACE}/
                   bash script/build_and_pack_run.sh --build_python_whl_type ${build_type}
 
-                  # 收集所有 wheel 包到输出目录
+                  # Collect all wheels in the output directory
                   find output/ -name "*.whl" | xargs -i cp -rf {} ${WORKSPACE}/BeiMing_output/
                 )
               done
 
-          - name: 软件包归档
+          - name: Archive packages
             run: |
               set -ex
 
               cd ${WORKSPACE}/
               version=$(head -n 1 VERSION)
               echo ${version}
-              # 安装并配置 obsutil 工具
+              # Install and configure obsutil
               mkdir /usr/local/obsutil
               wget --no-verbose https://obs-community.obs.cn-north-1.myhuaweicloud.com/obsutil/current/obsutil_linux_arm64.tar.gz
               tar -zxvf obsutil_linux_arm64.tar.gz -C /usr/local/obsutil/
               ln -sf "$(ls -d /usr/local/obsutil/obsutil_linux_arm64_* | sort -V | tail -n1)/obsutil" /usr/local/bin/obsutil
 
-              # 配置 OBS 凭据
+              # Configure OBS credentials
               obsutil config -i=${AK_ASCEND} -k=${SK_ASCEND} -e=obs.cn-southwest-2.myhuaweicloud.com
 
-              # 上传构建产物到 OBS
+              # Upload build artifacts to OBS
               obsutil cp -r -f ${WORKSPACE}/BeiMing_output \
                 obs://ascend-ci-artifacts-staging/pypi/packages/ascend/repos/pypi/memcache-hybrid/${version}/ -flat
 
-          - name: 同步 wheel 到 Ascend PyPI
+          - name: Sync wheels to Ascend PyPI
             run: |
               /opt/python/cp310-cp310/bin/python3 "${WORKSPACE}/.gitcode/workflows/scripts/sync_pypi.py" \
                 --component memcache-hybrid \
@@ -101,68 +101,68 @@ stages:
           image: swr.cn-north-4.myhuaweicloud.com/memfabric-hybrid/memfabric-hybrid_x86:memfabric_version_v5
         if: ${{ contains(env.PIP_EXECUTOR, atomgit.actor) }}
         steps:
-          - name: 源码准备
+          - name: Prepare source
             uses: checkout
             with:
               ref: ${{ atomgit.ref }}
               submodules: recursive
 
-          - name: 编译打包
+          - name: Build and package
             run: |
               set -ex
 
-              # 创建构建输出目录
+              # Create the build output directory
               mkdir -p ${WORKSPACE}/BeiMing_output
 
-              # 支持 Python 3.10 ~ 3.13 多版本 wheel 构建
+              # Build wheels for Python 3.10 through 3.13
               python_multi_versions=("cp310-cp310" "cp311-cp311" "cp312-cp312" "cp313-cp313")
 
               for item_version in "${python_multi_versions[@]}"; do
                 (
-                  # 设置当前构建的 Python 环境
+                  # Set the Python environment for this build
                   export PYTHON_HOME=/opt/python/${item_version}
                   export PATH=/opt/python/${item_version}/bin:/usr/bin:$PATH
 
-                  # 升级构建工具链
+                  # Upgrade the build toolchain
                   pip3 install --upgrade pip
                   pip3 install --upgrade setuptools wheel
-                  pip3 install pybind11==3.0.1   # 固定版本确保 ABI 兼容
+                  pip3 install pybind11==3.0.1   # Pin the version for ABI compatibility
                   pip3 install auditwheel --force-reinstall
 
-                  # 验证 Python 环境
+                  # Verify the Python environment
                   python3 --version
                   which pip3
 
-                  # 执行构建脚本
+                  # Run the build script
                   cd ${WORKSPACE}/
                   bash script/build_and_pack_run.sh --build_python_whl_type ${build_type}
 
-                  # 收集所有 wheel 包到输出目录
+                  # Collect all wheels in the output directory
                   find output/ -name "*.whl" | xargs -i cp -rf {} ${WORKSPACE}/BeiMing_output/
                 )
               done
 
-          - name: 软件包归档
+          - name: Archive packages
             run: |
               set -ex
 
               cd ${WORKSPACE}/
               version=$(head -n 1 VERSION)
               echo ${version}
-              # 安装并配置 obsutil 工具
+              # Install and configure obsutil
               mkdir /usr/local/obsutil
               wget --no-verbose https://obs-community.obs.cn-north-1.myhuaweicloud.com/obsutil/current/obsutil_linux_amd64.tar.gz
               tar -zxvf obsutil_linux_amd64.tar.gz -C /usr/local/obsutil/
               ln -sf "$(ls -d /usr/local/obsutil/obsutil_linux_amd64_* | sort -V | tail -n1)/obsutil" /usr/local/bin/obsutil
 
-              # 配置 OBS 凭据
+              # Configure OBS credentials
               obsutil config -i=${AK_ASCEND} -k=${SK_ASCEND} -e=obs.cn-southwest-2.myhuaweicloud.com
 
-              # 上传构建产物到 OBS
+              # Upload build artifacts to OBS
               obsutil cp -r -f ${WORKSPACE}/BeiMing_output \
                 obs://ascend-ci-artifacts-staging/pypi/packages/ascend/repos/pypi/memcache-hybrid/${version}/ -flat
 
-          - name: 同步 wheel 到 Ascend PyPI
+          - name: Sync wheels to Ascend PyPI
             run: |
               /opt/python/cp310-cp310/bin/python3 "${WORKSPACE}/.gitcode/workflows/scripts/sync_pypi.py" \
                 --component memcache-hybrid \

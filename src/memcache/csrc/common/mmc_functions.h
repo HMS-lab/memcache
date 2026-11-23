@@ -287,9 +287,9 @@ inline void SetBits(T &value, T mask)
 }
 
 /**
- * @brief 判断网卡名是否属于「虚拟/非业务」网卡（用于本机 IP 兜底时过滤）
- * @param name 网卡名，例如 eth0 / docker0 / vethxxxx / br-xxxx
- * @return true 表示应跳过
+ * @brief Identify virtual or non-business network interfaces to exclude from the local IP fallback.
+ * @param name Interface name, such as eth0, docker0, vethxxxx, or br-xxxx.
+ * @return true if the interface should be skipped.
  */
 inline bool IsVirtualNetDeviceName(const std::string &name)
 {
@@ -305,17 +305,17 @@ inline bool IsVirtualNetDeviceName(const std::string &name)
 }
 
 /**
- * @brief 尝试找一个本机可用的 IP（Linux 平台兜底用，例如 backend_id 未配置时）
+ * @brief Find an available local IP on Linux, for example when backend_id is not configured.
  *
- * 实现说明：用 getifaddrs() 枚举本机全部网卡地址（底层走 netlink RTM_GETADDR，
- * 返回 ifaddrs 链表，每项带 网卡名 / flags / 地址），按下列规则挑一个：
- *   1. 跳过 down、loopback、以及常见虚拟网卡（见 IsVirtualNetDeviceName）；
- *   2. 优先 IPv4；只有完全没有 IPv4 时才退到 IPv6（跳过 link-local / loopback / 未指定）；
- *   3. 同等条件下优先 eth0（仅作为偏好，没有 eth0 时取第一个可用网卡）。
+ * Use getifaddrs() to enumerate local interface addresses (via netlink RTM_GETADDR).
+ * Each ifaddrs list entry includes the interface name, flags, and address. Select as follows:
+ *   1. Skip down, loopback, and common virtual interfaces (see IsVirtualNetDeviceName).
+ *   2. Prefer IPv4; fall back to IPv6 only if no IPv4 exists (skip link-local, loopback, and unspecified addresses).
+ *   3. Prefer eth0 among otherwise equal candidates; use the first available interface if eth0 is absent.
  *
- * @return 形如 "192.168.0.55" 或 "fd00::1" 的地址；找不到返回空串
- * @note 容器 net=host 时拿到的是宿主地址；容器独立网络命名空间时拿到的是容器地址，
- *       同机多实例仍会得到同一个值，可满足「同机共享 backendId」的语义。
+ * @return An address such as "192.168.0.55" or "fd00::1", or an empty string if none is found.
+ * @note Containers with net=host use the host address; separate network namespaces use the container address.
+ *       Multiple instances on the same machine still share a value, as required for a shared backendId.
  */
 inline std::string TryFindLinuxFirstIp()
 {

@@ -645,31 +645,31 @@ result = store.remove(key, flags=0)
 
 **Function**
 
-删除指定 key 的数据对象。
+Delete the data object for the specified key.
 
 **parameter**
 
-- `key`：要删除的数据键，非空且长度 `<= 256` 字节。
-- `flags`：删除标志位，默认 `0`，含未知位返回 `MMC_INVALID_PARAM`：
-  - `0`（默认）：立即摘除索引，底层内存与已登记 SSD 副本在后台异步释放（有活跃租约时等待释放或超时）。
-  - `1`（`MMC_REMOVE_FLAG_LAZY`）：懒删除。不立即摘除索引，仅标记为优先淘汰（按首次懒删除先后顺序）。
-    - 期间 `get`/`get_key_info`/`is_exist`/`batch_add_lease` 等访问会恢复热度并取消标记。
-    - 淘汰降级到低层后按普通数据对待；SSD-only key（未置 `KEEP_SSD`）退化为默认删除。
-    - `lruType=sharded_lru` 下仅保证同分片内先后顺序，跨分片及候选列表路径不保证全局 FIFO。
-  - `2`（`MMC_REMOVE_FLAG_KEEP_SSD`）：仅释放内存层并保留 SSD 副本；无 SSD 副本时退化为默认删除。
-  - `3`（`MMC_REMOVE_FLAG_LAZY | MMC_REMOVE_FLAG_KEEP_SSD`）：内存层懒删除，淘汰时保留 SSD 副本；仅 SSD 副本时直接返回成功。
+- `key`: Data key to delete; must be nonempty and at most 256 bytes.
+- `flags`: Deletion flags; default `0`. Unknown bits return `MMC_INVALID_PARAM`:
+  - `0` (default): Remove the index entry immediately; release underlying memory and registered SSD replicas asynchronously in the background (wait for active leases to be released or expire).
+  - `1` (`MMC_REMOVE_FLAG_LAZY`): Lazy deletion. Keep the index entry and mark the key for priority eviction, ordered by its first lazy-deletion mark.
+    - Access through `get`/`get_key_info`/`is_exist`/`batch_add_lease` restores recency and clears the mark.
+    - Data demoted to a lower tier is treated normally. For SSD-only keys without `KEEP_SSD`, use default deletion.
+    - With `lruType=sharded_lru`, ordering is guaranteed only within each shard; there is no global FIFO guarantee across shards or candidate-list paths.
+  - `2` (`MMC_REMOVE_FLAG_KEEP_SSD`): Release only the memory tier and retain the SSD replica; without an SSD replica, use default deletion.
+  - `3` (`MMC_REMOVE_FLAG_LAZY | MMC_REMOVE_FLAG_KEEP_SSD`): Lazily delete the memory tier and retain the SSD replica during eviction; SSD-only keys return success immediately.
 
-**说明**
+**Notes**
 
-- **UBS IO / SSD 删除边界**：仅对 MetaService 已登记的 `MEDIA_SSD` 副本发起异步尽力删除（失败仅告警、不重试）。
-  - `metadata_mode=aggregated`：已完成刷盘并回填元数据的 SSD 副本会异步删除；刷盘在途未登记时不触发 UBS IO 删除。
-  - `metadata_mode=separated`：MetaService 不登记 SSD 元数据，默认删除与 `KEEP_SSD` 均只清内存层，不删 UBS IO / SSD 数据。
-- **本地缓存**：返回 `0` 时清理本进程 GVA 追踪记录（含懒删除成功）。
+- **UBS IO / SSD deletion scope**: Asynchronously attempt deletion only for `MEDIA_SSD` replicas registered with MetaService (failures produce warnings without retries).
+  - `metadata_mode=aggregated`: Asynchronously delete SSD replicas whose flush has completed and whose metadata has been registered. In-flight flushes without registered metadata do not trigger UBS IO deletion.
+  - `metadata_mode=separated`: MetaService does not register SSD metadata. Default deletion and `KEEP_SSD` clear only the memory tier; UBS IO / SSD data is retained.
+- **Local cache**: A return value of `0` clears GVA tracking records in this process, including successful lazy deletion.
 
 **return value**
 
-- `0`：成功（不含后台异步释放与 SSD 删除结果）
-- 其他：负错误码（如 `MMC_INVALID_PARAM`、`MMC_UNMATCHED_KEY`）
+- `0`: Success (excludes background asynchronous release and SSD deletion results).
+- Otherwise: A negative error code, such as `MMC_INVALID_PARAM` or `MMC_UNMATCHED_KEY`.
 
 #### remove_batch
 
@@ -679,29 +679,29 @@ results = store.remove_batch(keys, flags=0)
 
 **Function**
 
-按顺序批量删除多个键（服务端逐 key 处理，不保证整批原子性）。
+Delete multiple keys in order. The server processes each key separately; the batch is not atomic.
 
 **parameter**
 
-- `keys`：键列表，每个键非空且长度 `<= 256` 字节；为空列表时直接返回 `[]`。
-- `flags`：删除标志位，默认 `0`，含义与 `remove` 一致；含未知位时服务端逐 key 返回 `MMC_INVALID_PARAM`：
-  - `0`：立即摘除索引，底层内存与已登记 SSD 副本异步释放（有活跃租约时等待释放或超时）。
-  - `1`（`MMC_REMOVE_FLAG_LAZY`）：懒删除（优先淘汰，访问取消标记；SSD-only 退化为默认删除；详见 `remove`）。
-  - `2`（`MMC_REMOVE_FLAG_KEEP_SSD`）：仅释放内存层并保留 SSD 副本；无 SSD 副本时退化为默认删除。
-  - `3`（`MMC_REMOVE_FLAG_LAZY | MMC_REMOVE_FLAG_KEEP_SSD`）：内存层懒删除，淘汰时保留 SSD 副本。
+- `keys`: List of nonempty keys, each at most 256 bytes. An empty input returns `[]`.
+- `flags`: Deletion flags; default `0`, with the same meaning as `remove`. Unknown bits return `MMC_INVALID_PARAM` for each key on the server:
+  - `0`: Remove index entries immediately; release underlying memory and registered SSD replicas asynchronously (wait for active leases to be released or expire).
+  - `1` (`MMC_REMOVE_FLAG_LAZY`): Lazy deletion (priority eviction; access clears the mark; SSD-only keys use default deletion; see `remove`).
+  - `2` (`MMC_REMOVE_FLAG_KEEP_SSD`): Release only the memory tier and retain the SSD replica; without an SSD replica, use default deletion.
+  - `3` (`MMC_REMOVE_FLAG_LAZY | MMC_REMOVE_FLAG_KEEP_SSD`): Lazily delete the memory tier and retain the SSD replica during eviction.
 
-**说明**
+**Notes**
 
-- **SSD 边界**：`aggregated` 仅异步尽力删已登记 SSD 副本（刷盘在途未登记不触发）；`separated` 仅清内存层，不删 UBS IO。
-- **部分非法 key**：空串或超长（`> 256` 字节）key 本地过滤并填 `MMC_INVALID_PARAM`，不影响同批合法 key。
-- **本地缓存**：返回 `0` 的 key 会清理本进程 GVA 追踪记录（含懒删除成功）。
+- **SSD scope**: `aggregated` asynchronously attempts deletion only for registered SSD replicas (in-flight, unregistered flushes do not trigger deletion); `separated` clears only memory and retains UBS IO data.
+- **Invalid keys in a batch**: Empty or oversized keys (> 256 bytes) are filtered locally and assigned `MMC_INVALID_PARAM`, without affecting valid keys in the batch.
+- **Local cache**: Keys with result `0` have their GVA tracking records cleared in this process, including successful lazy deletion.
 
 **return value**
 
-与 `keys` 等长的结果列表（`keys` 为空返回 `[]`）：
+A result list with the same length as `keys` (empty input returns `[]`):
 
-- `0`：对应 key 删除成功。
-- 负错误码：失败（如 `MMC_INVALID_PARAM`、`MMC_UNMATCHED_KEY`；未初始化或整批 RPC 失败时全表填同一错误码）。
+- `0`: The corresponding key was deleted successfully.
+- A negative error code: Failure, such as `MMC_INVALID_PARAM` or `MMC_UNMATCHED_KEY`. If the client is uninitialized or the batch RPC fails, every entry contains the same error code.
 
 #### remove_all
 
@@ -711,19 +711,19 @@ result = store.remove_all()
 
 **Function**
 
-清空 MetaService 当前管理的全部键值对元数据，并异步释放关联数据。
+Clear all key-value metadata currently managed by MetaService and asynchronously release associated data.
 
-**说明**
+**Notes**
 
-- **不支持 `flags`**：无懒删除或保留 SSD 选项，直接清除索引内全部 key（含已标记懒删除的 key）。
-- **异步释放**：返回 `0` 仅表示索引已清、本进程 GVA 追踪已清且后台任务已提交；有活跃租约时会等待释放或超时。
-- **SSD 边界**：`aggregated` 仅异步尽力删已登记 SSD 副本（刷盘在途未登记不触发，失败仅告警）；`separated` 不删 UBS IO。
-- **并发语义**：`lruType=sharded_lru` 下逐分片加锁清空，不保证并发写入时的全局原子快照。
+- **No `flags` support**: There are no lazy-deletion or SSD-retention options. Clear every key from the index, including keys marked for lazy deletion.
+- **Asynchronous release**: A return value of `0` only means the index and this process's GVA tracking have been cleared and background tasks submitted. Active leases must be released or expire.
+- **SSD scope**: `aggregated` asynchronously attempts deletion only for registered SSD replicas (in-flight, unregistered flushes do not trigger deletion; failures only produce warnings); `separated` retains UBS IO data.
+- **Concurrency**: With `lruType=sharded_lru`, each shard is locked and cleared separately; a globally atomic snapshot is not guaranteed during concurrent writes.
 
 **return value**
 
-- `0`：清空请求完成（不含后台异步释放及 SSD 删除结果；客户端在 RPC 成功后即返回 `0`）
-- 其他：失败（客户端未初始化或 RPC 失败）
+- `0`: Clear request completed (excludes background asynchronous release and SSD deletion results; the client returns `0` once the RPC succeeds).
+- Otherwise: Failure (client uninitialized or RPC failed).
 
 #### is_exist
 

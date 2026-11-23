@@ -1,15 +1,15 @@
-# HOST_RDMA 跨机传输后出现数据一致性问题
+# Data Inconsistency After Cross-node HOST_RDMA Transfers
 
-## 问题现象
+## Symptoms
 
-get获取到的数据和put不相符
+Data returned by get differs from the data written by put:
 
-- 单机双client测试无问题
-- 跨机双client测试有问题
+- Two clients on one machine work correctly.
+- Two clients on different machines show the problem.
 
-## 定位思路
+## Diagnosis
 
-检查两节点rdma网卡的MTU设置：
+Check the RDMA NIC MTU on both nodes:
 
 ```ini
 ip link show
@@ -17,7 +17,7 @@ ip link show
     link/ether e8:eb:d3:3a:53:cc brd ff:ff:ff:ff:ff:ff
 ```
 
-HCOM最新版本HOST_RDAM传输需要rdma网卡MTU大于4096，如果不正确可通过如下命令修改：
+The latest HCOM HOST_RDMA transport requires an RDMA NIC MTU greater than 4096. If necessary, change it with:
 
 ```bash
 ip link set enp67s0f0np0 mtu 4500

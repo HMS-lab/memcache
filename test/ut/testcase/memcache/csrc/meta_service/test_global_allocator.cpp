@@ -875,11 +875,11 @@ namespace {
 constexpr uint64_t FRAG_SMALL_SIZE = SIZE_32K;
 constexpr uint64_t FRAG_LARGE_SIZE = SIZE_32K * 2U;
 constexpr uint64_t FRAG_SMALL_COUNT = 10U;
-// 10 个小块 + 1 个大块后尾部仅剩 32K，碎片瓶颈只能来自隔块释放产生的 32K 空洞
+// Ten small blocks and one large block leave only 32K at the end; fragmentation can only come from freed 32K holes.
 constexpr uint64_t FRAG_CAPACITY = FRAG_SMALL_SIZE * (FRAG_SMALL_COUNT + 3U); // 13 * 32K = 416K
 
-// 构造碎片棋盘：先按 32K 分配 FRAG_SMALL_COUNT 块，再用 64K 大块把全局 maxAlignedSize 抬到 64K；
-// makeHoles 为 true 时隔块释放，留下多个互不相邻的 32K 空洞（总空闲 192K，最大连续空闲 32K）
+// Build a fragmented layout: allocate FRAG_SMALL_COUNT 32K blocks, then a 64K block to raise maxAlignedSize to 64K.
+// If makeHoles is true, free alternating blocks, leaving nonadjacent 32K holes (192K total free; largest hole: 32K).
 void LayoutFragmentedBoard(const MmcGlobalAllocatorPtr &allocator, uint32_t rank, bool enableMaxValueMode,
                            bool makeHoles)
 {
@@ -911,18 +911,18 @@ void LayoutFragmentedBoard(const MmcGlobalAllocatorPtr &allocator, uint32_t rank
 }
 } // namespace
 
-// max 模式碎片判定按放大后的切块粒度比较：32K 申请实际需要 64K 连续块，
-// 同布局非 max 模式可复用 32K 空洞，max 模式则因最大连续空闲仅 32K 判定为碎片
+// In max mode, fragmentation detection uses the enlarged block size: a 32K request needs a contiguous 64K block.
+// The same layout can reuse 32K holes without max mode, but is fragmented in max mode because the largest hole is 32K.
 TEST_F(TestMmcGlobalAllocator, MaxValueModeFragmentationUsesMaxAlignedSize)
 {
-    // 对照组：非 max 模式，maxAlignedSize 虽被 64K 大块抬升，但不参与碎片判定
+    // Control: without max mode, the 64K block raises maxAlignedSize but does not affect fragmentation detection.
     auto plainAllocator = MmcMakeRef<MmcGlobalAllocator>();
     LayoutFragmentedBoard(plainAllocator, 0U, false, true);
     EXPECT_EQ(plainAllocator->GetMaxAlignedSize(), FRAG_LARGE_SIZE);
     EXPECT_EQ(plainAllocator->GetFreeSpace(MEDIA_DRAM), FRAG_SMALL_SIZE * 6U);
     EXPECT_FALSE(plainAllocator->IsFragmentation(MEDIA_DRAM, FRAG_SMALL_SIZE));
 
-    // 实验组：max 模式，32K 申请被放大到 64K，32K 空洞不可复用，属碎片
+    // In max mode, a 32K request becomes 64K; the 32K holes cannot be reused and indicate fragmentation.
     auto maxAllocator = MmcMakeRef<MmcGlobalAllocator>();
     LayoutFragmentedBoard(maxAllocator, 0U, true, true);
     EXPECT_EQ(maxAllocator->GetMaxAlignedSize(), FRAG_LARGE_SIZE);
@@ -931,14 +931,14 @@ TEST_F(TestMmcGlobalAllocator, MaxValueModeFragmentationUsesMaxAlignedSize)
     EXPECT_TRUE(maxAllocator->IsFragmentation(MEDIA_DRAM, FRAG_SMALL_SIZE));
 }
 
-// 逐 rank 碎片检测：只返回存在碎片空洞的 rank，健康 rank 与 SSD 介质不参与
+// Per-rank fragmentation detection returns only fragmented ranks, excluding healthy ranks and SSD media.
 TEST_F(TestMmcGlobalAllocator, GetFragmentedRanksOnlyReturnsFragmentedRank)
 {
     auto maxAllocator = MmcMakeRef<MmcGlobalAllocator>();
-    // rank0：隔块释放形成 32K 空洞，max 模式下属碎片
+    // rank0: freeing alternating blocks creates 32K holes, which indicate fragmentation in max mode.
     LayoutFragmentedBoard(maxAllocator, 0U, true, true);
 
-    // rank1：仅占用一个 64K 大块，剩余 352K 连续空闲，不属碎片
+    // rank1: one 64K block leaves 352K of contiguous free space, so there is no fragmentation.
     MmcLocation healthyLoc{1U, MEDIA_DRAM};
     MmcLocalMemlInitInfo healthyInfo{FRAG_CAPACITY, FRAG_CAPACITY};
     ASSERT_EQ(maxAllocator->Mount(healthyLoc, healthyInfo, true), MMC_OK);
@@ -953,7 +953,7 @@ TEST_F(TestMmcGlobalAllocator, GetFragmentedRanksOnlyReturnsFragmentedRank)
     EXPECT_EQ(fragmentedRanks[0], 0U);
     EXPECT_TRUE(maxAllocator->GetFragmentedRanks(MEDIA_SSD, FRAG_SMALL_SIZE).empty());
 
-    // 对照组：同布局非 max 模式，32K 空洞可满足 32K 申请，不返回碎片 rank
+    // Control: without max mode, 32K holes satisfy 32K requests, so no fragmented rank is returned.
     auto plainAllocator = MmcMakeRef<MmcGlobalAllocator>();
     LayoutFragmentedBoard(plainAllocator, 0U, false, true);
     EXPECT_TRUE(plainAllocator->GetFragmentedRanks(MEDIA_DRAM, FRAG_SMALL_SIZE).empty());

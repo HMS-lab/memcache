@@ -24,7 +24,7 @@ High-performance distributed key-value cache
 
 ## 🔄 Latest News
 
-- [2026/06] MemCache enables PrefixCache acceleration for inference. See the [wiki case library](https://gitcode.com/Ascend/memcache/wiki/Home.md) for the latest examples.
+- [2026/06] MemCache enables PrefixCache acceleration for inference. See the [deployment examples](https://ascend-memcache.readthedocs.io/zh-cn/latest/getting_started/) for the latest examples.
 - [2025/12] MemCache is available as a vllm-ascend backend to accelerate LLM inference. See the vllm-ascend open-source community and the [usage example](https://docs.vllm.ai/projects/ascend/en/v0.27.1rc1/user_guide/feature_guide/kv_pool.html#example-of-using-memcache-as-a-kv-pool-backend).
 
 - [2025/11] MemCache was open-sourced in November 2025. The community repository is <https://gitcode.com/Ascend/memcache>.

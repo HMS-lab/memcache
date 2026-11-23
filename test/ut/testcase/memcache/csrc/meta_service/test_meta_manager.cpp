@@ -2247,7 +2247,7 @@ TEST_F(TestMmcMetaManager, UpdateConfigAppliesNewValues)
     metaMng->Stop();
 }
 
-// 写线程交替更新两组高低水位时，每次读取的所有非 SSD 介质都应采用同一组完整水位，SSD 水位为 {0, 0}。
+// While a writer alternates watermark pairs, each read must use one complete pair for all non-SSD media; SSD uses {0, 0}.
 TEST_F(TestMmcMetaManager, UpdateConfigKeepsWatermarkSnapshotsConsistent)
 {
     constexpr uint64_t defaultTtl = 2000U;

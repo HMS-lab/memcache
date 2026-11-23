@@ -540,7 +540,7 @@ protected:
     }
 };
 
-// DRAM 使用率低于或等于低水位时，普通 LRU 保留所有 key，淘汰回调次数为 0。
+// At or below the low DRAM watermark, normal LRU retains all keys and invokes no eviction callbacks.
 TEST_F(TestEvictYield, EliminationSkipsAtOrBelowLowWatermark)
 {
     constexpr size_t keyCount = 100;

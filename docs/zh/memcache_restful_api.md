@@ -957,16 +957,16 @@ curl "http://127.0.0.1:8000/batch_query_keys?keys=key_a,key_b"
 
 ### Purpose
 
-删除 MetaService 中指定业务 KV Cache key 的元数据，并按 `flags` 释放或降级关联数据。
+Delete metadata for the specified business KV Cache key in MetaService, and release or demote associated data according to `flags`.
 
-- **异步释放**：默认删除同步摘除索引，底层内存与已登记 SSD 副本后台异步释放（有活跃租约时等待释放或超时）。
-- **SSD 边界**：`aggregated` 仅异步尽力删已登记 SSD 副本（刷盘在途未登记不触发，失败仅告警）；`separated` 不删 UBS IO。
-- **客户端缓存**：通过 REST 删除不会主动通知各客户端清理进程内本地 GVA 追踪缓存。
+- **Asynchronous release**: Default deletion synchronously removes the index entry; underlying memory and registered SSD replicas are released asynchronously (wait for active leases to be released or expire).
+- **SSD scope**: `aggregated` asynchronously attempts deletion only for registered SSD replicas (in-flight, unregistered flushes do not trigger deletion; failures only produce warnings); `separated` retains UBS IO data.
+- **Client caches**: REST deletion does not notify clients to clear their process-local GVA tracking caches.
 
 ### curl
 
 ```bash
-# 默认删除：同步清索引，内存与已登记 SSD 副本异步释放
+# Default deletion: clear the index synchronously; release memory and registered SSD replicas asynchronously.
 curl -X DELETE "http://127.0.0.1:8000/key?key=demo_key"
 
 # Lazy deletion: only Demote the key and wait for natural eviction.
@@ -1025,12 +1025,12 @@ curl -X DELETE "http://127.0.0.1:8000/key?key=demo_key&flags=2"
 
 ### Purpose
 
-清空 MetaService 当前管理的全部业务 KV Cache key 元数据，并异步释放关联数据。
+Clear all business KV Cache key metadata currently managed by MetaService and asynchronously release associated data.
 
-- **不支持 `flags`**：无懒删除或保留 SSD 选项，直接清除索引内全部 key（含已标记懒删除的 key）。
-- **异步释放**：返回 `success: true` 仅表示索引已清且后台任务已提交；有活跃租约时会等待释放或超时。
-- **SSD 边界**：`aggregated` 仅异步尽力删已登记 SSD 副本（刷盘在途未登记不触发，失败仅告警）；`separated` 不删 UBS IO。
-- **并发与缓存**：`lruType=sharded_lru` 下逐分片加锁清空（非全局原子）；不会通知各客户端清理本地 GVA 追踪缓存。
+- **No `flags` support**: There are no lazy-deletion or SSD-retention options. Clear every key from the index, including keys marked for lazy deletion.
+- **Asynchronous release**: `success: true` only means the index has been cleared and background tasks submitted. Active leases must be released or expire.
+- **SSD scope**: `aggregated` asynchronously attempts deletion only for registered SSD replicas (in-flight, unregistered flushes do not trigger deletion; failures only produce warnings); `separated` retains UBS IO data.
+- **Concurrency and caches**: With `lruType=sharded_lru`, each shard is locked and cleared separately (the operation is not globally atomic). Clients are not notified to clear their local GVA tracking caches.
 
 ### curl
 

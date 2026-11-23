@@ -28,7 +28,7 @@ using namespace ock::mmc;
 
 namespace {
 constexpr const char *EXCEEDS_LIMIT_LOG = "exceeds limit";
-// 反序列化框架 NetMsgUnpacker 的所有错误日志都带此文件标签，出现即说明反序列化路径报错。
+// Every NetMsgUnpacker error log has this file tag; its presence indicates a deserialization error.
 constexpr const char *PACKER_LOG_TAG = "mmc_msg_packer.h";
 } // namespace
 
@@ -172,9 +172,9 @@ TEST_F(TestMmcMetaService, ExistRequest)
     metaService->Stop();
 }
 
-// 通过真实客户端 MmcClientDefault::IsExist 走完整 TCP + 序列化/反序列化链路，
-// 校验命中/未命中返回值，并断言捕获窗口内没有反序列化 ERROR 日志（旧 bug 误用 Response 解析
-// IsExistResponse，流耗尽后会打出 "Deserialize container size: 0 exceeds limit" 误报）。
+// Exercise the full TCP and serialization/deserialization path through MmcClientDefault::IsExist.
+// Verify hit/miss results and the absence of deserialization ERROR logs in the capture window. The old bug parsed
+// IsExistResponse as Response and incorrectly logged "Deserialize container size: 0 exceeds limit" on stream exhaustion.
 TEST_F(TestMmcMetaService, IsExistClientRoundTrip)
 {
     std::string metaUrl = "tcp://127.0.0.1:5678";
@@ -247,7 +247,7 @@ TEST_F(TestMmcMetaService, IsExistClientRoundTrip)
     ASSERT_TRUE(client != nullptr);
     ASSERT_TRUE(client->Start(clientConfig) == MMC_OK);
 
-    // UT 构建下所有 MMC_LOG_* 走 std::cout，重定向捕获 IsExist 期间的反序列化日志。
+    // In UT builds, all MMC_LOG_* output goes to std::cout; redirect it to capture IsExist deserialization logs.
     std::stringstream logCapture;
     std::streambuf *originalBuf = std::cout.rdbuf(logCapture.rdbuf());
     const Result hitRet = client->IsExist(hitKey, 0);

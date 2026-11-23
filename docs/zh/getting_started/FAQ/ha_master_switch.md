@@ -1,8 +1,8 @@
-# HA 模式下 master 节点频繁切换
+# Frequent Master Switches in HA Mode
 
-## 问题现象
+## Symptoms
 
-HA 模式下观察到master节点一直在切换，观察master日志发现master在master和backup间频繁切换，初始化时日志中有如下打印：
+In HA mode, the master repeatedly switches between master and backup roles. The master initialization logs include:
 
 ```ini
 2026-06-02 08:57:07.344376 20 warning [MMC_leader_election.cpp:26 Logger] Updated label of self.pod_name=grtest-mmc-1-mmc-meta-0 to labels={'role': 'master'}
@@ -15,35 +15,35 @@ HA 模式下观察到master节点一直在切换，观察master日志发现maste
 2026-06-02 08:57:10.360390 20 warning [MMC_leader_election.cpp:26 Logger] Updated label of self.pod_name=grtest-mmc-1-mmc-meta-0 to labels={'role': 'backup'}
 ```
 
-## 问题根因
+## Root Causes
 
-造成问题的原因一般有以下几种：
+Common causes include:
 
-### 1. 🔥 续约失败 → 降级 → 检查到自己是 holder 又夺回 → 循环
+### 1. 🔥 Renewal failure → demotion → detection of self as holder → promotion → repeat
 
-- RenewLoop 每 3s 续约，一旦网络抖动/APIServer 慢/409 冲突导致续约失败，立即 isLeader_=false，label 变 backup
-- 同一进程的 ElectionLoop 同样每 3s 检查 lease，发现 holder 还是自己，又立即夺回，label 变 master
-- 3s 内 label 就来回跳一次
+- RenewLoop renews the lease every 3 seconds. If network instability, a slow API server, or an HTTP 409 conflict causes renewal to fail, `isLeader_` becomes false and the label changes to backup immediately.
+- ElectionLoop in the same process also checks the lease every 3 seconds. If it is still the holder, it immediately reclaims leadership and changes the label to master.
+- The label can switch back and forth within 3 seconds.
 
-**解决方案**
+**Solution**
 
-检查集群网络配置，或手动修改leaseDurationSeconds 从 10 改大到 20-30。
+Check cluster networking or increase `leaseDurationSeconds` from 10 to 20–30.
 
-### 2. 🔥 两节点时钟不同步
+### 2. 🔥 Node clocks are not synchronized
 
-- check_leader_status 用本地时间判断租约是否过期
-- A 比 B 快 2s → B 认为 lease 已过期 → 抢主
-- A 认为 lease 还有效 → 双方冲突
-- 部署文档要求手动 set-time，生产环境基本都会偏差
+- `check_leader_status` uses local time to determine whether a lease has expired.
+- If A is 2 seconds ahead of B, B may treat the lease as expired and claim leadership.
+- A still considers the lease valid, causing a conflict.
+- The deployment guide requires manual time setting, which can leave clock differences in production.
 
-**解决方案**
+**Solution**
 
-手动同步POD的时钟
+Manually synchronize the pod clocks.
 
-### 3. 🔥 外部控制器自动清理k8s租约信息
+### 3. 🔥 An external controller clears Kubernetes lease information
 
-绝大部分问题场景都是1、2的情况，如果不是，极有可能是用户的代码定时清理k8s租约信息导致
+Most cases are caused by 1 or 2. Otherwise, user code that periodically clears Kubernetes leases is a likely cause.
 
-**解决方案**
+**Solution**
 
-需用户自行排查解决
+Investigate and fix the external lease cleanup.

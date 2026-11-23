@@ -1,17 +1,17 @@
-# 常见问题及解决办法
+# Frequently Asked Questions and Solutions
 
-> [!TIP] 排查步骤
+> [!TIP] Troubleshooting Steps
 >
-> 1. 请先根据下方「问题列表」点击进入对应 FAQ 页面查找解决办法。
-> 2. 如果在本文档中未找到对应问题，请前往 [MemFabric Hybrid FAQ](https://memfabric-hybrid.readthedocs.io/zh-cn/latest/wiki/FAQ/) 继续排查。MemCache 的内存池与传输能力依赖 MemFabric Hybrid 底座，该文档按传输协议汇总了内存分配、设备打开、内存注册与导入等底层问题的定位方法，日志中出现 `[HYBM]`、`[SMEM]`、`[HCOM]` 等底层模块报错时尤其适用。
+> 1. Open the relevant FAQ page from the issue list below.
+> 2. If your issue is not listed, continue with the [MemFabric Hybrid FAQ](https://memfabric-hybrid.readthedocs.io/zh-cn/latest/wiki/FAQ/). MemCache depends on MemFabric Hybrid for memory pooling and transport. That FAQ groups memory allocation, device opening, memory registration, and import troubleshooting by protocol. It is especially useful for errors from underlying modules such as `[HYBM]`, `[SMEM]`, and `[HCOM]`.
 
-## 问题列表
+## Issue List
 
-1. [HalMemCreate 失败（ret: 6）](halmemcreate.md)：内存不足或内核版本不兼容导致内存申请失败。
-2. [store 对象初始化失败](store_init_failed.md)：HCOM 获取 gid 失败，`hcom_url` 未正确配置。
-3. [HOST_RDMA 跨机传输后出现数据一致性问题](host_rdma_data_consistency.md)：RDMA 网卡 MTU 未大于 4096。
-4. [不同节点池化 Size 不一致导致启动失败](pool_size_mismatch.md)：日志报 `AddVaInfo failed: address overlap`。
-5. [HA 模式下 master 节点频繁切换](ha_master_switch.md)：续约失败、时钟不同步或租约被外部清理。
-6. [多 Python 环境混用 memcache 与 memfabric](python_env_mismatch.md)：版本与 `LD_LIBRARY_PATH` 不一致导致拉起或存取失败。
-7. [推理过程中报 lease 过期](lease_expired.md)：单次 batch copy 数据过大超过租约时间。
-8. [内存池初始化报错 AutoRanking failed](auto_ranking_failed.md)：集群 rank 总数超过 `world_size` 配置。
+1. [HalMemCreate fails (ret: 6)](halmemcreate.md): Memory allocation fails because memory is insufficient or the kernel is incompatible.
+2. [Store initialization fails](store_init_failed.md): HCOM cannot obtain a GID because `hcom_url` is configured incorrectly.
+3. [Data inconsistency after cross-node HOST_RDMA transfers](host_rdma_data_consistency.md): The RDMA NIC MTU is not greater than 4096.
+4. [Startup fails because pool sizes differ across nodes](pool_size_mismatch.md): Logs report `AddVaInfo failed: address overlap`.
+5. [Frequent master switches in HA mode](ha_master_switch.md): Lease renewal fails, clocks differ, or an external process clears leases.
+6. [Mixing MemCache and MemFabric across Python environments](python_env_mismatch.md): Versions and `LD_LIBRARY_PATH` differ, causing startup or access failures.
+7. [Lease expiration during inference](lease_expired.md): A batch copy is too large to complete within the lease period.
+8. [Memory pool initialization reports AutoRanking failed](auto_ranking_failed.md): The total cluster rank count exceeds `world_size`.

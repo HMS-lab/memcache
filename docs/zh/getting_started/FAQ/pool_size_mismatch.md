@@ -1,21 +1,21 @@
-# 不同节点池化 Size 不一致导致启动失败
+# Startup Fails Because Pool Sizes Differ Across Nodes
 
-## 问题现象
+## Symptoms
 
-不同节点池化Size不一致，多个local进程启动失败，Mmap失败，初始化时日志中有如下打印：
+Different pool sizes across nodes cause LocalService processes to fail during startup and mmap. Initialization logs include:
 
 ```ini
 AddVaInfo failed: address overlap
 ```
 
-## 问题根因
+## Root Causes
 
-1、每个local进程的配置参数 `ock.mmc.local_service.max.dram.size` 和 `ock.mmc.local_service.max.hbm.size` 不一致，比如A进程的 `ock.mmc.local_service.max.dram.size` 设置 1GB，B进程的 `ock.mmc.local_service.max.dram.size` 设置为 2GB，则不一致。
+1. LocalService processes use different `ock.mmc.local_service.max.dram.size` or `ock.mmc.local_service.max.hbm.size` values. For example, process A sets `ock.mmc.local_service.max.dram.size` to 1 GB while B sets it to 2 GB.
 
-2、`ock.mmc.local_service.max.dram.size` 和 `ock.mmc.local_service.max.hbm.size` 没有设置或者设置为0；而不同local进程的 `ock.mmc.local_service.dram.size` 和 `ock.mmc.local_service.hbm.size` 配置不一样，比如A进程`ock.mmc.local_service.hbm.size`设置为1GB，B进程`ock.mmc.local_service.hbm.size`设置为2GB或者为设置，则不一致。
+2. Maximum DRAM/HBM sizes are unset or zero, while `ock.mmc.local_service.dram.size` or `ock.mmc.local_service.hbm.size` differs across processes. For example, A sets its HBM size to 1 GB while B sets it to 2 GB or leaves it unset.
 
-## 解决方案
+## Solutions
 
-1、手动设置 `ock.mmc.local_service.max.dram.size`和 `ock.mmc.local_service.max.hbm.size`，让每个local进程一致。
+1. Explicitly set `ock.mmc.local_service.max.dram.size` and `ock.mmc.local_service.max.hbm.size` consistently across all LocalService processes.
 
-2、如果不设置 `ock.mmc.local_service.max.dram.size` 或者 `ock.mmc.local_service.max.hbm.size`，则每个local进程对应的 `ock.mmc.local_service.dram.size` 和 `ock.mmc.local_service.hbm.size`要一致。
+2. If maximum sizes are unset, use matching `ock.mmc.local_service.dram.size` and `ock.mmc.local_service.hbm.size` values across all LocalService processes.

@@ -196,7 +196,7 @@ pip install memfabric_hybrid==1.3.1 --force-reinstall --no-deps
 pip install memcache_hybrid==1.3.1 --force-reinstall --no-deps
 ```
 
-`--force-reinstall` 会覆盖当前环境中的同名包，`--no-deps` 不会自动安装或调整依赖。在四台容器中执行以下检查，确认两个包的版本均为 `1.3.1`，并核对同一个包在各节点上的构建提交是否一致。
+`--force-reinstall` replaces packages with the same names in the current environment; `--no-deps` does not install or change dependencies automatically. Run the following checks in all four containers to confirm both packages are version `1.3.1` and each package has the same build commit across nodes.
 
 ```bash
 python3 - <<'PY'
@@ -211,7 +211,7 @@ for package in ("memfabric_hybrid", "memcache_hybrid"):
 PY
 ```
 
-PyPI 发布的 `1.3.1` CPython 3.12 AArch64 wheel 中，`memfabric_hybrid` 的构建提交前六位为 `137c52`，`memcache_hybrid` 为 `9922c2`。
+In the `1.3.1` CPython 3.12 AArch64 wheels published on PyPI, the build commit prefixes are `137c52` for `memfabric_hybrid` and `9922c2` for `memcache_hybrid`.
 
 ### 修改MemCache配置文件
 
@@ -386,7 +386,7 @@ ubsio.standalone.force_new_disk = true
 
 其中 `80GB` 采用A3 分离模式典型值；使用前需确认节点具有足够剩余内存。`force_new_disk = true` 会把两个专用 loop 设备按新盘初始化，不恢复旧 UBS IO 元数据，因此只能用于已确认可覆盖的专用镜像文件。
 
-本次实测使用 `ubsio.mem.size_in_gb = 80`，Meta 淘汰低水位为 50%，高水位为 70%。特性原理和完整参数说明参见 [DRAM + SSD 多级池化特性介绍](https://ascend-memcache.readthedocs.io/zh-cn/latest/user_guide/feature_guide/DRAM%2BSSD%E5%A4%9A%E7%BA%A7%E6%B1%A0%E5%8C%96/%E7%89%B9%E6%80%A7%E4%BB%8B%E7%BB%8D/) 与 [DRAM + SSD 多级池化配置指南](https://ascend-memcache.readthedocs.io/zh-cn/latest/user_guide/feature_guide/DRAM%2BSSD%E5%A4%9A%E7%BA%A7%E6%B1%A0%E5%8C%96/%E9%85%8D%E7%BD%AE%E6%8C%87%E5%8D%97/)。
+This test uses `ubsio.mem.size_in_gb = 80`, with MetaService eviction low/high watermarks of 50% and 70%. For feature details and the full parameter reference, see the [DRAM + SSD tiered pooling overview](https://ascend-memcache.readthedocs.io/zh-cn/latest/user_guide/feature_guide/DRAM%2BSSD%E5%A4%9A%E7%BA%A7%E6%B1%A0%E5%8C%96/%E7%89%B9%E6%80%A7%E4%BB%8B%E7%BB%8D/) and [configuration guide](https://ascend-memcache.readthedocs.io/zh-cn/latest/user_guide/feature_guide/DRAM%2BSSD%E5%A4%9A%E7%BA%A7%E6%B1%A0%E5%8C%96/%E9%85%8D%E7%BD%AE%E6%8C%87%E5%8D%97/).
 
 **步骤五**：新建独立进程启动脚本。
 

@@ -1,8 +1,8 @@
-# store 对象初始化失败
+# Store Initialization Fails
 
-## 问题现象
+## Symptoms
 
-调用store初始化接口时，HCOM获取gid失败，日志中报以下错误：
+During store initialization, HCOM fails to obtain a GID and logs the following errors:
 
 ```ini
 ERROR [HCOM rdma_device_helper.cpp:322] Failed to get proper gid by address for ip 127.0.0.1
@@ -27,10 +27,10 @@ ERROR [952-952][MMC mmc_service.cpp:53 mmcs_local_service_start] create or start
 ERROR [952-952][MMC mmc.cpp:70 mmc_init] failed to create or start local service
 ```
 
-## 问题根因
+## Root Cause
 
-此问题是因为mmc-local.conf配置文件中将ock.mmc.local_service.protocol设置为host_rdma，但是没有正确设置ock.mmc.local_service.hcom_url中的ip地址
+`ock.mmc.local_service.protocol` is set to `host_rdma` in `mmc-local.conf`, but the IP address in `ock.mmc.local_service.hcom_url` is incorrect.
 
-## 解决方案
+## Solution
 
-需要在环境上执行show_gids查询RDMA网卡的IP地址，并将其设置到ock.mmc.local_service.hcom_url中
+Run `show_gids` to find the RDMA NIC IP address and set it in `ock.mmc.local_service.hcom_url`.
