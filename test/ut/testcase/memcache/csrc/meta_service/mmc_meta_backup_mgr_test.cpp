@@ -19,6 +19,7 @@
 #include "gtest/gtest.h"
 
 #include "mmc_meta_backup_mgr_default.h"
+#include "mmc_meta_service.h"
 
 namespace ock {
 namespace mmc {
@@ -127,6 +128,40 @@ struct BackupSendMember {
 };
 template struct PrivateMemberAccessor<BackupSendMember, &MMCMetaBackUpMgrDefault::SendBackupForRank>;
 
+struct BackupServerEngineMember {
+    using Type = NetEnginePtr MetaNetServer::*;
+    friend Type GetMember(BackupServerEngineMember);
+};
+template struct PrivateMemberAccessor<BackupServerEngineMember, &MetaNetServer::engine_>;
+
+class BackupTestNetEngine : public NetEngine {
+public:
+    Result Start(const NetEngineOptions &) override
+    {
+        return MMC_OK;
+    }
+
+    void Stop() override {}
+
+    Result ConnectToPeer(uint32_t, const std::string &, uint16_t, NetLinkPtr &, bool, bool) override
+    {
+        return MMC_ERROR;
+    }
+
+    Result Send(uint32_t, const char *, uint32_t, int32_t) override
+    {
+        return MMC_ERROR;
+    }
+
+    Result Call(uint32_t, int16_t, const char *, uint32_t, char **, uint32_t &, int32_t) override
+    {
+        ++callCount;
+        return MMC_ERROR;
+    }
+
+    uint32_t callCount = 0;
+};
+
 TEST_F(MmcMetaBackupMgrTest, BackupSkipsRejectedDramSources)
 {
     constexpr uint32_t rank = 1;
@@ -134,7 +169,6 @@ TEST_F(MmcMetaBackupMgrTest, BackupSkipsRejectedDramSources)
     constexpr uint64_t size = 4096;
     constexpr uint32_t oneAttempt = 1;
     uint32_t acquireCount = 0;
-    uint32_t releaseCount = 0;
     // No server is configured: rejected sources must never reach the RPC path.
     auto defaultConf = MmcMakeRef<MMCMetaBackUpConfDefault>(MetaNetServerPtr{});
     defaultConf->acquireReadLease = [&acquireCount](const std::string &key, const MmcMemBlobDesc &, BackupReadLease &) {
@@ -142,7 +176,6 @@ TEST_F(MmcMetaBackupMgrTest, BackupSkipsRejectedDramSources)
         ++acquireCount;
         return MMC_UNMATCHED_KEY;
     };
-    defaultConf->releaseReadLease = [&releaseCount](const BackupReadLease &) { ++releaseCount; };
     MMCMetaBackUpConfPtr conf = defaultConf.Get();
     MMCMetaBackUpMgrDefault backupMgr;
     ASSERT_EQ(backupMgr.Start(conf), MMC_OK);
@@ -150,27 +183,27 @@ TEST_F(MmcMetaBackupMgrTest, BackupSkipsRejectedDramSources)
     std::vector<MetaBackUpOperate> entries{{META_BACKUP_ADD, "stale", desc}};
     (backupMgr.*GetMember(BackupSendMember{}))(rank, entries);
     EXPECT_EQ(acquireCount, oneAttempt);
-    EXPECT_EQ(releaseCount, 0U);
     backupMgr.Stop();
 }
 
-TEST_F(MmcMetaBackupMgrTest, BackupSkipsDramSourcesWithoutLeaseHooks)
+TEST_F(MmcMetaBackupMgrTest, BackupSendsDramSourceOnlyWhenLeaseIsAcquired)
 {
     constexpr uint32_t rank = 1;
     constexpr uint64_t gva = 4096;
     constexpr uint64_t size = 4096;
+    constexpr uint32_t oneCall = 1;
     for (bool provideAcquire : {false, true}) {
         uint32_t acquireCount = 0;
-        uint32_t releaseCount = 0;
-        auto defaultConf = MmcMakeRef<MMCMetaBackUpConfDefault>(MetaNetServerPtr{});
+        auto engine = MmcMakeRef<BackupTestNetEngine>();
+        auto server = MmcMakeRef<MetaNetServer>(MmcMetaServicePtr{});
+        server.Get()->*GetMember(BackupServerEngineMember{}) = engine.Get();
+        auto defaultConf = MmcMakeRef<MMCMetaBackUpConfDefault>(server);
         if (provideAcquire) {
             defaultConf->acquireReadLease = [&acquireCount](const std::string &, const MmcMemBlobDesc &,
                                                             BackupReadLease &) {
                 ++acquireCount;
                 return MMC_OK;
             };
-        } else {
-            defaultConf->releaseReadLease = [&releaseCount](const BackupReadLease &) { ++releaseCount; };
         }
         MMCMetaBackUpConfPtr conf = defaultConf.Get();
         MMCMetaBackUpMgrDefault backupMgr;
@@ -178,8 +211,9 @@ TEST_F(MmcMetaBackupMgrTest, BackupSkipsDramSourcesWithoutLeaseHooks)
         MmcMemBlobDesc desc{rank, gva, size, MEDIA_DRAM};
         std::vector<MetaBackUpOperate> entries{{META_BACKUP_ADD, "missing_hook", desc}};
         (backupMgr.*GetMember(BackupSendMember{}))(rank, entries);
-        EXPECT_EQ(acquireCount, 0U);
-        EXPECT_EQ(releaseCount, 0U);
+        const uint32_t expectedCalls = provideAcquire ? oneCall : 0U;
+        EXPECT_EQ(acquireCount, expectedCalls);
+        EXPECT_EQ(engine->callCount, expectedCalls);
         backupMgr.Stop();
     }
 }

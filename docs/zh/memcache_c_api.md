@@ -376,7 +376,8 @@ int32_t mmcc_batch_remove_lease(const char **keys, uint32_t keys_count);
 
 **功能**
 
-批量移除多个 key 的读租约，并清理当前进程中对应的 GVA 读取状态。
+批量清理当前进程中多个 key 的 GVA 读取状态，并向 MetaService 发送读取完成通知。
+读取完成通知不改变服务端的租约截止时间，数据块在租约到期前仍受淘汰保护。
 
 **参数**
 
@@ -385,7 +386,7 @@ int32_t mmcc_batch_remove_lease(const char **keys, uint32_t keys_count);
 
 **返回值**
 
-- `0`：本地读租约检查通过并已触发移除租约请求发送流程。
+- `0`：本地读租约检查通过，客户端已发起读取完成通知。
 - 其他：失败。
 
 #### mmcc_batch_malloc

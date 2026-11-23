@@ -132,7 +132,7 @@ void MMCMetaBackUpMgrDefault::SendBackupForRank(uint32_t rank, std::vector<MetaB
     for (auto &e : entries) {
         if (e.op_ == META_BACKUP_ADD && e.desc_.mediaType_ == MEDIA_DRAM) {
             BackupReadLease lease;
-            if (!acquireReadLease_ || !releaseReadLease_ || acquireReadLease_(e.key_, e.desc_, lease) != MMC_OK) {
+            if (!acquireReadLease_ || acquireReadLease_(e.key_, e.desc_, lease) != MMC_OK) {
                 MMC_LOG_DEBUG("Skip backup without a DRAM read lease, key=" << e.key_ << ", blob=" << e.desc_);
                 continue;
             }
@@ -152,9 +152,6 @@ void MMCMetaBackUpMgrDefault::SendBackupForRank(uint32_t rank, std::vector<MetaB
     TP_TRACE_BEGIN(TP_MMC_META_ASYNC_FLUSH_RPC);
     Result ret = metaNetServer_->SyncCall(rank, request, response, ASYNC_FLUSH_RPC_TIMEOUT_SECOND);
     TP_TRACE_END(TP_MMC_META_ASYNC_FLUSH_RPC, ret);
-    for (const auto &lease : leases) {
-        releaseReadLease_(lease);
-    }
 
     if (ret != MMC_OK) {
         MMC_LOG_ERROR("mmc meta back up failed, bm rank " << rank << ", ret=" << ret

@@ -362,8 +362,9 @@ public:
     virtual std::vector<int> BatchAddLease(const std::vector<std::string> &keys, uint64_t leaseTtlMs = 0) = 0;
 
     /**
-     * @brief Remove read leases for keys and clear local GVA read state
-     * @param keys Vector of keys to remove lease
+     * @brief Clear local GVA read state and notify MetaService of read completion
+     * @note The notification leaves the server-side lease deadline intact.
+     * @param keys Vector of keys whose reads have completed
      * @return 0 if local remove-lease handling succeeds, negative value on error
      */
     virtual int BatchRemoveLease(const std::vector<std::string> &keys) = 0;

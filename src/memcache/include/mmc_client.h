@@ -114,7 +114,8 @@ int32_t mmcc_batch_query(const char **keys, size_t keys_count, mmc_data_info *in
 int32_t mmcc_batch_add_lease(const char **keys, uint32_t keys_count, uint64_t lease_ttl_ms, int32_t *results);
 
 /**
- * @brief Remove read leases for multiple keys
+ * @brief Clear local GVA read state and notify MetaService of read completion
+ * @note The notification leaves the server-side lease deadline intact.
  *
  * @param keys             [in] keys of data, the length of key is less than 256
  * @param keys_count       [in] Count of keys

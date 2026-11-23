@@ -16,6 +16,7 @@
 #include <limits>
 #include <thread>
 #include "gtest/gtest.h"
+#include "mmc_config_const.h"
 #include "mmc_meta_manager.h"
 #include "mmc_meta_mgr_proxy.h"
 #include "mmc_def.h"
@@ -26,6 +27,11 @@ using namespace std;
 
 namespace ock {
 namespace mmc {
+
+namespace {
+// Fixture writes should expire before the test exercises removal or eviction.
+constexpr uint64_t kSetupWriteLeaseTtlMs = 10;
+} // namespace
 
 class TestMmcMetaManager : public testing::Test {
 public:
@@ -204,6 +210,7 @@ TEST_F(TestMmcMetaManager, PendingGetDoesNotDependOnRewarmWorkerAvailability)
 TEST_F(TestMmcMetaManager, BatchQuerySsdEvictionWakesPendingAndPreservesOtherKeys)
 {
     constexpr uint64_t defaultTtlMs = 2000U;
+    constexpr uint64_t readLeaseTtlMs = 30000U;
     constexpr uint64_t pendingTimeoutMs = 5000U;
     constexpr uint16_t highWatermark = 70U;
     constexpr uint16_t lowWatermark = 60U;
@@ -241,6 +248,11 @@ TEST_F(TestMmcMetaManager, BatchQuerySsdEvictionWakesPendingAndPreservesOtherKey
     ASSERT_NE(evictedPending, nullptr);
     ASSERT_NE(successfulPending, nullptr);
     ASSERT_NE(readable, nullptr);
+    const auto remainingWriteLeaseMs = successfulPending->LeaseTimeoutTtlMs();
+    ASSERT_GT(remainingWriteLeaseMs, 0U);
+    ASSERT_LT(remainingWriteLeaseMs, readLeaseTtlMs);
+    // Any read lease granted during prefetch would extend the existing write deadline.
+    successfulPending->SetDefaultLeaseTtlMs(readLeaseTtlMs);
     for (size_t index = 0; index < keys.size(); ++index) {
         ASSERT_EQ(MetaContainer(mgr)->Insert(keys[index], objects[index]), MMC_OK);
     }
@@ -273,7 +285,7 @@ TEST_F(TestMmcMetaManager, BatchQuerySsdEvictionWakesPendingAndPreservesOtherKey
     EXPECT_EQ(queryStatus, std::future_status::ready);
     EXPECT_LT(completionElapsed, completionLimit);
     EXPECT_EQ(objects[evictedIndex]->NumBlobs(), 0U);
-    EXPECT_EQ(evictedPending->UseCount(), 0U);
+    EXPECT_EQ(evictedPending->State(), REMOVING);
     MmcMemObjMetaPtr removedObject;
     EXPECT_EQ(MetaContainer(mgr)->Get(keys[evictedIndex], removedObject), MMC_UNMATCHED_KEY);
     ASSERT_EQ(response.batchQueryInfos_.size(), keys.size());
@@ -291,8 +303,9 @@ TEST_F(TestMmcMetaManager, BatchQuerySsdEvictionWakesPendingAndPreservesOtherKey
     }
     EXPECT_EQ(response.batchQueryInfos_[rewarmedIndex].blobs_.front().gva_, successfulPending->GetDesc().gva_);
     EXPECT_EQ(response.batchQueryInfos_[readableIndex].blobs_.front().gva_, readable->GetDesc().gva_);
-    EXPECT_EQ(successfulPending->UseCount(), 0U);
-    EXPECT_EQ(readable->UseCount(), 0U);
+    EXPECT_GT(successfulPending->LeaseTimeoutTtlMs(), 0U);
+    EXPECT_LE(successfulPending->LeaseTimeoutTtlMs(), remainingWriteLeaseMs);
+    EXPECT_EQ(readable->LeaseTimeoutTtlMs(), 0U);
 }
 
 TEST_F(TestMmcMetaManager, QueuedRewarmSsdEvictionPreservesReadableDram)
@@ -352,7 +365,7 @@ TEST_F(TestMmcMetaManager, PendingPrefetchDoesNotAddDramReadLease)
     EXPECT_EQ(ret, MMC_OK);
     ASSERT_EQ(objMetas.size(), 1U);
     EXPECT_EQ(objMetas[0].numBlobs_, 1U);
-    EXPECT_EQ(pendingBlob->UseCount(), 0U);
+    EXPECT_EQ(pendingBlob->LeaseTimeoutTtlMs(), 0U);
 
     metaMng->Stop();
 }
@@ -379,7 +392,7 @@ TEST_F(TestMmcMetaManager, AsyncPrefetchDoesNotWaitForPendingBlob)
     }
     EXPECT_EQ(submitStatus, std::future_status::ready);
     EXPECT_EQ(submitFuture.get(), MMC_OK);
-    EXPECT_EQ(pendingBlob->UseCount(), 0U);
+    EXPECT_EQ(pendingBlob->LeaseTimeoutTtlMs(), 0U);
 
     metaMng->Stop();
 }
@@ -1135,9 +1148,9 @@ TEST_F(TestMmcMetaManager, EvictCallback_AllocatedOnlyExpiredLease_GoesToRemove)
     metaMng->Stop();
 }
 
-TEST_F(TestMmcMetaManager, EvictCallback_ReleasesCompletedWriteLease)
+TEST_F(TestMmcMetaManager, EvictCallback_ProtectsCompletedWriteUntilLeaseExpires)
 {
-    constexpr uint64_t leaseTtlMs = 5000;
+    constexpr uint64_t leaseTtlMs = 200;
     constexpr uint16_t highWatermark = 70;
     constexpr uint16_t lowWatermark = 50;
     const MmcLocation dramLoc{0, MEDIA_DRAM};
@@ -1160,20 +1173,66 @@ TEST_F(TestMmcMetaManager, EvictCallback_ReleasesCompletedWriteLease)
         ASSERT_EQ(container->Get(key, object), MMC_OK);
         ASSERT_EQ(object->GetBlobs().size(), 1U);
         EXPECT_EQ(object->GetBlobs()[0]->State(), ALLOCATED);
-        EXPECT_EQ(object->GetBlobs()[0]->UseCount(), 1U);
         EXPECT_GT(object->GetBlobs()[0]->LeaseTimeoutTtlMs(), 0U);
         ASSERT_EQ(manager->UpdateState(key, dramLoc, MMC_WRITE_OK, operateId), MMC_OK);
-        EXPECT_EQ(object->GetBlobs()[0]->UseCount(), 0U);
-        EXPECT_EQ(object->GetBlobs()[0]->LeaseTimeoutTtlMs(), 0U);
+        EXPECT_GT(object->GetBlobs()[0]->LeaseTimeoutTtlMs(), 0U);
+        EXPECT_EQ(container->EvictDefragTargets({key}, evict, MEDIA_DRAM), 0U);
+        std::this_thread::sleep_for(std::chrono::milliseconds(leaseTtlMs));
         EXPECT_EQ(container->EvictDefragTargets({key}, evict, MEDIA_DRAM), 1U);
         EXPECT_EQ(container->Get(key, object), MMC_UNMATCHED_KEY);
         manager->Stop();
     }
 }
 
-TEST_F(TestMmcMetaManager, EvictCallback_ReleasesCompletedReadLease)
+TEST_F(TestMmcMetaManager, CompletedWritesBlockReclamationUnderPressureWithDefaultLease)
 {
-    constexpr uint64_t leaseTtlMs = 5000;
+    constexpr auto leaseTtlMs = ConfConstant::OCK_MMC_META_LEASE_TTL_MS.second;
+    constexpr auto highWatermark = ConfConstant::OKC_MMC_EVICT_THRESHOLD_HIGH.second;
+    constexpr auto lowWatermark = ConfConstant::OKC_MMC_EVICT_THRESHOLD_LOW.second;
+    constexpr uint8_t replicaCount = 1;
+    const auto evictionTimeout = std::chrono::seconds(1);
+    const auto pollInterval = std::chrono::milliseconds(1);
+    const std::vector<std::string> keys{"completed_write_first", "completed_write_second"};
+    const MmcLocation dramLoc{0, MEDIA_DRAM};
+    auto proxy = MmcMakeRef<MmcMetaMgrProxy>(MetaNetServerPtr{});
+    ASSERT_EQ(proxy->Start(leaseTtlMs, highWatermark, lowWatermark), MMC_OK);
+    auto manager = proxy->GetMetaManager();
+    std::vector<std::pair<std::string, MmcMemBlobDesc>> blobMap;
+    ASSERT_EQ(manager->Mount(dramLoc, {0, SIZE_32K * keys.size()}, blobMap), MMC_OK);
+
+    const AllocOptions options{SIZE_32K, replicaCount, MEDIA_DRAM, {dramLoc.rank_}, 0};
+    for (const auto &key : keys) {
+        const auto operateId = GenerateOperateId(dramLoc.rank_);
+        AllocResponse allocation;
+        ASSERT_EQ(proxy->Alloc({key, options, operateId, dramLoc.rank_}, allocation), MMC_OK);
+        Response completion;
+        ASSERT_EQ(proxy->UpdateState({MMC_WRITE_OK, key, dramLoc.rank_, MEDIA_DRAM, operateId}, completion), MMC_OK);
+        ASSERT_EQ(completion.ret_, MMC_OK);
+    }
+    ASSERT_EQ(GlobalAllocator(manager)->GetFreeSpace(MEDIA_DRAM), 0U);
+
+    AllocResponse overflow;
+    EXPECT_EQ(proxy->Alloc({"overflow_write", options, GenerateOperateId(dramLoc.rank_), dramLoc.rank_}, overflow),
+              MMC_ERROR);
+    const auto deadline = std::chrono::steady_clock::now() + evictionTimeout;
+    while (manager->IsEvictRunning() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(pollInterval);
+    }
+    ASSERT_FALSE(manager->IsEvictRunning());
+    for (const auto &key : keys) {
+        MmcMemObjMetaPtr object;
+        ASSERT_EQ(MetaContainer(manager)->Get(key, object), MMC_OK);
+        ASSERT_EQ(object->GetBlobs().size(), replicaCount);
+        EXPECT_EQ(object->GetBlobs().front()->State(), READABLE);
+        EXPECT_GT(object->GetBlobs().front()->LeaseTimeoutTtlMs(), 0U);
+    }
+    EXPECT_EQ(GlobalAllocator(manager)->GetFreeSpace(MEDIA_DRAM), 0U);
+    proxy->Stop();
+}
+
+TEST_F(TestMmcMetaManager, EvictCallback_ProtectsCompletedReadUntilLeaseExpires)
+{
+    constexpr uint64_t leaseTtlMs = 200;
     constexpr uint16_t highWatermark = 70;
     constexpr uint16_t lowWatermark = 50;
     const MmcLocation dramLoc{0, MEDIA_DRAM};
@@ -1199,11 +1258,11 @@ TEST_F(TestMmcMetaManager, EvictCallback_ReleasesCompletedReadLease)
         ASSERT_EQ(container->Get(key, object), MMC_OK);
         ASSERT_EQ(object->GetBlobs().size(), 1U);
         EXPECT_EQ(object->GetBlobs()[0]->State(), READABLE);
-        EXPECT_EQ(object->GetBlobs()[0]->UseCount(), 1U);
         EXPECT_GT(object->GetBlobs()[0]->LeaseTimeoutTtlMs(), 0U);
         ASSERT_EQ(manager->UpdateState(key, dramLoc, MMC_READ_FINISH, readOperateId), MMC_OK);
-        EXPECT_EQ(object->GetBlobs()[0]->UseCount(), 0U);
-        EXPECT_EQ(object->GetBlobs()[0]->LeaseTimeoutTtlMs(), 0U);
+        EXPECT_GT(object->GetBlobs()[0]->LeaseTimeoutTtlMs(), 0U);
+        EXPECT_EQ(container->EvictDefragTargets({key}, evict, MEDIA_DRAM), 0U);
+        std::this_thread::sleep_for(std::chrono::milliseconds(leaseTtlMs));
         EXPECT_EQ(container->EvictDefragTargets({key}, evict, MEDIA_DRAM), 1U);
         EXPECT_EQ(container->Get(key, object), MMC_UNMATCHED_KEY);
         manager->Stop();
@@ -1372,8 +1431,9 @@ TEST_F(TestMmcMetaManager, RemoveMixedMedia_FreesAllAllocators)
     std::string key = "mixed_key";
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_HBM, {0}, 0};
     MmcMemMetaDesc objMeta;
-    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, kSetupWriteLeaseTtlMs, objMeta), MMC_OK);
     ASSERT_EQ(metaMng->UpdateState(key, hbmLoc, MMC_WRITE_OK, 1), MMC_OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(kSetupWriteLeaseTtlMs));
 
     // 记录 Remove 前各介质使用量
     auto getUsed = [&](const std::string &medium) -> uint64_t {
@@ -1412,8 +1472,9 @@ TEST_F(TestMmcMetaManager, DramOnlyRemove_SsdPreFreeNoop)
     std::string key = "dram_only";
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
     MmcMemMetaDesc objMeta;
-    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, kSetupWriteLeaseTtlMs, objMeta), MMC_OK);
     ASSERT_EQ(metaMng->UpdateState(key, dramLoc, MMC_WRITE_OK, 1), MMC_OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(kSetupWriteLeaseTtlMs));
 
     auto segs = metaMng->GetAllSegmentInfo();
     uint64_t dramUsed = 0;
@@ -1452,8 +1513,9 @@ TEST_F(TestMmcMetaManager, KeepSsdRemove_FreesMemoryOnlyKeepsSsdMeta)
     std::string key = "keep_ssd_key";
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
     MmcMemMetaDesc objMeta;
-    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, kSetupWriteLeaseTtlMs, objMeta), MMC_OK);
     ASSERT_EQ(metaMng->UpdateState(key, dramLoc, MMC_WRITE_OK, 1), MMC_OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(kSetupWriteLeaseTtlMs));
     ASSERT_EQ(metaMng->AddSsdBlob(key, MmcMemBlobDesc{0, 0, SIZE_32K, MEDIA_SSD, READABLE, 0}), MMC_OK);
 
     // Spy overrides SsdPreFree handler (Stop clears it, so no manual restoration is needed).
@@ -1505,8 +1567,9 @@ TEST_F(TestMmcMetaManager, RemoveDefault_DramSsdKey_TriggersSsdPreFree)
     std::string key = "full_remove_key";
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
     MmcMemMetaDesc objMeta;
-    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, kSetupWriteLeaseTtlMs, objMeta), MMC_OK);
     ASSERT_EQ(metaMng->UpdateState(key, dramLoc, MMC_WRITE_OK, 1), MMC_OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(kSetupWriteLeaseTtlMs));
     ASSERT_EQ(metaMng->AddSsdBlob(key, MmcMemBlobDesc{0, 0, SIZE_32K, MEDIA_SSD, READABLE, 0}), MMC_OK);
 
     std::atomic<uint32_t> spyCount{0};
@@ -1542,8 +1605,9 @@ TEST_F(TestMmcMetaManager, KeepSsdRemove_NoSsdBlob_DegradesToFullRemove)
     std::string key = "no_ssd_key";
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
     MmcMemMetaDesc objMeta;
-    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, kSetupWriteLeaseTtlMs, objMeta), MMC_OK);
     ASSERT_EQ(metaMng->UpdateState(key, dramLoc, MMC_WRITE_OK, 1), MMC_OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(kSetupWriteLeaseTtlMs));
 
     std::atomic<uint32_t> spyCount{0};
     MmcMemBlob::ssdPreFreeHandler_ = [&spyCount](const std::string &key, const MmcMemBlobDesc &desc) {
@@ -1586,8 +1650,9 @@ TEST_F(TestMmcMetaManager, LazyRemove_DramKey_MarksLazyWithoutErasing)
     std::string key = "lazy_remove_key";
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
     MmcMemMetaDesc objMeta;
-    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, kSetupWriteLeaseTtlMs, objMeta), MMC_OK);
     ASSERT_EQ(metaMng->UpdateState(key, dramLoc, MMC_WRITE_OK, 1), MMC_OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(kSetupWriteLeaseTtlMs));
 
     auto getDramUsed = [&metaMng]() -> uint64_t {
         for (const auto &s : metaMng->GetAllSegmentInfo()) {
@@ -1628,8 +1693,9 @@ TEST_F(TestMmcMetaManager, LazyRemove_SsdOnlyKey_DegradesToFullRemove)
     std::string key = "lazy_remove_ssd_only_key";
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
     MmcMemMetaDesc objMeta;
-    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, kSetupWriteLeaseTtlMs, objMeta), MMC_OK);
     ASSERT_EQ(metaMng->UpdateState(key, dramLoc, MMC_WRITE_OK, 1), MMC_OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(kSetupWriteLeaseTtlMs));
     ASSERT_EQ(metaMng->AddSsdBlob(key, MmcMemBlobDesc{0, 0, SIZE_32K, MEDIA_SSD, READABLE, 0}), MMC_OK);
 
     // First park as SSD-only with KEEP_SSD: outside memory LRU, unreachable by natural eviction.
@@ -1670,8 +1736,9 @@ TEST_F(TestMmcMetaManager, RemoveBothFlags_DramSsdKey_MarksLazyAndKeepsSsd)
     std::string key = "both_flags_dram_ssd_key";
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
     MmcMemMetaDesc objMeta;
-    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, kSetupWriteLeaseTtlMs, objMeta), MMC_OK);
     ASSERT_EQ(metaMng->UpdateState(key, dramLoc, MMC_WRITE_OK, 1), MMC_OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(kSetupWriteLeaseTtlMs));
     ASSERT_EQ(metaMng->AddSsdBlob(key, MmcMemBlobDesc{0, 0, SIZE_32K, MEDIA_SSD, READABLE, 0}), MMC_OK);
 
     std::atomic<uint32_t> spyCount{0};
@@ -1736,8 +1803,9 @@ TEST_F(TestMmcMetaManager, RemoveBothFlags_DramOnlyKey_MarksLazyOnly)
     std::string key = "both_flags_dram_only_key";
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
     MmcMemMetaDesc objMeta;
-    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, kSetupWriteLeaseTtlMs, objMeta), MMC_OK);
     ASSERT_EQ(metaMng->UpdateState(key, dramLoc, MMC_WRITE_OK, 1), MMC_OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(kSetupWriteLeaseTtlMs));
 
     auto getDramUsed = [&metaMng]() -> uint64_t {
         for (const auto &s : metaMng->GetAllSegmentInfo()) {
@@ -1778,8 +1846,9 @@ TEST_F(TestMmcMetaManager, RemoveBothFlags_SsdOnlyKey_IsNoopButReturnsOk)
     std::string key = "both_flags_ssd_only_key";
     AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
     MmcMemMetaDesc objMeta;
-    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, kSetupWriteLeaseTtlMs, objMeta), MMC_OK);
     ASSERT_EQ(metaMng->UpdateState(key, dramLoc, MMC_WRITE_OK, 1), MMC_OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(kSetupWriteLeaseTtlMs));
     ASSERT_EQ(metaMng->AddSsdBlob(key, MmcMemBlobDesc{0, 0, SIZE_32K, MEDIA_SSD, READABLE, 0}), MMC_OK);
     ASSERT_EQ(metaMng->Remove(key, MMC_REMOVE_FLAG_KEEP_SSD), MMC_OK);
     usleep(100000U);
@@ -1832,9 +1901,10 @@ TEST_F(TestMmcMetaManager, RemoveOutcome_LazyReportsActualResult)
 
     // 2) SSD-only key: lazy deletion becomes full deletion; count as kRemoved.
     std::string ssdOnlyKey = "outcome_ssd_only_key";
-    ASSERT_EQ(metaMng->Alloc(ssdOnlyKey, allocReq, 1, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->Alloc(ssdOnlyKey, allocReq, 1, kSetupWriteLeaseTtlMs, objMeta), MMC_OK);
     ASSERT_EQ(metaMng->UpdateState(ssdOnlyKey, dramLoc, MMC_WRITE_OK, 1), MMC_OK);
     ASSERT_EQ(metaMng->AddSsdBlob(ssdOnlyKey, MmcMemBlobDesc{0, 0, SIZE_32K, MEDIA_SSD, READABLE, 0}), MMC_OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(kSetupWriteLeaseTtlMs));
     ASSERT_EQ(metaMng->Remove(ssdOnlyKey, MMC_REMOVE_FLAG_KEEP_SSD), MMC_OK);
     usleep(100000U);
 
@@ -1975,7 +2045,6 @@ TEST_F(TestMmcMetaManager, GvaAlloc_DuplicateSsdDoesNotGrantWriteLease)
     EXPECT_EQ(result.blobs_.front().mediaType_, static_cast<uint16_t>(MEDIA_SSD));
     EXPECT_EQ(result.blobs_.front().gva_, uint64_t{0});
     EXPECT_EQ(result.blobs_.front().state_, READABLE);
-    EXPECT_EQ(ssdBlob->UseCount(), uint32_t{0});
     EXPECT_EQ(ssdBlob->LeaseTimeoutTtlMs(), uint64_t{0});
     metaMng->Stop();
 }
@@ -2216,12 +2285,15 @@ TEST_F(TestMmcMetaManager, PrefetchKeys_EmptyKeys_ReturnsOk)
 
 TEST_F(TestMmcMetaManager, GetByRankPrefetchDoesNotAddDramReadLease)
 {
-    auto metaMng = MmcMakeRef<MmcMetaManager>(2000U, 70U, 60U);
+    constexpr uint64_t readLeaseTtlMs = 2000U;
+    constexpr uint64_t renewedLeaseTtlMs = 30000U;
+    auto metaMng = MmcMakeRef<MmcMetaManager>(readLeaseTtlMs, 70U, 60U);
     ASSERT_EQ(metaMng->Start(), MMC_OK);
 
     const std::string key = "prefetch_without_read_lease";
     auto memObj = MmcMakeRef<MmcMemObjMeta>();
     auto blob = MmcMakeRef<MmcMemBlob>(0, 0x1000, SIZE_32K, MEDIA_DRAM, READABLE, SIZE_32K);
+    blob->SetDefaultLeaseTtlMs(readLeaseTtlMs);
     ASSERT_EQ(memObj->AddBlob(blob), MMC_OK);
     ASSERT_EQ(MetaContainer(metaMng)->Insert(key, memObj), MMC_OK);
 
@@ -2229,13 +2301,20 @@ TEST_F(TestMmcMetaManager, GetByRankPrefetchDoesNotAddDramReadLease)
     ASSERT_EQ(metaMng->GetByRank({key}, GenerateOperateId(UINT32_MAX), objMetas, {}, false), MMC_OK);
     ASSERT_EQ(objMetas.size(), 1U);
     EXPECT_EQ(objMetas[0].numBlobs_, 1U);
-    EXPECT_EQ(blob->UseCount(), 0U);
+    EXPECT_EQ(blob->LeaseTimeoutTtlMs(), 0U);
 
     const uint64_t getOperateId = GenerateOperateId(0);
     ASSERT_EQ(metaMng->GetByRank({key}, getOperateId, objMetas), MMC_OK);
-    EXPECT_EQ(blob->UseCount(), 1U);
-    EXPECT_EQ(metaMng->UpdateState(key, {0, MEDIA_DRAM}, MMC_READ_FINISH, getOperateId), MMC_OK);
-    EXPECT_EQ(blob->UseCount(), 0U);
+    const auto remainingReadLeaseMs = blob->LeaseTimeoutTtlMs();
+    ASSERT_GT(remainingReadLeaseMs, 0U);
+    ASSERT_LE(remainingReadLeaseMs, readLeaseTtlMs);
+
+    // A lease renewal at read completion would use the longer TTL.
+    blob->SetDefaultLeaseTtlMs(renewedLeaseTtlMs);
+    ASSERT_EQ(metaMng->UpdateState(key, {0, MEDIA_DRAM}, MMC_READ_FINISH, getOperateId), MMC_OK);
+    const auto remainingAfterFinishMs = blob->LeaseTimeoutTtlMs();
+    EXPECT_GT(remainingAfterFinishMs, 0U);
+    EXPECT_LE(remainingAfterFinishMs, remainingReadLeaseMs);
 
     metaMng->Stop();
 }
@@ -2401,17 +2480,13 @@ TEST_F(TestMmcMetaManager, EvictKey_SingleKey_ReturnsOk)
     metaMng->Stop();
 }
 
-TEST_F(TestMmcMetaManager, BackupReadLeaseReleasesOriginalObjectAfterKeyRemovalOrRecreation)
+TEST_F(TestMmcMetaManager, BackupReadLeaseValidatesSource)
 {
     constexpr uint64_t leaseTtlMs = 10000;
     constexpr uint16_t evictHigh = 70;
     constexpr uint16_t evictLow = 60;
     constexpr uint64_t gva = 4096;
     constexpr uint64_t size = 4096;
-    constexpr uint32_t clientRank = 1;
-    constexpr uint32_t clientRequest = 1;
-    constexpr uint32_t oneReader = 1;
-    constexpr uint32_t twoReaders = 2;
     const std::string key = "backup_source";
     auto manager = MmcMakeRef<MmcMetaManager>(leaseTtlMs, evictHigh, evictLow);
     ASSERT_EQ(manager->Start(), MMC_OK);
@@ -2425,28 +2500,14 @@ TEST_F(TestMmcMetaManager, BackupReadLeaseReleasesOriginalObjectAfterKeyRemovalO
     BackupReadLease invalidLease;
     EXPECT_NE(manager->AcquireBackupReadLease(key, stale, invalidLease), MMC_OK);
     EXPECT_NE(manager->AcquireBackupReadLease("missing", desc, invalidLease), MMC_OK);
-    BackupReadLease firstLease;
-    BackupReadLease secondLease;
-    ASSERT_EQ(manager->AcquireBackupReadLease(key, desc, firstLease), MMC_OK);
-    ASSERT_EQ(manager->AcquireBackupReadLease(key, desc, secondLease), MMC_OK);
-    EXPECT_EQ(blob->UseCount(), twoReaders);
-
-    ASSERT_EQ(MetaContainer(manager)->Erase(key), MMC_OK);
-    manager->ReleaseBackupReadLease(firstLease);
-    EXPECT_EQ(blob->UseCount(), oneReader);
-    auto replacementObject = MmcMakeRef<MmcMemObjMeta>();
-    auto replacement = MmcMakeRef<MmcMemBlob>(0, gva, size, MEDIA_DRAM, READABLE, size);
-    ASSERT_EQ(replacementObject->AddBlob(replacement), MMC_OK);
-    ASSERT_EQ(MetaContainer(manager)->Insert(key, replacementObject), MMC_OK);
-    ASSERT_EQ(replacement->UpdateState(key, clientRank, clientRequest, MMC_READ_START), MMC_OK);
-    manager->ReleaseBackupReadLease(secondLease);
-    EXPECT_EQ(blob->UseCount(), 0U);
-    EXPECT_EQ(replacement->UseCount(), oneReader);
-    EXPECT_EQ(replacement->UpdateState(key, clientRank, clientRequest, MMC_READ_FINISH), MMC_OK);
+    EXPECT_EQ(blob->LeaseTimeoutTtlMs(), 0U);
+    BackupReadLease lease;
+    ASSERT_EQ(manager->AcquireBackupReadLease(key, desc, lease), MMC_OK);
+    EXPECT_GT(blob->LeaseTimeoutTtlMs(), 0U);
     manager->Stop();
 }
 
-TEST_F(TestMmcMetaManager, BackupReadLeaseReleaseFindsMatchingLeaseAmongBlobs)
+TEST_F(TestMmcMetaManager, BackupReadLeaseProtectsOnlyMatchingBlob)
 {
     constexpr uint64_t leaseTtlMs = 10000;
     constexpr uint16_t evictHigh = 70;
@@ -2454,7 +2515,6 @@ TEST_F(TestMmcMetaManager, BackupReadLeaseReleaseFindsMatchingLeaseAmongBlobs)
     constexpr uint64_t gva = 4096;
     constexpr uint64_t size = 4096;
     constexpr uint32_t otherRank = 1;
-    constexpr uint32_t oneReader = 1;
     const std::string key = "backup_multiple_blobs";
     auto manager = MmcMakeRef<MmcMetaManager>(leaseTtlMs, evictHigh, evictLow);
     ASSERT_EQ(manager->Start(), MMC_OK);
@@ -2464,22 +2524,14 @@ TEST_F(TestMmcMetaManager, BackupReadLeaseReleaseFindsMatchingLeaseAmongBlobs)
     ASSERT_EQ(object->AddBlob(firstBlob), MMC_OK);
     ASSERT_EQ(object->AddBlob(secondBlob), MMC_OK);
     ASSERT_EQ(MetaContainer(manager)->Insert(key, object), MMC_OK);
-    BackupReadLease firstLease;
-    BackupReadLease secondLease;
-    ASSERT_EQ(manager->AcquireBackupReadLease(key, firstBlob->GetDesc(), firstLease), MMC_OK);
-    ASSERT_EQ(manager->AcquireBackupReadLease(key, secondBlob->GetDesc(), secondLease), MMC_OK);
-
-    manager->ReleaseBackupReadLease(secondLease);
-    EXPECT_EQ(firstBlob->UseCount(), oneReader);
-    EXPECT_EQ(secondBlob->UseCount(), 0U);
-    manager->ReleaseBackupReadLease(secondLease);
-    EXPECT_EQ(firstBlob->UseCount(), oneReader);
-    manager->ReleaseBackupReadLease(firstLease);
-    EXPECT_EQ(firstBlob->UseCount(), 0U);
+    BackupReadLease lease;
+    ASSERT_EQ(manager->AcquireBackupReadLease(key, secondBlob->GetDesc(), lease), MMC_OK);
+    EXPECT_EQ(firstBlob->LeaseTimeoutTtlMs(), 0U);
+    EXPECT_GT(secondBlob->LeaseTimeoutTtlMs(), 0U);
     manager->Stop();
 }
 
-TEST_F(TestMmcMetaManager, BackupReadLeaseReleaseSkipsReusedBlobInOriginalObject)
+TEST_F(TestMmcMetaManager, BackupReadLeaseDeadlineDoesNotCarryOverToReusedAddress)
 {
     constexpr uint64_t leaseTtlMs = 50;
     constexpr uint16_t evictHigh = 70;
@@ -2515,6 +2567,7 @@ TEST_F(TestMmcMetaManager, BackupReadLeaseReleaseSkipsReusedBlobInOriginalObject
     ASSERT_EQ(GlobalAllocator(manager)->Alloc(options, allocated), MMC_OK);
     auto replacement = allocated.front();
     ASSERT_EQ(replacement->Gva(), original->Gva());
+    EXPECT_EQ(replacement->LeaseTimeoutTtlMs(), 0U);
     ASSERT_EQ(replacement->UpdateState(MMC_WRITE_OK), MMC_OK);
     {
         std::lock_guard<std::mutex> guard(object->Mutex());
@@ -2523,15 +2576,11 @@ TEST_F(TestMmcMetaManager, BackupReadLeaseReleaseSkipsReusedBlobInOriginalObject
     BackupReadLease newLease;
     ASSERT_EQ(manager->AcquireBackupReadLease(key, replacement->GetDesc(), newLease), MMC_OK);
     ASSERT_NE(newLease.sequence, oldLease.sequence);
-
-    manager->ReleaseBackupReadLease(oldLease);
-    EXPECT_EQ(replacement->UseCount(), oneBlob);
-    manager->ReleaseBackupReadLease(newLease);
-    EXPECT_EQ(replacement->UseCount(), 0U);
+    EXPECT_GT(replacement->LeaseTimeoutTtlMs(), 0U);
     manager->Stop();
 }
 
-TEST_F(TestMmcMetaManager, BackupReadLeaseReleaseHandlesConcurrentRemoval)
+TEST_F(TestMmcMetaManager, BackupReadLeaseRejectsDetachedSource)
 {
     constexpr uint64_t leaseTtlMs = 50;
     constexpr uint16_t evictHigh = 70;
@@ -2564,7 +2613,6 @@ TEST_F(TestMmcMetaManager, BackupReadLeaseReleaseHandlesConcurrentRemoval)
         return blobs.size();
     });
     removalLocked.get_future().wait();
-    manager->ReleaseBackupReadLease(lease);
     EXPECT_EQ(removal.get(), oneBlob);
     EXPECT_EQ(blob->State(), REMOVING);
     EXPECT_EQ(GlobalAllocator(manager)->GetFreeSpace(MEDIA_DRAM), size);
@@ -2662,9 +2710,10 @@ TEST_F(TestMmcMetaManager, ForceEvict_ReleasesLruTailKey)
     for (int i = 0; i < numKeys; ++i) {
         AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
         MmcMemMetaDesc objMeta;
-        ASSERT_EQ(metaMng->Alloc("frag_key_" + std::to_string(i), allocReq, 1, 0, objMeta), MMC_OK);
+        ASSERT_EQ(metaMng->Alloc("frag_key_" + std::to_string(i), allocReq, 1, kSetupWriteLeaseTtlMs, objMeta), MMC_OK);
         ASSERT_EQ(metaMng->UpdateState("frag_key_" + std::to_string(i), loc, MMC_WRITE_OK, 1), MMC_OK);
     }
+    std::this_thread::sleep_for(std::chrono::milliseconds(kSetupWriteLeaseTtlMs));
     // 挖洞：key_1 位于 [32K,64K)，删除后在 key_0 上方留下空闲块
     ASSERT_EQ(metaMng->Remove("frag_key_1"), MMC_OK);
     usleep(200000U); // 等待异步释放完成，空洞就位
@@ -2736,9 +2785,10 @@ TEST_F(TestMmcMetaManager, ForceEvict_ReleasesTailWithoutAdjacentFree)
     for (int i = 0; i < numKeys; ++i) {
         AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
         MmcMemMetaDesc objMeta;
-        ASSERT_EQ(metaMng->Alloc("fill_key_" + std::to_string(i), allocReq, 1, 0, objMeta), MMC_OK);
+        ASSERT_EQ(metaMng->Alloc("fill_key_" + std::to_string(i), allocReq, 1, kSetupWriteLeaseTtlMs, objMeta), MMC_OK);
         ASSERT_EQ(metaMng->UpdateState("fill_key_" + std::to_string(i), loc, MMC_WRITE_OK, 1), MMC_OK);
     }
+    std::this_thread::sleep_for(std::chrono::milliseconds(kSetupWriteLeaseTtlMs));
     // 不挖洞：10 个 key 连续填充 [0,320K)，尾部 key_0 的上下邻居均被占用
     // 释放目标 = max(10 * 5%, 1) = 1，直接强制释放 LRU 尾部的 key_0
     EXPECT_EQ(TestMmcMetaManager::ForceEvictForFragmentation(metaMng, MEDIA_DRAM, {0U}, SIZE_32K * 2), 1U);
@@ -2794,9 +2844,11 @@ TEST_F(TestMmcMetaManager, ForceEvict_SkipsKeyWithActiveLease)
     for (int i = 0; i < numKeys; ++i) {
         AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
         MmcMemMetaDesc objMeta;
-        ASSERT_EQ(metaMng->Alloc("lease_key_" + std::to_string(i), allocReq, 1, 0, objMeta), MMC_OK);
-        ASSERT_EQ(metaMng->UpdateState("lease_key_" + std::to_string(i), loc, MMC_WRITE_OK, 1), MMC_OK);
+        const auto key = "lease_key_" + std::to_string(i);
+        ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, kSetupWriteLeaseTtlMs, objMeta), MMC_OK);
+        ASSERT_EQ(metaMng->UpdateState(key, loc, MMC_WRITE_OK, 1), MMC_OK);
     }
+    std::this_thread::sleep_for(std::chrono::milliseconds(kSetupWriteLeaseTtlMs));
 
     // LRU 尾部 key_0 持有读租约：被跳过不释放，向后延伸释放 key_1 补足 1 个 key 的目标
     MemObjQueryInfo queryInfo;
@@ -2826,9 +2878,10 @@ TEST_F(TestMmcMetaManager, ForceEvict_ExtendsOnlyOnceWhenTailKeysHaveLease)
     for (int i = 0; i < numKeys; ++i) {
         AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
         MmcMemMetaDesc objMeta;
-        ASSERT_EQ(metaMng->Alloc("ext_key_" + std::to_string(i), allocReq, 1, 0, objMeta), MMC_OK);
+        ASSERT_EQ(metaMng->Alloc("ext_key_" + std::to_string(i), allocReq, 1, kSetupWriteLeaseTtlMs, objMeta), MMC_OK);
         ASSERT_EQ(metaMng->UpdateState("ext_key_" + std::to_string(i), loc, MMC_WRITE_OK, 1), MMC_OK);
     }
+    std::this_thread::sleep_for(std::chrono::milliseconds(kSetupWriteLeaseTtlMs));
 
     // AddLease 会 Promote key 至 LRU 头部：加完租约后把无租约的 key_2~key_9 逐一 ExistKey 提升回头部，
     // 使有活跃租约的 ext_key_0/ext_key_1 滑回 LRU 尾部成为候选
@@ -2901,9 +2954,10 @@ TEST_F(TestMmcMetaManager, AllocFragmentationFailure_TriggerForceEvict)
     for (int i = 0; i < numKeys; ++i) {
         AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
         MmcMemMetaDesc objMeta;
-        ASSERT_EQ(metaMng->Alloc("trig_key_" + std::to_string(i), allocReq, 1, 0, objMeta), MMC_OK);
+        ASSERT_EQ(metaMng->Alloc("trig_key_" + std::to_string(i), allocReq, 1, kSetupWriteLeaseTtlMs, objMeta), MMC_OK);
         ASSERT_EQ(metaMng->UpdateState("trig_key_" + std::to_string(i), loc, MMC_WRITE_OK, 1), MMC_OK);
     }
+    std::this_thread::sleep_for(std::chrono::milliseconds(kSetupWriteLeaseTtlMs));
     // 挖洞 [32K,64K)：10 个 key 用 320K，尾部空闲 64K，最大连续空闲块 = 64K < 96K
     ASSERT_EQ(metaMng->Remove("trig_key_1"), MMC_OK);
     usleep(200000U); // 等待 Remove 异步释放完成，空洞就位
@@ -2941,7 +2995,7 @@ TEST_F(TestMmcMetaManager, ForceEvict_MultiRankOnlyReleasesFragmentedRank)
     // rank1_0 最先分配 → 位于 LRU 尾部（最久未使用）
     AllocOptions rank1Req{SIZE_32K, 1, MEDIA_DRAM, {1}, 0};
     MmcMemMetaDesc rank1Meta;
-    ASSERT_EQ(metaMng->Alloc("rank1_0", rank1Req, 1, 0, rank1Meta), MMC_OK);
+    ASSERT_EQ(metaMng->Alloc("rank1_0", rank1Req, 1, kSetupWriteLeaseTtlMs, rank1Meta), MMC_OK);
     ASSERT_EQ(metaMng->UpdateState("rank1_0", loc1, MMC_WRITE_OK, 1), MMC_OK);
 
     // rank0_0..rank0_9 随后分配 → 位于 rank1_0 之前（靠近 LRU 头部）
@@ -2949,9 +3003,10 @@ TEST_F(TestMmcMetaManager, ForceEvict_MultiRankOnlyReleasesFragmentedRank)
     for (int i = 0; i < numRank0Keys; ++i) {
         AllocOptions allocReq{SIZE_32K, 1, MEDIA_DRAM, {0}, 0};
         MmcMemMetaDesc objMeta;
-        ASSERT_EQ(metaMng->Alloc("rank0_" + std::to_string(i), allocReq, 1, 0, objMeta), MMC_OK);
+        ASSERT_EQ(metaMng->Alloc("rank0_" + std::to_string(i), allocReq, 1, kSetupWriteLeaseTtlMs, objMeta), MMC_OK);
         ASSERT_EQ(metaMng->UpdateState("rank0_" + std::to_string(i), loc0, MMC_WRITE_OK, 1), MMC_OK);
     }
+    std::this_thread::sleep_for(std::chrono::milliseconds(kSetupWriteLeaseTtlMs));
     // 挖洞：删除 rank0_1 在 rank0 上留下 [32K,64K) 空洞
     ASSERT_EQ(metaMng->Remove("rank0_1"), MMC_OK);
     usleep(200000U); // 等待异步释放完成，空洞就位
@@ -2989,9 +3044,10 @@ TEST_F(TestMmcMetaManager, ForceEvict_MultiReplicaReleasesOnlyTargetRankBlob)
     const std::string key = "replica_key";
     AllocOptions allocReq{SIZE_32K, 2, MEDIA_DRAM, {0}, 0};
     MmcMemMetaDesc objMeta;
-    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, 0, objMeta), MMC_OK);
+    ASSERT_EQ(metaMng->Alloc(key, allocReq, 1, kSetupWriteLeaseTtlMs, objMeta), MMC_OK);
     ASSERT_EQ(metaMng->UpdateState(key, loc0, MMC_WRITE_OK, 1), MMC_OK);
     ASSERT_EQ(metaMng->UpdateState(key, loc1, MMC_WRITE_OK, 1), MMC_OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(kSetupWriteLeaseTtlMs));
 
     // 限定 fragmentedRanks={0}：仅释放 rank0 的 blob，key 计入释放数
     EXPECT_EQ(TestMmcMetaManager::ForceEvictForFragmentation(metaMng, MEDIA_DRAM, {0U}, SIZE_32K * 2), 1U);

@@ -468,7 +468,7 @@ Add read leases for multiple keys in batches, and record the read lease status r
 - When `leaseTtlMs` is `0`, the meta side uses the value of the configuration item `ock.mmc.meta.lease_ttl_ms` to increase the lease.
 - The caller should only continue to perform subsequent GVA-based reading processes for keys whose return value is `0`.
 - Typical usage is to first obtain GVA through `BatchGetKeyInfo(keys)`, and then call `BatchAddLease(keys)` to establish a read lease status for subsequent GVA-based reading processes.
-- When the same process calls the same key repeatedly, the existing read lease in the current process will be reused and renewed on the meta side; after completing the reading, call `BatchRemoveLease` once to release it.
+- When the same process calls the same key repeatedly, the existing read lease in the current process will be reused and renewed on the meta side; after completing the reading, call `BatchRemoveLease` once to clear the local read state.
 
 #### BatchRemoveLease
 
@@ -478,20 +478,21 @@ virtual int BatchRemoveLease(const std::vector<std::string> &keys) = 0;
 
 **Function**
 
-Remove the read leases of multiple keys in batches and clear the corresponding GVA read status in the current process.
+Clear local GVA read state for multiple keys and send a read-completion notification to MetaService.
+MetaService protects each blob from eviction until its lease deadline expires.
 
 **parameter**
 
-`keys`: The key list to remove the read lease (each key length < 256 bytes), cannot be empty.
+`keys`: The list of keys whose reads have completed (each key length < 256 bytes), cannot be empty.
 
 **return value**
 
-- `int`: `0` indicates that the local read lease check has passed and the lease removal request sending process has been triggered.
+- `int`: `0` indicates that the local read lease check has passed and the client has initiated the read-completion notification.
 - Other values ​​indicate failure.
 
 **Instructions for use**
 
-After the caller completes the GVA-based read, it should call this interface to explicitly release the read lease established by `BatchAddLease`.
+Call this method after completing the GVA-based read to clear the client’s read state. The completion notification leaves the server-side deadline intact.
 
 #### BatchMalloc
 
@@ -571,7 +572,7 @@ Explicitly notify the meta service that writing for the given key is complete.
 > [!NOTE] Typical GVA cross-process reading process:
 >
 > - Writing process: `BatchMalloc -> BatchCopy` (writing data) -> `BatchWriteFinish` explicitly notifies the writing completion, and the blob is converted to READABLE.
-> - Read process: `BatchGetKeyInfo(keys, 0)` acquires GVA -> `BatchAddLease(...)` adds read lease and prepares GVA read status -> `BatchCopy` (read) -> `BatchRemoveLease(...)` explicitly releases read lease.
+> - Read process: `BatchGetKeyInfo(keys, 0)` acquires GVA -> `BatchAddLease(...)` adds read lease and prepares GVA read status -> `BatchCopy` (read) -> `BatchRemoveLease(...)` clears local read state.
 
 ### 5. Hierarchical tensor operations
 

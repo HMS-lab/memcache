@@ -174,17 +174,8 @@ public:
 
     inline Result ExtendLease(const uint32_t id, const uint32_t requestId, uint64_t ttl);
 
-    inline bool IsLeaseExpired();
-
     inline uint64_t LeaseTimeoutTtlMs() const;
     inline void SetDefaultLeaseTtlMs(uint64_t defaultTtlMs);
-
-    // Number of clients currently holding a read lease on this blob.
-    // Non-zero means eviction must wait for lease timeout (LeaseWait) before freeing.
-    inline uint32_t UseCount() const;
-
-    // The caller must hold the owning MmcMemObjMeta mutex while checking a lease.
-    inline bool HasLease(uint32_t rankId, uint32_t requestId) const;
 
     friend std::ostream &operator<<(std::ostream &os, const MmcMemBlob &blob)
     {
@@ -290,28 +281,10 @@ Result MmcMemBlob::ExtendLease(const uint32_t id, const uint32_t requestId, uint
 {
     return metaLeaseManager_.Add(id, requestId, ttl);
 }
-bool MmcMemBlob::IsLeaseExpired()
-{
-    if (metaLeaseManager_.UseCount() == 0) {
-        return true;
-    }
-    metaLeaseManager_.Wait();
-    return true;
-}
 
 inline uint64_t MmcMemBlob::LeaseTimeoutTtlMs() const
 {
     return metaLeaseManager_.RemainingLeaseTtlMs();
-}
-
-inline uint32_t MmcMemBlob::UseCount() const
-{
-    return metaLeaseManager_.UseCount();
-}
-
-inline bool MmcMemBlob::HasLease(uint32_t rankId, uint32_t requestId) const
-{
-    return metaLeaseManager_.HasLease(rankId, requestId);
 }
 
 inline void MmcMemBlob::SetDefaultLeaseTtlMs(uint64_t defaultTtlMs)

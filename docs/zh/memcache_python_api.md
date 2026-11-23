@@ -884,7 +884,7 @@ Add read leases for multiple keys in batches, and record the read lease status r
 - Typical usage is to first obtain GVA through `batch_get_key_info(keys, flag=0)`, and then call `batch_add_lease(keys)`
   Establish read lease status for subsequent GVA-based read processes.
 - When the same process calls the same key repeatedly, the existing read lease in the current process will be reused and renewed on the meta side;
-  Call `batch_remove_lease` once after finishing reading to release it.
+  Call `batch_remove_lease` once after finishing reading to clear the local read state.
 
 ```python
 key_infos = store.batch_get_key_info(keys, flag=0)
@@ -908,20 +908,21 @@ ret = store.batch_remove_lease(keys)
 
 **Function**
 
-Remove the read leases of multiple keys in batches and clear the corresponding GVA read status in the current process.
+Clear local GVA read state for multiple keys and send a read-completion notification to MetaService.
+MetaService protects each blob from eviction until its lease deadline expires.
 
 **parameter**
 
-`keys`: The key list to remove the read lease, cannot be empty.
+`keys`: The list of keys whose reads have completed, cannot be empty.
 
 **return value**
 
-- `int`: `0` indicates that the local read lease check has passed and the lease removal request sending process has been triggered.
+- `int`: `0` indicates that the local read lease check has passed and the client has initiated the read-completion notification.
 - Other values ​​indicate failure.
 
 **Instructions for use**
 
-After the caller completes the GVA-based read, it should call this interface to explicitly release the read lease established by `batch_add_lease`.
+Call this method after completing the GVA-based read to clear the client’s read state. The completion notification leaves the server-side deadline intact.
 
 #### batch_alloc
 
@@ -1034,7 +1035,7 @@ Explicitly notify the meta service that writing for the given key is complete.
 > [!NOTE] Typical GVA cross-process reading process:
 >
 > - Writing process: `batch_alloc` -> `batch_copy` / `batch_copy_layers` (writing data) -> `batch_write_finish` explicitly notifies the writing completion, and the blob is converted to READABLE.
-> - Read process: `batch_get_key_info(...)` acquires GVA -> `batch_add_lease(...)` adds read lease and prepares GVA read status -> `batch_copy` / `batch_copy_layers` (read) -> `batch_remove_lease(...)` explicitly releases read lease.
+> - Read process: `batch_get_key_info(...)` acquires GVA -> `batch_add_lease(...)` adds read lease and prepares GVA read status -> `batch_copy` / `batch_copy_layers` (read) -> `batch_remove_lease(...)` clears local read state.
 
 #### register_buffer
 

@@ -12,14 +12,13 @@
 #include "mmc_meta_lease_manager.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <limits>
 #include <thread>
 
 #include "mmc_montotonic.h"
 #include "mmc_types.h"
-#include "mmc_define.h"
-#include "mmc_ptracer.h"
 
 namespace ock {
 namespace mmc {
@@ -27,29 +26,8 @@ Result MmcMetaLeaseManager::Add(uint32_t id, uint32_t requestId, uint64_t ttl)
 {
     MMC_LOG_DEBUG("MmcMetaLeaseManager ADD " << " id " << id << " requestId " << requestId << " ttl " << ttl);
     const uint64_t nowMs = ock::dagger::Monotonic::TimeUs() / 1000U;
-    if (ttl > std::numeric_limits<uint64_t>::max() - nowMs) {
-        return MMC_INVALID_PARAM;
-    }
-    lease_ = std::max(lease_, nowMs + ttl);
-    useClient.insert(GenerateClientId(id, requestId));
-    return MMC_OK;
-}
-
-Result MmcMetaLeaseManager::Remove(uint32_t id, uint32_t requestId)
-{
-    MMC_LOG_DEBUG("MmcMetaLeaseManager Remove id " << id << " requestId " << requestId);
-    useClient.erase(GenerateClientId(id, requestId));
-    if (useClient.empty()) {
-        lease_ = 0;
-    }
-    return MMC_OK;
-}
-
-Result MmcMetaLeaseManager::Extend(uint64_t ttl)
-{
-    MMC_LOG_DEBUG("MmcMetaLeaseManager Extend " << " ttl " << ttl);
-    const uint64_t nowMs = ock::dagger::Monotonic::TimeUs() / 1000U;
-    if (ttl > std::numeric_limits<uint64_t>::max() - nowMs) {
+    constexpr auto maxWaitMs = static_cast<uint64_t>(std::chrono::milliseconds::max().count());
+    if (ttl > maxWaitMs || ttl > std::numeric_limits<uint64_t>::max() - nowMs) {
         return MMC_INVALID_PARAM;
     }
     lease_ = std::max(lease_, nowMs + ttl);
@@ -58,15 +36,11 @@ Result MmcMetaLeaseManager::Extend(uint64_t ttl)
 
 Result MmcMetaLeaseManager::Wait()
 {
-    const uint64_t waitIntervalMs =
-        std::min<uint64_t>(std::max<uint64_t>(1, defaultTtlMs_ / 10ULL), MMC_DATA_TTL_MS / 10ULL);
-    while (!useClient.empty()) {
-        if ((ock::dagger::Monotonic::TimeUs() / 1000ULL) >= lease_) {
-            TP_TRACE_RECORD(TP_MMC_META_LEASE_TIMEOUT_COUNT, defaultTtlMs_ * 1000ULL, 0);
-            return MMC_TIMEOUT;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(waitIntervalMs));
+    const uint64_t nowMs = ock::dagger::Monotonic::TimeUs() / 1000U;
+    if (lease_ < nowMs) {
+        return MMC_OK;
     }
+    std::this_thread::sleep_for(std::chrono::milliseconds(lease_ - nowMs));
     return MMC_OK;
 }
 } // namespace mmc
