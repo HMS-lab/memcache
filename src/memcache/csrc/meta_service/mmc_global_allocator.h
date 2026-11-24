@@ -207,6 +207,7 @@ public:
         }
 
         MMC_LOG_INFO("GlobalAllocator Mount " << loc << " enableMaxValueMode:" << enableMaxValueMode);
+        enableMaxValueMode_.store(enableMaxValueMode, std::memory_order_relaxed);
         auto allocator = MmcBlobAllocator::Create(loc, localMemInitInfo, enableMaxValueMode, &maxAlignedSize_);
         allocators_[loc] = allocator;
         if (allocator != nullptr && static_cast<int>(loc.mediaType_) < MEDIA_NONE) {
@@ -482,6 +483,10 @@ public:
             return false;
         }
         auto alignedSize = MmcBlobAllocator::AllocSizeAlignUp(wantSize);
+        // In max mode, use the largest historical aligned size to match MmcBlobAllocator::Alloc.
+        if (enableMaxValueMode_.load(std::memory_order_relaxed)) {
+            alignedSize = std::max(alignedSize, GetMaxAlignedSize());
+        }
         // Insufficient total free space means capacity exhaustion, not fragmentation. Handle it through normal
         // watermark eviction, which can move data to a lower-layer medium. Forced eviction discards data directly
         // and should not be triggered by insufficient capacity.
@@ -510,6 +515,9 @@ public:
             return {};
         }
         auto alignedSize = MmcBlobAllocator::AllocSizeAlignUp(wantSize);
+        if (enableMaxValueMode_.load(std::memory_order_relaxed)) {
+            alignedSize = std::max(alignedSize, GetMaxAlignedSize());
+        }
         std::vector<uint32_t> ranks;
         globalAllocLock_.LockRead();
         for (const auto &[loc, allocator] : allocators_) {
@@ -679,6 +687,7 @@ private:
 
     // Declare maxAlignedSize_ before allocators_ so blob allocators, which hold a pointer to it, are destroyed first.
     std::atomic<uint64_t> maxAlignedSize_{0};
+    std::atomic<bool> enableMaxValueMode_{false};
     MmcAllocators allocators_;
     ReadWriteLock globalAllocLock_;
     // Approximate per-media usage, updated on the allocation/free hot path so

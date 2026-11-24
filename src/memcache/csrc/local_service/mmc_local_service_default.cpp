@@ -19,13 +19,13 @@
 
 #include "smem_bm_api.h"
 #include "mmc_meta_net_client.h"
-#include "mmc_storage_mode.h"
 #include "mmc_msg_client_meta.h"
 #include "mmc_ptracer.h"
 #include "mmc_functions.h"
 #include "mmc_configuration.h"
 #include "mmc_smem_bm_helper.h"
 #include "mmc_local_service_default.h"
+#include "mmc_version.h"
 
 namespace ock {
 namespace mmc {
@@ -34,11 +34,6 @@ constexpr int CLIENT_THREAD_COUNT = 2;
 constexpr size_t kSsdRebuildQueryBatchSize = 1024;
 
 namespace {
-bool IsSsdMetadataSeparated(uint32_t mode)
-{
-    return mode == MMC_SSD_METADATA_SEPARATED;
-}
-
 bool IsEtcdStoreUrl(const char *storeUrl)
 {
     return storeUrl != nullptr && (std::string(storeUrl).find("etcd://") == 0);
@@ -105,7 +100,6 @@ Result MmcLocalServiceDefault::ConnectMetaNetServer(const NetEngineOptions &netO
 
 Result MmcLocalServiceDefault::Start(const mmc_local_service_config_t &config)
 {
-    MMC_LOG_TRACE("Starting meta service " << name_);
     std::lock_guard<std::mutex> guard(mutex_);
     if (started_) {
         MMC_LOG_TRACE("MetaService " << name_ << " already started");
@@ -120,6 +114,7 @@ Result MmcLocalServiceDefault::Start(const mmc_local_service_config_t &config)
     if (options_.logFunc != nullptr) {
         ock::mmc::MmcOutLogger::Instance().SetExternalLogFunction(options_.logFunc);
     }
+    MMC_LOG_TRACE("Starting MemCache LocalService " << name_ << ", " << LIB_VERSION);
     MMC_RETURN_ERROR(InitBm(), "Failed to init bm of local service " << name_);
 
     metaNetClient_ = MetaNetClientFactory::GetInstance(this->options_.discoveryURL, "MetaClientCommon").Get();
@@ -140,14 +135,6 @@ Result MmcLocalServiceDefault::Start(const mmc_local_service_config_t &config)
             DestroyBm();
             return MMC_ERROR;
         }
-    }
-
-    Result configRet = GetExternalConfig();
-    if (configRet != MMC_OK) {
-        MMC_LOG_ERROR("Failed to query initialization config from MetaService, ret=" << configRet);
-        metaNetClient_->Stop();
-        DestroyBm();
-        return configRet;
     }
 
     if (options_.storageEnabled) {
@@ -339,29 +326,6 @@ Result MmcLocalServiceDefault::InitBm()
     return ret;
 }
 
-Result MmcLocalServiceDefault::GetExternalConfig()
-{
-    GetExternalConfigRequest request;
-    GetExternalConfigResponse response;
-    Result ret = SyncCallMeta(request, response, TIMEOUT_THIRTY);
-    if (ret != MMC_OK) {
-        MMC_LOG_ERROR("Get external config RPC failed, rank=" << options_.rankId << ", ret=" << ret);
-        return ret;
-    }
-    if (response.ret_ != MMC_OK) {
-        MMC_LOG_ERROR("Get external config failed on MetaService, rank=" << options_.rankId
-                                                                         << ", ret=" << response.ret_);
-        return response.ret_;
-    }
-    if (response.ssdMetadataMode_ > MMC_SSD_METADATA_SEPARATED) {
-        MMC_LOG_ERROR("Invalid SSD metadata mode returned by MetaService: " << response.ssdMetadataMode_);
-        return MMC_INVALID_PARAM;
-    }
-    ssdMetadataMode_ = static_cast<SsdMetadataMode>(response.ssdMetadataMode_);
-    MMC_LOG_TRACE("Resolved SSD metadata mode from MetaService: " << response.ssdMetadataMode_);
-    return MMC_OK;
-}
-
 Result MmcLocalServiceDefault::UnregisterBm()
 {
     MMC_RETURN_ERROR(bmProxyPtr_ == nullptr, "bm proxy has not been initialized.");
@@ -479,7 +443,7 @@ Result MmcLocalServiceDefault::ReconnectBm()
 {
     MMC_RETURN_ERROR(bmProxyPtr_ == nullptr, "bm proxy has not been initialized.");
     std::unique_lock<std::mutex> lockGuard(blobMutex_);
-    if (ubsIoProxyPtr_ == nullptr || IsSsdMetadataSeparated(ssdMetadataMode_)) {
+    if (ubsIoProxyPtr_ == nullptr || ubsIoProxyPtr_->IsSsdMetadataSeparated()) {
         return RebuildBm();
     }
 
@@ -523,6 +487,7 @@ void MmcLocalServiceDefault::RegisterBaseInfo(BmRegisterRequest &req)
     req.backendId_ = ResolveBackendId();
     req.role_ = options_.role;
     req.storageEnabled_ = options_.storageEnabled;
+    req.ssdMetadataSeparated_ = ubsIoProxyPtr_ != nullptr && ubsIoProxyPtr_->IsSsdMetadataSeparated();
     for (MediaType type = MEDIA_HBM; type != MEDIA_NONE;) {
         uint64_t gva = bmProxyPtr_->GetGva(type);
         uint64_t capacity = bmProxyPtr_->GetCapacity(type);
@@ -548,21 +513,18 @@ Result MmcLocalServiceDefault::InitUbsIo(int32_t deviceId, const std::string &co
                               "metaNetClient_ not ready when registering UBS IO callback", MMC_NOT_INITIALIZED);
     ubsIoProxyPtr_ = ubsIoProxy;
 
-    // 只有 aggregated 模式才用 SSD 生命周期事件更新集中式元数据；separated 模式由 UBSIO 管理，
-    // MetaService 本来就不保存 SSD 条目，因此无需更新或删除。
-    if (!IsSsdMetadataSeparated(ssdMetadataMode_)) {
-        ubsIoProxy->SetMetaEventCallback([this](int type, const std::vector<std::string> &keys) {
-            ubsioEventPool_->Enqueue([this, type, keys]() { HandleUbsIoMetaEvents(type, keys); });
-        });
-    }
+    ubsIoProxy->SetMetaEventCallback([this](int type, const std::vector<std::string> &keys) {
+        ubsioEventPool_->Enqueue([this, type, keys]() { HandleUbsIoMetaEvents(type, keys); });
+    });
 
     auto ret = ubsIoProxy->InitUbsIo(deviceId, confPath);
     if (ret != MMC_OK) {
         ubsIoProxy->SetMetaEventCallback(nullptr);
+        ubsIoProxyPtr_ = nullptr;
         return ret;
     }
 
-    if (!IsSsdMetadataSeparated(ssdMetadataMode_)) {
+    if (!ubsIoProxyPtr_->IsSsdMetadataSeparated()) {
         ret = RecoverBlob(ubsIoProxy);
         if (ret != MMC_OK) {
             MMC_LOG_ERROR("Failed to recover blobMap from ubs, name=" << name_ << ", ret=" << ret);
@@ -686,7 +648,7 @@ std::vector<size_t> MmcLocalServiceDefault::ProcessBackupMetadata(const std::vec
     std::lock_guard<std::mutex> guard(blobMutex_);
     size_t unexpectedOps = 0;
     for (size_t i = 0; i < length; i++) {
-        if (IsSsdMetadataSeparated(ssdMetadataMode_) && blobs[i].mediaType_ == MEDIA_SSD) {
+        if (blobs[i].mediaType_ == MEDIA_SSD && ubsIoProxyPtr_ != nullptr && ubsIoProxyPtr_->IsSsdMetadataSeparated()) {
             keyResults[i] = MMC_OK;
             continue;
         }
@@ -756,7 +718,7 @@ size_t MmcLocalServiceDefault::ExecuteFlushBatch(BatchIoParams &params, const st
     size_t successCnt = 0;
     for (size_t i = 0; i < params.keys.size(); ++i) {
         if (batchRet == MMC_OK && batchResults[i] == 0) {
-            if (IsSsdMetadataSeparated(ssdMetadataMode_)) {
+            if (ubsIoProxyPtr_->IsSsdMetadataSeparated()) {
                 keyResults[params.validIdx[i]] = MMC_OK;
                 ++successCnt;
                 continue;
@@ -854,16 +816,34 @@ Result MmcLocalServiceDefault::BlobDelete(const std::string &key, const MmcMemBl
 
 std::string MmcLocalServiceDefault::ResolveBackendId()
 {
+    // Priority: explicit configuration (Python API / configuration file) > environment variable > local IP fallback.
     if (options_.backendId[0] != '\0') {
         return std::string(options_.backendId);
     }
 
     std::string envBackendId = SafeGetEnv("MMC_LOCAL_SERVICE_BACKEND_ID");
-    if (envBackendId.empty()) {
-        MMC_LOG_WARN("backend_id is not set in config and MMC_LOCAL_SERVICE_BACKEND_ID is empty; "
-                     "backend_id will be emitted as empty string");
+    if (!envBackendId.empty()) {
+        return envBackendId;
     }
-    return envBackendId;
+
+    // Final fallback: use the first available local IP. LocalServices on the same node get the same value,
+    // preserving backendId affinity groups and avoiding exclusion from the local_first distribution table.
+    std::string localIp = TryFindLinuxFirstIp();
+    if (!localIp.empty()) {
+        MMC_LOG_INFO("backend_id is not set in config/env, fallback to local ip "
+                     << localIp
+                     << "; set ock.mmc.local_service.backend_id or MMC_LOCAL_SERVICE_BACKEND_ID to override");
+        return localIp;
+    }
+
+    // Configuration, environment variable, and local IP fallback have all failed. LocalService cannot inspect
+    // the MetaService alloc_strategy to determine whether local_first is active, so only warn about the risk.
+    MMC_LOG_WARN("backend_id is not set in config/env and the local-ip fallback also found no usable address; "
+                 "backend_id will be empty. If MetaService is running with alloc_strategy=local_first, this rank "
+                 "will not appear in the write distribution: it stays writable, but is starved by priority and "
+                 "only receives data when allocation falls back to ALLOC_RANDOM. It still contributes DRAM "
+                 "capacity, so the pool looks bigger than the capacity actually in use");
+    return std::string();
 }
 std::vector<Result> MmcLocalServiceDefault::BatchCopyBlob(const std::vector<std::string> &keys,
                                                           const std::vector<MmcMemBlobDesc> &srcBlobs,

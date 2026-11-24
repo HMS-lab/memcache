@@ -49,10 +49,25 @@ std::string ExtractModelNameFromObjectKey(const std::string &objectKey)
 
 std::optional<std::string> ExtractBlockHashFromObjectKey(const std::string &objectKey)
 {
-    if (objectKey.empty()) {
+    if (objectKey.empty() || objectKey.find("@partial@") != std::string::npos) {
         return std::nullopt;
     }
+    constexpr size_t blockHashHexLength = 64;
+    constexpr size_t separatorLength = 1;
     const auto pos = objectKey.rfind('@');
+    if (pos != std::string::npos && pos > 0) {
+        const auto previous = objectKey.rfind('@', pos - separatorLength);
+        if (previous != std::string::npos) {
+            const auto hash = objectKey.substr(previous + separatorLength, pos - previous - separatorLength);
+            const auto rank = objectKey.substr(pos + separatorLength);
+            // GVA object keys append a decimal rank after the full block hash.
+            if (hash.size() == blockHashHexLength &&
+                hash.find_first_not_of("0123456789abcdefABCDEF") == std::string::npos && !rank.empty() &&
+                rank.find_first_not_of("0123456789") == std::string::npos) {
+                return hash;
+            }
+        }
+    }
     std::string tail = (pos == std::string::npos) ? objectKey : objectKey.substr(pos + 1);
     if (tail.size() >= 2 && tail[0] == '0' && (tail[1] == 'x' || tail[1] == 'X')) {
         tail = tail.substr(2);

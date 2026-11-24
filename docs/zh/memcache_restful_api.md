@@ -957,12 +957,16 @@ curl "http://127.0.0.1:8000/batch_query_keys?keys=key_a,key_b"
 
 ### Purpose
 
-Delete the specified business KV Cache key and its associated data.
+Delete metadata for the specified business KV Cache key in MetaService, and release or demote associated data according to `flags`.
+
+- **Asynchronous release**: Default deletion synchronously removes the index entry; underlying memory and registered SSD replicas are released asynchronously (wait for active leases to be released or expire).
+- **SSD scope**: `aggregated` asynchronously attempts deletion only for registered SSD replicas (in-flight, unregistered flushes do not trigger deletion; failures only produce warnings); `separated` retains UBS IO data.
+- **Client caches**: REST deletion does not notify clients to clear their process-local GVA tracking caches.
 
 ### curl
 
 ```bash
-# Default deletion: remove metadata and blobs from all tiers.
+# Default deletion: clear the index synchronously; release memory and registered SSD replicas asynchronously.
 curl -X DELETE "http://127.0.0.1:8000/key?key=demo_key"
 
 # Lazy deletion: only Demote the key and wait for natural eviction.
@@ -1021,7 +1025,12 @@ curl -X DELETE "http://127.0.0.1:8000/key?key=demo_key&flags=2"
 
 ### Purpose
 
-Delete all business KV Cache keys and their associated data.
+Clear all business KV Cache key metadata currently managed by MetaService and asynchronously release associated data.
+
+- **No `flags` support**: There are no lazy-deletion or SSD-retention options. Clear every key from the index, including keys marked for lazy deletion.
+- **Asynchronous release**: `success: true` only means the index has been cleared and background tasks submitted. Active leases must be released or expire.
+- **SSD scope**: `aggregated` asynchronously attempts deletion only for registered SSD replicas (in-flight, unregistered flushes do not trigger deletion; failures only produce warnings); `separated` retains UBS IO data.
+- **Concurrency and caches**: With `lruType=sharded_lru`, each shard is locked and cleared separately (the operation is not globally atomic). Clients are not notified to clear their local GVA tracking caches.
 
 ### curl
 

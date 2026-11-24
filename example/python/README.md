@@ -14,13 +14,13 @@ The HDK firmware and driver must use version **25.0.RC1** or later ([community H
 
 After installation, configure the CANN environment variables ([step 3: configure environment variables when installing the Toolkit development package](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/81RC1alpha002/softwareinst/instg/instg_0008.html)).
 
-Before running the example, build and install the [**memfabric_hybrid run package**](https://gitcode.com/Ascend/memfabric_hybrid/blob/develop/docs/installation.md). The default installation path is `/usr/local/`. Then source `set_env.sh` under the installation directory.
+Before running the example, build and install the [**memfabric_hybrid run package**](https://memfabric-hybrid.readthedocs.io/zh-cn/latest/wiki/quick_start/installation/). The default installation path is `/usr/local/`. Then source `set_env.sh` under the installation directory.
 
 Example memfabric_hybrid installation commands:
 
 ```bash
-bash memfabric_hybrid-1.0.0_linux_aarch64.run # Replace with the actual package name
-bash memcache_hybrid-1.0.0_linux_aarch64.run  # Replace with the actual package name
+bash memfabric_hybrid-1.3.1_linux_aarch64.run # Replace with the actual package name
+bash memcache_hybrid-1.3.1_linux_aarch64.run  # Replace with the actual package name
 source /usr/local/memfabric_hybrid/set_env.sh
 source /usr/local/memcache_hybrid/set_env.sh
 ```

@@ -73,6 +73,10 @@ struct UbsIoStartedMember {
     using Type = bool MmcUbsIoProxy::*;
     friend Type GetMember(UbsIoStartedMember);
 };
+struct UbsIoSeparatedMember {
+    using Type = bool MmcUbsIoProxy::*;
+    friend Type GetMember(UbsIoSeparatedMember);
+};
 struct BatchExistSymbol {
     using Type = ubsio_batch_existFunc *;
     friend Type GetMember(BatchExistSymbol);
@@ -89,6 +93,7 @@ template struct RebuildTestAccessor<UbsIoProxyMember, &MmcLocalServiceDefault::u
 template struct RebuildTestAccessor<MetaClientMember, &MmcLocalServiceDefault::metaNetClient_>;
 template struct RebuildTestAccessor<EngineMember, &MetaNetClient::engine_>;
 template struct RebuildTestAccessor<UbsIoStartedMember, &MmcUbsIoProxy::started_>;
+template struct RebuildTestAccessor<UbsIoSeparatedMember, &MmcUbsIoProxy::ssdMetadataSeparated_>;
 template struct RebuildTestAccessor<BatchExistSymbol, &DlUbsioApi::pUbsioBatchExist>;
 template struct RebuildTestAccessor<ExistSymbol, &DlUbsioApi::pUbsioExist>;
 
@@ -425,5 +430,17 @@ TEST_F(MmcLocalRebuildTest, RpcFailureDoesNotSendCompletion)
     }
 }
 } // namespace
+TEST_F(MmcLocalRebuildTest, SeparatedReconnectReportsModeWithoutScanningLocalSsd)
+{
+    auto &proxy = local_.*GetMember(UbsIoProxyMember{});
+    proxy.Get()->*GetMember(UbsIoSeparatedMember{}) = true;
+    ASSERT_EQ(local_.ReconnectBm(), MMC_OK);
+    EXPECT_TRUE(proxy->IsSsdMetadataSeparated());
+    EXPECT_TRUE(backend_.queryBatches.empty());
+    ASSERT_EQ(engine_->requests.size(), kSingleItem);
+    EXPECT_TRUE(engine_->requests.front().storageEnabled_);
+    EXPECT_EQ(engine_->requests.front().ssdMetadataSeparated_, true);
+}
+
 } // namespace mmc
 } // namespace ock

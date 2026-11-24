@@ -21,7 +21,6 @@
 // Load dependencies before changing access to the manager under test.
 #include "mmc_defrag_evict.h"
 #include "mmc_global_allocator.h"
-#include "mmc_storage_mode.h"
 #include "mmc_meta_backup_mgr.h"
 #include "mmc_meta_net_server.h"
 
@@ -108,7 +107,7 @@ protected:
     void SetUp() override
     {
         manager_ = MmcMakeRef<MmcMetaManager>(kTestLeaseTtlMs, kHighWatermark, kLowWatermark);
-        manager_->SetSsdMetadataMode(MMC_SSD_METADATA_SEPARATED);
+        manager_->ssdMetadataSeparated_.store(true, std::memory_order_release);
         hooks_ = std::make_shared<EraseHooks>();
         auto getType = [](const MmcMemObjMetaPtr &) { return MEDIA_DRAM; };
         if (std::get<0>(GetParam()) == MetaLruType::SHARDED_LRU) {

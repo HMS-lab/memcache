@@ -192,11 +192,11 @@ docker run --name "${NAME}" -it -d --net=host --shm-size=500g \
 在修改 MemCache 配置前，先在四台节点的容器中安装指定版本包：
 
 ```bash
-pip install memfabric_hybrid==1.2.0 --force-reinstall --no-deps
-pip install memcache_hybrid==1.2.0 --force-reinstall --no-deps
+pip install memfabric_hybrid==1.3.1 --force-reinstall --no-deps
+pip install memcache_hybrid==1.3.1 --force-reinstall --no-deps
 ```
 
-`--force-reinstall` 会覆盖当前环境中的同名包，`--no-deps` 不会自动安装或调整依赖。安装后在四台容器中读取本次 pip 安装包内的 `VERSION`，确认完整 commit 与本次测试基线一致，并且四台节点之间没有差异：
+`--force-reinstall` replaces packages with the same names in the current environment; `--no-deps` does not install or change dependencies automatically. Run the following checks in all four containers to confirm both packages are version `1.3.1` and each package has the same build commit across nodes.
 
 ```bash
 python3 - <<'PY'
@@ -211,7 +211,7 @@ for package in ("memfabric_hybrid", "memcache_hybrid"):
 PY
 ```
 
-PyPI 发布的 `1.2.0` CPython 3.12 AArch64 wheel 参考值为：`memfabric_hybrid` commit 前 6 位 `999034`，`memcache_hybrid` commit 前 6 位 `4310d6`。
+In the `1.3.1` CPython 3.12 AArch64 wheels published on PyPI, the build commit prefixes are `137c52` for `memfabric_hybrid` and `9922c2` for `memcache_hybrid`.
 
 ### 修改MemCache配置文件
 
@@ -254,9 +254,6 @@ ock.mmc.evict_threshold_low = 50
 
 ## 数据淘汰高水位：空间使用率达到该值时，触发淘汰
 ock.mmc.evict_threshold_high = 70
-
-## DRAM压力水位：达到该值后，淘汰时快速删除数据释放内存
-ock.mmc.rewarm.dram_watermark = 90
 
 ## Log level: debug, info, warn, error
 ock.mmc.log_level = info
@@ -389,7 +386,7 @@ ubsio.standalone.force_new_disk = true
 
 其中 `80GB` 采用A3 分离模式典型值；使用前需确认节点具有足够剩余内存。`force_new_disk = true` 会把两个专用 loop 设备按新盘初始化，不恢复旧 UBS IO 元数据，因此只能用于已确认可覆盖的专用镜像文件。
 
-本次实测使用 `ubsio.mem.size_in_gb = 80`，Meta 水位使用 `50/70/90`。特性原理和完整参数说明参见 [DRAM + SSD 多级池化特性介绍](https://gitcode.com/Ascend/memcache/wiki/DRAM%20+%20SSD%20%E5%A4%9A%E7%BA%A7%E6%B1%A0%E5%8C%96%E7%89%B9%E6%80%A7%E4%BB%8B%E7%BB%8D.md) 与 [DRAM + SSD 多级池化配置指南](https://gitcode.com/Ascend/memcache/wiki/DRAM%20+%20SSD%20%E5%A4%9A%E7%BA%A7%E6%B1%A0%E5%8C%96%E9%85%8D%E7%BD%AE%E6%8C%87%E5%8D%97.md)。
+This test uses `ubsio.mem.size_in_gb = 80`, with MetaService eviction low/high watermarks of 50% and 70%. For feature details and the full parameter reference, see the [DRAM + SSD tiered pooling overview](https://ascend-memcache.readthedocs.io/zh-cn/latest/user_guide/feature_guide/DRAM%2BSSD%E5%A4%9A%E7%BA%A7%E6%B1%A0%E5%8C%96/%E7%89%B9%E6%80%A7%E4%BB%8B%E7%BB%8D/) and [configuration guide](https://ascend-memcache.readthedocs.io/zh-cn/latest/user_guide/feature_guide/DRAM%2BSSD%E5%A4%9A%E7%BA%A7%E6%B1%A0%E5%8C%96/%E9%85%8D%E7%BD%AE%E6%8C%87%E5%8D%97/).
 
 **步骤五**：新建独立进程启动脚本。
 

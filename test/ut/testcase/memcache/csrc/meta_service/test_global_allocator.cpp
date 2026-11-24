@@ -870,3 +870,91 @@ TEST_F(TestMmcGlobalAllocator, BlobAllocatorMaxContiguousFreeSize)
     EXPECT_EQ(blobAllocator.Release(blob), MMC_OK);
     EXPECT_EQ(blobAllocator.GetMaxContiguousFreeSize(), SIZE_32K * 4);
 }
+
+namespace {
+constexpr uint64_t FRAG_SMALL_SIZE = SIZE_32K;
+constexpr uint64_t FRAG_LARGE_SIZE = SIZE_32K * 2U;
+constexpr uint64_t FRAG_SMALL_COUNT = 10U;
+// Ten small blocks and one large block leave only 32K at the end; fragmentation can only come from freed 32K holes.
+constexpr uint64_t FRAG_CAPACITY = FRAG_SMALL_SIZE * (FRAG_SMALL_COUNT + 3U); // 13 * 32K = 416K
+
+// Build a fragmented layout: allocate FRAG_SMALL_COUNT 32K blocks, then a 64K block to raise maxAlignedSize to 64K.
+// If makeHoles is true, free alternating blocks, leaving nonadjacent 32K holes (192K total free; largest hole: 32K).
+void LayoutFragmentedBoard(const MmcGlobalAllocatorPtr &allocator, uint32_t rank, bool enableMaxValueMode,
+                           bool makeHoles)
+{
+    MmcLocation loc{rank, MEDIA_DRAM};
+    MmcLocalMemlInitInfo info{static_cast<uint64_t>(rank) * FRAG_CAPACITY, FRAG_CAPACITY};
+    ASSERT_EQ(allocator->Mount(loc, info, enableMaxValueMode), MMC_OK);
+    ASSERT_EQ(allocator->Start(loc), MMC_OK);
+
+    std::vector<MmcMemBlobPtr> smalls;
+    for (uint64_t i = 0; i < FRAG_SMALL_COUNT; ++i) {
+        AllocOptions req{FRAG_SMALL_SIZE, 1, MEDIA_DRAM, {rank}, ALLOC_FORCE_BY_RANK};
+        std::vector<MmcMemBlobPtr> blobs;
+        ASSERT_EQ(allocator->Alloc(req, blobs), MMC_OK);
+        ASSERT_EQ(blobs.size(), 1U);
+        smalls.push_back(blobs[0]);
+    }
+
+    AllocOptions bigReq{FRAG_LARGE_SIZE, 1, MEDIA_DRAM, {rank}, ALLOC_FORCE_BY_RANK};
+    std::vector<MmcMemBlobPtr> bigs;
+    ASSERT_EQ(allocator->Alloc(bigReq, bigs), MMC_OK);
+    ASSERT_EQ(bigs.size(), 1U);
+
+    if (!makeHoles) {
+        return;
+    }
+    for (size_t i = 0; i < smalls.size(); i += 2U) {
+        ASSERT_EQ(allocator->Free(smalls[i]), MMC_OK);
+    }
+}
+} // namespace
+
+// In max mode, fragmentation detection uses the enlarged block size: a 32K request needs a contiguous 64K block.
+// The same layout can reuse 32K holes without max mode, but is fragmented in max mode because the largest hole is 32K.
+TEST_F(TestMmcGlobalAllocator, MaxValueModeFragmentationUsesMaxAlignedSize)
+{
+    // Control: without max mode, the 64K block raises maxAlignedSize but does not affect fragmentation detection.
+    auto plainAllocator = MmcMakeRef<MmcGlobalAllocator>();
+    LayoutFragmentedBoard(plainAllocator, 0U, false, true);
+    EXPECT_EQ(plainAllocator->GetMaxAlignedSize(), FRAG_LARGE_SIZE);
+    EXPECT_EQ(plainAllocator->GetFreeSpace(MEDIA_DRAM), FRAG_SMALL_SIZE * 6U);
+    EXPECT_FALSE(plainAllocator->IsFragmentation(MEDIA_DRAM, FRAG_SMALL_SIZE));
+
+    // In max mode, a 32K request becomes 64K; the 32K holes cannot be reused and indicate fragmentation.
+    auto maxAllocator = MmcMakeRef<MmcGlobalAllocator>();
+    LayoutFragmentedBoard(maxAllocator, 0U, true, true);
+    EXPECT_EQ(maxAllocator->GetMaxAlignedSize(), FRAG_LARGE_SIZE);
+    EXPECT_EQ(maxAllocator->GetFreeSpace(MEDIA_DRAM), FRAG_SMALL_SIZE * 6U);
+    EXPECT_EQ(maxAllocator->GetMaxContiguousFreeSize(MEDIA_DRAM), FRAG_SMALL_SIZE);
+    EXPECT_TRUE(maxAllocator->IsFragmentation(MEDIA_DRAM, FRAG_SMALL_SIZE));
+}
+
+// Per-rank fragmentation detection returns only fragmented ranks, excluding healthy ranks and SSD media.
+TEST_F(TestMmcGlobalAllocator, GetFragmentedRanksOnlyReturnsFragmentedRank)
+{
+    auto maxAllocator = MmcMakeRef<MmcGlobalAllocator>();
+    // rank0: freeing alternating blocks creates 32K holes, which indicate fragmentation in max mode.
+    LayoutFragmentedBoard(maxAllocator, 0U, true, true);
+
+    // rank1: one 64K block leaves 352K of contiguous free space, so there is no fragmentation.
+    MmcLocation healthyLoc{1U, MEDIA_DRAM};
+    MmcLocalMemlInitInfo healthyInfo{FRAG_CAPACITY, FRAG_CAPACITY};
+    ASSERT_EQ(maxAllocator->Mount(healthyLoc, healthyInfo, true), MMC_OK);
+    ASSERT_EQ(maxAllocator->Start(healthyLoc), MMC_OK);
+    AllocOptions healthyReq{FRAG_LARGE_SIZE, 1, MEDIA_DRAM, {1U}, ALLOC_FORCE_BY_RANK};
+    std::vector<MmcMemBlobPtr> healthyBlobs;
+    ASSERT_EQ(maxAllocator->Alloc(healthyReq, healthyBlobs), MMC_OK);
+    ASSERT_EQ(healthyBlobs.size(), 1U);
+
+    auto fragmentedRanks = maxAllocator->GetFragmentedRanks(MEDIA_DRAM, FRAG_SMALL_SIZE);
+    ASSERT_EQ(fragmentedRanks.size(), 1U);
+    EXPECT_EQ(fragmentedRanks[0], 0U);
+    EXPECT_TRUE(maxAllocator->GetFragmentedRanks(MEDIA_SSD, FRAG_SMALL_SIZE).empty());
+
+    // Control: without max mode, 32K holes satisfy 32K requests, so no fragmented rank is returned.
+    auto plainAllocator = MmcMakeRef<MmcGlobalAllocator>();
+    LayoutFragmentedBoard(plainAllocator, 0U, false, true);
+    EXPECT_TRUE(plainAllocator->GetFragmentedRanks(MEDIA_DRAM, FRAG_SMALL_SIZE).empty());
+}

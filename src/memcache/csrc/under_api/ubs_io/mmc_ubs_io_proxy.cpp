@@ -117,8 +117,16 @@ Result MmcUbsIoProxy::InitUbsIo(int32_t deviceId, const std::string &confPath)
         return result;
     }
 
+    UbsioUnderFsType underFsType = UBSIO_UNDERFS_NONE;
+    result = DlUbsioApi::UbsioGetUnderFsType(underFsType);
+    if (result != MMC_OK) {
+        MMC_LOG_WARN("Failed to query UBSIO UnderFS type, use NONE, ret=" << result);
+        underFsType = UBSIO_UNDERFS_NONE;
+    }
+
+    ssdMetadataSeparated_ = underFsType == UBSIO_UNDERFS_SHARED;
     started_ = true;
-    MMC_LOG_TRACE("InitUbsIo success, deviceId=" << deviceId);
+    MMC_LOG_TRACE("InitUbsIo success, deviceId=" << deviceId << ", underFsType=" << underFsType);
     return MMC_OK;
 }
 
@@ -127,6 +135,7 @@ void MmcUbsIoProxy::DestroyUbsIo()
     if (started_) {
         DlUbsioApi::CleanupLibrary();
         started_ = false;
+        ssdMetadataSeparated_ = false;
         MMC_LOG_TRACE("DestroyUbsIo completed");
     }
 }
@@ -137,7 +146,12 @@ void MmcUbsIoProxy::StaticMetaEventCallback(void *context, const UbsioMetaEventC
         return;
     }
     auto *proxy = static_cast<MmcUbsIoProxy *>(context);
-    if (proxy->metaEventCallback_ == nullptr) {
+    UbsIoMetaCallback callback;
+    {
+        std::lock_guard<std::mutex> eventGuard(proxy->metaEventMutex_);
+        callback = proxy->metaEventCallback_;
+    }
+    if (callback == nullptr) {
         return;
     }
     TP_TRACE_BEGIN(TP_MMC_UBS_IO_META_EVENT_CB);
@@ -148,7 +162,7 @@ void MmcUbsIoProxy::StaticMetaEventCallback(void *context, const UbsioMetaEventC
         }
     }
     if (!deleteKeys.empty()) {
-        proxy->metaEventCallback_(UBSIO_META_DELETE_C, deleteKeys);
+        callback(UBSIO_META_DELETE_C, deleteKeys);
     }
     TP_TRACE_END(TP_MMC_UBS_IO_META_EVENT_CB, deleteKeys.size());
 }

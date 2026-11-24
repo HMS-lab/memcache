@@ -21,4 +21,4 @@ This project provides C++ and Python examples. Developers can refer to the imple
 | [benchmark](./benchmark/README.md) | MemCache performance benchmarks | Python |
 | [C++ example](./cpp/README.md) | MemCache C++ example | C++ |
 | [Python example](./python/README.md) | MemCache Python example | Python |
-| [metrics example](https://gitcode.com/Ascend/memcache/wiki/memcache%E5%AF%B9%E6%8E%A5Grafana+Prometheus%E4%BD%BF%E7%94%A8%E6%95%99%E7%A8%8B.md) | MemCache Grafana metrics example | JSON |
+| [metrics example](https://ascend-memcache.readthedocs.io/zh-cn/latest/user_guide/monitoring/memcache%E5%AF%B9%E6%8E%A5Grafana%2BPrometheus%E4%BD%BF%E7%94%A8%E6%95%99%E7%A8%8B/) | MemCache Grafana metrics example | JSON |

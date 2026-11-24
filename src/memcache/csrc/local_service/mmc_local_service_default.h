@@ -24,7 +24,6 @@
 #include "mmc_def.h"
 #include "mmc_thread_pool.h"
 #include "mmc_periodic_task.h"
-#include "mmc_storage_mode.h"
 
 namespace ock {
 namespace mmc {
@@ -82,16 +81,14 @@ public:
     inline MetaNetClientPtr GetMetaClient() const;
 
 private:
-    Result GetExternalConfig();
-
-    Result UnregisterBm();
-
     struct BatchIoParams {
         std::vector<std::string> keys;
         std::vector<void *> vas;
         std::vector<size_t> sizes;
         std::vector<size_t> validIdx;
     };
+
+    Result UnregisterBm();
 
     // Start meta net client and connect to the MetaService leader. In etcd HA mode the
     // leader address is dynamically assigned and registered with a short etcd lease, so
@@ -142,7 +139,6 @@ private:
     std::atomic<bool> stopRequested_{false};
     std::string name_;
     mmc_local_service_config_t options_;
-    SsdMetadataMode ssdMetadataMode_{MMC_SSD_METADATA_AGGREGATED};
     std::map<std::string, std::vector<MmcMemBlobDesc>> blobMap_;
     const int32_t blobRebuildSendMaxCount = 10240;
 

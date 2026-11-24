@@ -55,6 +55,7 @@ struct KvEvent {
 
 std::string ExtractModelNameFromObjectKey(const std::string &objectKey);
 
+// Supports hash-last keys and full-hash/decimal-rank suffixes; private partial snapshots are not indexed.
 std::optional<std::string> ExtractBlockHashFromObjectKey(const std::string &objectKey);
 
 std::optional<uint64_t> BlockHashHexToU64(const std::string &hashHex);

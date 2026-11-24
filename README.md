@@ -16,17 +16,23 @@ High-performance distributed key-value cache
 </div>
 <br/>
 
+<div align="center">
+
+### 📖 [**Full Documentation →**](https://ascend-memcache.readthedocs.io/zh-cn/latest/)
+
+</div>
+
 ## 🔄 Latest News
 
-- [2026/06] MemCache enables PrefixCache acceleration for inference. See the [wiki case library](https://gitcode.com/Ascend/memcache/wiki/Home.md) for the latest examples.
+- [2026/06] MemCache enables PrefixCache acceleration for inference. See the [deployment examples](https://ascend-memcache.readthedocs.io/zh-cn/latest/getting_started/) for the latest examples.
 - [2025/12] MemCache is available as a vllm-ascend backend to accelerate LLM inference. See the vllm-ascend open-source community and the [usage example](https://docs.vllm.ai/projects/ascend/en/v0.27.1rc1/user_guide/feature_guide/kv_pool.html#example-of-using-memcache-as-a-kv-pool-backend).
 
 - [2025/11] MemCache was open-sourced in November 2025. The community repository is <https://gitcode.com/Ascend/memcache>.
 
 ## 🔜 Roadmap and Release Strategy
 
-See the MemCache roadmap: [**Roadmap**](https://gitcode.com/Ascend/memcache/wiki/Roadmap.md).
-See the MemCache [**branch release strategy**](https://gitcode.com/Ascend/memcache/wiki/%E5%BC%80%E5%8F%91%E4%B8%8E%E5%8F%91%E5%B8%83%E8%8A%82%E5%A5%8F%E5%8E%9F%E5%88%99.md).
+See the MemCache roadmap: [**Roadmap**](https://ascend-memcache.readthedocs.io/zh-cn/latest/community/Roadmap/).
+See the MemCache [**branch release strategy**](https://ascend-memcache.readthedocs.io/zh-cn/latest/developer_guide/contribution/%E5%BC%80%E5%8F%91%E4%B8%8E%E5%8F%91%E5%B8%83%E8%8A%82%E5%A5%8F%E5%8E%9F%E5%88%99/).
 
 ## 🎉 Overview
 
@@ -51,7 +57,7 @@ MemCache consists of two core components: LocalService and MetaService.
   - Runs as a standalone process and can be started through the Python API or as a binary. See [wheel installation and usage](./docs/zh/install_whl.md) and [run-package installation and usage](./docs/zh/install_run.md).
   - Supports two deployment modes:
   ***1. Standalone mode***: A single MetaService process is easy to deploy, but creates a single point of failure. If the process crashes or becomes unreachable, the system cannot provide service until it recovers.
-  ***2. HA mode***: Uses Kubernetes ClusterIP Services and Lease resources. This more complex deployment runs multiple MetaService instances for active-active high availability. See [how to deploy a MemCache HA cluster](https://gitcode.com/Ascend/memcache/wiki/%E6%80%8E%E4%B9%88%E9%83%A8%E7%BD%B2%E4%B8%80%E4%B8%AAmemcache%E7%9A%84HA%E9%9B%86%E7%BE%A4.md).
+  ***2. HA mode***: Uses Kubernetes ClusterIP Services and Lease resources. This more complex deployment runs multiple MetaService instances for active-active high availability. See [how to deploy a MemCache HA cluster](https://ascend-memcache.readthedocs.io/zh-cn/latest/user_guide/deployment_guide/%E6%80%8E%E4%B9%88%E9%83%A8%E7%BD%B2%E4%B8%80%E4%B8%AAmemcache%E7%9A%84HA%E9%9B%86%E7%BE%A4/).
 
 - **LocalService**: Provides the following functions:
   - **Client**: Exposes APIs to application processes through a shared library distributed as a wheel or `.so` file.
@@ -126,7 +132,7 @@ See the following guides to get started:
 
 ## 📌 FAQ
 
-See the [FAQ](https://gitcode.com/Ascend/memcache/wiki/FAQ.md) for common questions.
+See the [FAQ](https://ascend-memcache.readthedocs.io/zh-cn/latest/getting_started/FAQ/) for common questions.
 
 ## 📝 Related Information
 

@@ -154,6 +154,6 @@ bash script/ci-pre-commit-pr.sh
 代码贡献遵循项目的 [Mulan PSL v2 许可证](./LICENSE)。
 社区行为准则采用的许可见其[贡献归属](./CODE_OF_CONDUCT.md#贡献归属)。
 
-[branch-policy]: https://gitcode.com/Ascend/memcache/wiki/%E5%BC%80%E5%8F%91%E4%B8%8E%E5%8F%91%E5%B8%83%E8%8A%82%E5%A5%8F%E5%8E%9F%E5%88%99.md
+[branch-policy]: https://ascend-memcache.readthedocs.io/zh-cn/latest/developer_guide/contribution/%E5%BC%80%E5%8F%91%E4%B8%8E%E5%8F%91%E5%B8%83%E8%8A%82%E5%A5%8F%E5%8E%9F%E5%88%99/
 
 返回[项目首页](./README.md) · 阅读[社区行为准则](./CODE_OF_CONDUCT.md)

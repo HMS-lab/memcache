@@ -29,7 +29,7 @@ readthedocs/
 │       ├── source/               # 正文引用的图片等静态资源
 │       ├── getting_started/      # 快速开始（概述、首跑、教程、FAQ）
 │       │   ├── tutorials/        # 教程（features/特性教程、models/模型案例、evaluation/评测）
-│       │   └── FAQ.md            # 常见问题
+│       │   └── FAQ/              # Frequently asked questions (one page per issue)
 │       ├── user_guide/           # 用户指南
 │       │   ├── feature_guide/    # 特性指南（含 DRAM+SSD多级池化/ 子目录、KvEvent加密配置指南）
 │       │   ├── deployment_guide/ # 部署指南（HA 高可用、扩缩容、机型适配）

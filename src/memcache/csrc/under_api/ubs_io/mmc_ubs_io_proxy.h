@@ -59,7 +59,13 @@ public:
 
     void SetMetaEventCallback(UbsIoMetaCallback callback)
     {
+        std::lock_guard<std::mutex> guard(metaEventMutex_);
         metaEventCallback_ = std::move(callback);
+    }
+
+    bool IsSsdMetadataSeparated() const
+    {
+        return ssdMetadataSeparated_;
     }
 
     bool IsReady() const
@@ -78,6 +84,8 @@ private:
     bool started_ = false;
     std::mutex mutex_;
     UbsIoMetaCallback metaEventCallback_;
+    std::mutex metaEventMutex_;
+    bool ssdMetadataSeparated_{false};
 };
 
 using MmcUbsIoProxyPtr = MmcRef<MmcUbsIoProxy>;
