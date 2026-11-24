@@ -80,6 +80,7 @@
 #include "bench_async_transport.h"
 #include "bench_latency.h"
 #include "bench_process_barrier.h"
+#include "bench_queue_depth.h"
 #include "mmc_blob_allocator.h"
 #include "mmc_blob_state.h"
 #include "mmc_def.h"
@@ -948,10 +949,15 @@ struct PendingOperation {
 };
 
 void WorkerWithPreparedKeys(bench::AsyncTransport &transport, const BenchConfig &cfg, const PreparedKeys &keys,
-                            ThreadStats &stats, int tid, uint32_t rank)
+                            ThreadStats &stats, int tid, uint32_t rank, std::atomic<uint32_t> *queueDepth = nullptr)
 {
     bench::CompletionQueue queue;
     std::unordered_map<uint32_t, PendingOperation> pending;
+    const auto publishDepth = [&]() {
+        if (queueDepth != nullptr) {
+            queueDepth->store(static_cast<uint32_t>(pending.size()), std::memory_order_relaxed);
+        }
+    };
     std::mt19937 rng(std::random_device{}());
     std::uniform_int_distribution<int> batchDist(cfg.minBatch, cfg.maxBatch);
     std::uniform_int_distribution<int> readDist(0, std::max(0, cfg.warmupKeyCount - 1));
@@ -978,6 +984,7 @@ void WorkerWithPreparedKeys(bench::AsyncTransport &transport, const BenchConfig 
             return;
         }
         pending.emplace(sequence, std::move(operation));
+        publishDepth();
         auto &entry = pending.at(sequence);
         double end = 0;
         int result = transport.Send(sequence, request.msgId, bytes, entry.start, end);
@@ -996,6 +1003,7 @@ void WorkerWithPreparedKeys(bench::AsyncTransport &transport, const BenchConfig 
                 transport.Cancel(entry.first);
             }
             pending.clear();
+            publishDepth();
             break;
         }
         while (issued < cfg.opsPerThread && pending.size() < static_cast<size_t>(cfg.queueDepth)) {
@@ -1029,6 +1037,7 @@ void WorkerWithPreparedKeys(bench::AsyncTransport &transport, const BenchConfig 
             if (found == pending.end()) continue;
             PendingOperation operation = std::move(found->second);
             pending.erase(found);
+            publishDepth();
             bool ok = completion.result == MMC_OK && !completion.bytes.empty();
             BatchUpdateRequest update;
             if (ok) {
@@ -1085,6 +1094,7 @@ void WorkerWithPreparedKeys(bench::AsyncTransport &transport, const BenchConfig 
             stats.failureCount[it->second.stage]++;
             if (it->second.put) finish(it->second, false);
             it = pending.erase(it);
+            publishDepth();
         }
     }
 }
@@ -1233,7 +1243,7 @@ int RunMetaService(const std::string &metaUrl, const std::string &bmUrl, const s
 }
 
 int RunClient(const BenchConfig &cfg, int clientIndex, ProcessResult *resultSlot, const std::string &metaUrl,
-              const std::string &logFile, int barrierFd)
+              const std::string &logFile, int barrierFd, bench::QueueDepthMonitor &queueDepthMonitor)
 {
     RedirectLogsToFile(logFile);
 
@@ -1302,7 +1312,8 @@ int RunClient(const BenchConfig &cfg, int clientIndex, ProcessResult *resultSlot
     double startUs = NowUs();
     for (int t = 0; t < cfg.threadCount; ++t) {
         workers.emplace_back(WorkerWithPreparedKeys, std::ref(transport), std::ref(cfg), std::cref(keys),
-                             std::ref(threadStats[static_cast<size_t>(t)]), t, rank);
+                             std::ref(threadStats[static_cast<size_t>(t)]), t, rank,
+                             queueDepthMonitor.Counter(clientIndex, t));
     }
     for (auto &w : workers)
         w.join();
@@ -1569,6 +1580,13 @@ int main(int argc, char *argv[])
     }
     std::memset(sharedResults, 0, shmSize);
 
+    bench::QueueDepthMonitor queueDepthMonitor(cfg.processCount, cfg.threadCount);
+    if (!queueDepthMonitor.Valid()) {
+        std::cerr << "Failed to allocate queue depth counters!" << std::endl;
+        munmap(sharedResults, shmSize);
+        return 1;
+    }
+
     std::cout << "[1/3] Starting meta_service process..." << std::endl;
     const pid_t coordinatorPid = getpid();
     pid_t metaPid = fork();
@@ -1627,7 +1645,7 @@ int main(int argc, char *argv[])
                 close(barrierFd);
             }
             int ret = RunClient(cfg, i, &sharedResults[i], metaUrl, cfg.logFile,
-                                controlSocket[bench::kBarrierClientEnd]);
+                                controlSocket[bench::kBarrierClientEnd], queueDepthMonitor);
             close(controlSocket[bench::kBarrierClientEnd]);
             _exit(ret);
         }
@@ -1657,6 +1675,7 @@ int main(int argc, char *argv[])
             perfPid = StartPerfChecked(targets, cfg);
         }
         if (cfg.profileControlFd < 0) {
+            queueDepthMonitor.Start();
             return true;
         }
         // Include target process IDs so the runner can capture every named pool thread.
@@ -1665,8 +1684,12 @@ int main(int argc, char *argv[])
         do {
             sent = send(cfg.profileControlFd, request.data(), request.size(), MSG_NOSIGNAL);
         } while (sent < 0 && errno == EINTR);
-        return sent == static_cast<ssize_t>(request.size()) &&
-               bench::ReceiveBarrierMessage(cfg.profileControlFd, bench::BarrierMessage::START, &gStopSignal);
+        const bool ready = sent == static_cast<ssize_t>(request.size()) &&
+            bench::ReceiveBarrierMessage(cfg.profileControlFd, bench::BarrierMessage::START, &gStopSignal);
+        if (ready) {
+            queueDepthMonitor.Start();
+        }
+        return ready;
     };
     const auto stopProfiling = [&]() {
         if (perfPid <= 0) {
@@ -1678,6 +1701,7 @@ int main(int argc, char *argv[])
         return true;
     };
     const auto finishProfiling = [&]() {
+        queueDepthMonitor.Stop();
         stopProfiling();
         // Ask the runner to freeze its collection before releasing any client to disconnect.
         bool runnerStopped = cfg.profileControlFd < 0 ||
@@ -1696,6 +1720,7 @@ int main(int argc, char *argv[])
                                                      bench::BarrierMessage::START, {}, &gStopSignal);
         }
     }
+    queueDepthMonitor.Stop();
     // Also stop an active recorder if coordination failed before every client drained.
     stopProfiling();
     if (cfg.profileControlFd >= 0) {

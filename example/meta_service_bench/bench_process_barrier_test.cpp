@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 #include "bench_process_barrier.h"
+#include "bench_queue_depth.h"
 
 namespace {
 constexpr int kTestClientCount = 2;
@@ -268,6 +269,50 @@ void RunCancellationTest()
     close(channel[bench::kBarrierParentEnd]);
     close(channel[bench::kBarrierClientEnd]);
 }
+// Child counters must print in worker columns, and later snapshots must redraw the same process rows.
+void RunQueueDepthTest()
+{
+    constexpr int workers = 2;
+    constexpr uint32_t firstDepth = 7;
+    constexpr uint32_t secondDepth = 11;
+    bench::QueueDepthMonitor monitor(kTestClientCount, workers);
+    Check(monitor.Valid());
+    pid_t child = fork();
+    Check(child >= 0);
+    if (child == 0) {
+        monitor.Counter(kSlowClient, 0)->store(firstDepth, std::memory_order_relaxed);
+        monitor.Counter(kSlowClient, workers - 1)->store(secondDepth, std::memory_order_relaxed);
+        _exit(EXIT_SUCCESS);
+    }
+    Reap(child, EXIT_SUCCESS);
+    Check(monitor.Counter(kFastClient, 0)->load(std::memory_order_relaxed) == 0);
+    Check(monitor.Counter(kSlowClient, 0)->load(std::memory_order_relaxed) == firstDepth);
+    std::ostringstream captured;
+    auto *original = std::cout.rdbuf(captured.rdbuf());
+    monitor.Start();
+    monitor.Stop();
+    std::cout.rdbuf(original);
+    const std::string cursorUp = "\033[" + std::to_string(kTestClientCount + bench::kQueueDepthHeaderLines) + "A";
+    Check(captured.str().find(cursorUp) != std::string::npos);
+    std::istringstream lines(captured.str());
+    std::string line;
+    bool found = false;
+    while (std::getline(lines, line)) {
+        const auto rowStart = line.find("client_");
+        if (rowStart == std::string::npos) {
+            continue;
+        }
+        std::istringstream row(line.substr(rowStart));
+        std::string client;
+        uint32_t first = 0;
+        uint32_t second = 0;
+        if (row >> client >> first >> second && client == "client_1") {
+            Check(first == firstDepth && second == secondDepth);
+            found = true;
+        }
+    }
+    Check(found);
+}
 } // namespace
 
 int main()
@@ -280,6 +325,7 @@ int main()
     RunExitTest(true);
     RunClosedWaitingClientTest();
     RunCancellationTest();
+    RunQueueDepthTest();
     RunFailedHookTest(bench::BarrierMessage::READY, bench::BarrierMessage::START);
     RunFailedHookTest(bench::BarrierMessage::DRAINED, bench::BarrierMessage::TEARDOWN);
     std::cout << "Process barrier tests passed\n";

@@ -152,6 +152,13 @@ No hashing or hex generation is performed.
 
 A logical Put is Alloc followed by Update, or BatchAlloc followed by BatchUpdate. Its slot remains occupied across both stages. Successful entries from partial batch allocation are updated, but any failed allocation or update makes the logical Put fail. Get performs a metadata RPC only. No data copy is timed or performed.
 
+During the workload, a queue-depth table refreshes in place every second using ANSI cursor controls,
+with one fixed row per client process and one
+column per generator worker. Values are instantaneous pending RPC counts (up to `--queue-depth`),
+not averages or transport send-queue occupancy. A Put retains its logical slot across Alloc and Update;
+the transition may briefly sample as one fewer pending RPC. The table also prints at workload start and end.
+Publishing counters and printing snapshots add a small amount of monitoring overhead.
+
 ## Timing and results
 
 Each RPC captures steady-clock timestamps:
