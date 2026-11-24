@@ -14,7 +14,10 @@ SOURCE = re.compile(r"^\s+at (.+:\d+)$")
 UNITS = {unit: 1024**i for i, unit in enumerate("BKMGT")}
 
 
-def _source_totals(report: str) -> dict[str, float]:
+def _source_totals(
+    report: str, *, memcache_only: bool = False
+) -> dict[str, float]:
+    memcache_prefix = f"{ROOT}/src/memcache/"
     totals: dict[str, float] = {}
 
     # Note: Both loops share an iterator
@@ -47,6 +50,7 @@ def _source_totals(report: str) -> dict[str, float]:
 
             if (
                 str(ROOT) not in frame
+                or (memcache_only and not frame.startswith(memcache_prefix))
                 or "/.venv/" in frame
                 or "/venv/" in frame
                 or "/site-packages/" in frame
@@ -74,6 +78,7 @@ def main() -> None:
 
     parser = argparse.ArgumentParser()
     parser.add_argument("capture", type=Path)
+    parser.add_argument("--memcache-only", action="store_true")
     args = parser.parse_args()
 
     report = subprocess.run(
@@ -91,8 +96,9 @@ def main() -> None:
     ).stdout
 
     # Group peak memory by source and print the largest totals first
+    totals = _source_totals(report, memcache_only=args.memcache_only)
     for source, size in sorted(
-        _source_totals(report).items(), key=lambda item: item[1], reverse=True
+        totals.items(), key=lambda item: item[1], reverse=True
     ):
         print(f"{size / 1024:10.2f} KiB {source}")
 

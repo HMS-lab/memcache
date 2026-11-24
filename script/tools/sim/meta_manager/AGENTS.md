@@ -175,11 +175,11 @@ python tools/heap_sources.py /path/to/capture.zst
 
 This tool requires `heaptrack_print`. It reads Heaptrack's text report, sums
 peak sizes by a selected project `file:line`, and prints descending KiB totals.
-The checkout root comes from the script's fixed location; there is no root
-argument. Virtual environments and installed packages are excluded. Prefer the
-first project caller outside `mmc_ref.h`, with the first wrapper frame as a
-fallback. This is a source breakdown of Heaptrack's report, not an RSS or
-recursive object-size measurement.
+The checkout root comes from the script's fixed location. Virtual environments
+and installed packages are excluded. Pass `--memcache-only` to limit eligible
+frames to `src/memcache/` and skip stacks without a matching frame. Both modes
+prefer the first eligible caller outside `mmc_ref.h` and fall back to the first
+eligible wrapper frame.
 
 Native code rebuilds automatically before a simulation. To build it alone:
 
@@ -258,7 +258,7 @@ Keep coverage focused:
   external tools
 - `test_profile.py`: optional real Heaptrack capture, native-PID sampling and
   the source-breakdown tool on the same capture
-- `test_heap_sources.py`: project-source grouping, dependency filtering,
+- `test_heap_sources.py`: source grouping in both modes, dependency filtering,
   wrapper fallback, final-entry handling, section boundaries and the positional
   capture argument; stub only `heaptrack_print`, not MetaManager
 
