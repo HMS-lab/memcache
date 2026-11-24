@@ -147,3 +147,6 @@ target_compile_options(bench_meta_service_async_test PRIVATE -W -fpermissive -Wn
 # The process protocol test has no MemCache, MemFabric, Python, or device runtime dependency.
 add_executable(bench_meta_service_barrier_test bench_process_barrier_test.cpp)
 target_link_libraries(bench_meta_service_barrier_test PRIVATE pthread)
+
+# Exact latency aggregation has no MemCache, MemFabric, Python, or device runtime dependency.
+add_executable(bench_meta_service_latency_test bench_latency_test.cpp)

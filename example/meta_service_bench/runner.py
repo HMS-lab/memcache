@@ -277,21 +277,27 @@ def add_run_markers(results, output):
 
 
 def parse_async_report(output):
-    """Parse the queue-depth report: two latency tables plus per-RPC outcomes."""
+    """Parse per-process latency tables and aggregate RPC outcomes; accept older reports too."""
     _, _, report = output.rpartition("Benchmark report:")
     results = {}
     prefix = None
+    process = None
 
     for line in report.splitlines():
         line = line.strip()
-        if line.startswith("Client-observed RPC round-trip latency"):
+        if match := re.match(r"Client process: rank=(\d+), pid=(\d+)$", line):
+            process = {"rank": int(match.group(1)), "pid": int(match.group(2))}
+            results.setdefault("per_process", []).append(process)
+            prefix = None
+        elif line.startswith("Client-observed RPC round-trip latency"):
             prefix = "rpc"
         elif line.startswith("Submission duration"):
             prefix = "sub"
         elif (match := LATENCY_ROW_RE.match(line)) and prefix:
             op = match.group(1).replace("-", "_")
             for column, value in zip(LATENCY_COLUMNS, match.group(2).split()):
-                results[f"{prefix}_{op}_{column}"] = number(value)
+                destination = process if process is not None else results
+                destination[f"{prefix}_{op}_{column}"] = number(value)
         elif match := OUTCOME_RE.match(line):
             op = match.group(1).replace("-", "_")
             keys = ("success", "fail", "transport_failures", "timeouts")

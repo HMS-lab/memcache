@@ -78,6 +78,7 @@
 #include <vector>
 
 #include "bench_async_transport.h"
+#include "bench_latency.h"
 #include "bench_process_barrier.h"
 #include "mmc_blob_allocator.h"
 #include "mmc_blob_state.h"
@@ -123,12 +124,6 @@ constexpr int kNetClientThreadCount = 2;
 constexpr int kMetaServiceRankId = 0;
 constexpr int kMicroSecPerSec = 1000000;
 constexpr int kPercentileDivisor = 100;
-constexpr int kPercentileP50 = 50;
-constexpr int kPercentileP95 = 95;
-constexpr int kPercentileP99 = 99;
-constexpr int kPercentileP999 = 999;
-constexpr int kPercentileP999Divisor = 1000;
-constexpr size_t kLatencyHistogramBucketCount = 64;
 constexpr int kTableWidth = 100;
 constexpr int kMetaServiceReadyWaitSec = 3;
 constexpr int kMaxProcessCount = 32;
@@ -555,100 +550,20 @@ void SetProcessName(const std::string &name, char *processTitle, size_t processT
 }
 
 
-struct LatencyHistogram {
-    std::array<uint64_t, kLatencyHistogramBucketCount> buckets{};
-    uint64_t count{0};
-    double totalUs{0.0};
-    double minUs{0.0};
-    double maxUs{0.0};
-
-    void Record(double us)
-    {
-        const uint64_t value = static_cast<uint64_t>(std::max(0.0, us));
-        size_t bucket = 0;
-        uint64_t upper = 1;
-        while (bucket + 1 < buckets.size() && value > upper) {
-            upper <<= 1;
-            ++bucket;
-        }
-        ++buckets[bucket];
-        ++count;
-        totalUs += us;
-        minUs = count == 1 ? us : std::min(minUs, us);
-        maxUs = std::max(maxUs, us);
-    }
-
-    void MergeFrom(const LatencyHistogram &other)
-    {
-        for (size_t i = 0; i < buckets.size(); ++i) {
-            buckets[i] += other.buckets[i];
-        }
-        if (other.count > 0) {
-            minUs = count == 0 ? other.minUs : std::min(minUs, other.minUs);
-            maxUs = std::max(maxUs, other.maxUs);
-        }
-        count += other.count;
-        totalUs += other.totalUs;
-    }
-
-    double Percentile(int numerator, int denominator) const
-    {
-        if (count == 0) {
-            return 0.0;
-        }
-        const uint64_t rank =
-            (count * static_cast<uint64_t>(numerator) + denominator - 1) / static_cast<uint64_t>(denominator);
-        uint64_t cumulative = 0;
-        uint64_t upper = 1;
-        for (size_t i = 0; i < buckets.size(); ++i) {
-            cumulative += buckets[i];
-            if (cumulative >= rank) {
-                return static_cast<double>(upper);
-            }
-            upper <<= 1;
-        }
-        return maxUs;
-    }
-};
-
-struct LatencySamples {
-    std::vector<double> samplesUs;
-    void Record(double us)
-    {
-        samplesUs.push_back(us);
-    }
-    void MergeFrom(const LatencySamples &o)
-    {
-        samplesUs.insert(samplesUs.end(), o.samplesUs.begin(), o.samplesUs.end());
-    }
-    void ComputeStats(double &avg, double &p50, double &p95, double &p99, double &mn, double &mx) const
-    {
-        if (samplesUs.empty()) {
-            avg = p50 = p95 = p99 = mn = mx = 0.0;
-            return;
-        }
-        std::vector<double> s = samplesUs;
-        std::sort(s.begin(), s.end());
-        double sum = 0.0;
-        for (double v : s)
-            sum += v;
-        avg = sum / static_cast<double>(s.size());
-        mn = s.front();
-        mx = s.back();
-        auto pct = [&](int p) -> double {
-            size_t i = static_cast<size_t>(static_cast<int>(s.size()) * p / kPercentileDivisor);
-            return s[std::min(i, s.size() - 1)];
-        };
-        p50 = pct(kPercentileP50);
-        p95 = pct(kPercentileP95);
-        p99 = pct(kPercentileP99);
-    }
-};
+using bench::LatencyHistogram;
+using bench::LatencySummary;
 
 struct ThreadStats {
+    ThreadStats()
+    {
+        for (auto type : {kOpAlloc, kOpUpdate, kOpGet}) {
+            histogram[type].ReserveBuckets();
+            submission[type].ReserveBuckets();
+        }
+    }
+
     uint64_t successCount[kOpTypeCount] = {0};
     uint64_t failureCount[kOpTypeCount] = {0};
-    LatencySamples latency[kOpTypeCount];
     LatencyHistogram histogram[kOpTypeCount];
     LatencyHistogram submission[kOpTypeCount];
     uint64_t transportFailures[kOpTypeCount]{};
@@ -658,14 +573,8 @@ struct ThreadStats {
 struct PerOpResult {
     uint64_t successCount;
     uint64_t failureCount;
-    double avgUs;
-    double p50Us;
-    double p95Us;
-    double p99Us;
-    double minUs;
-    double maxUs;
-    LatencyHistogram histogram;
-    LatencyHistogram submission;
+    LatencySummary histogram;
+    LatencySummary submission;
     uint64_t transportFailures{};
     uint64_t timeouts{};
 };
@@ -894,17 +803,15 @@ void PrintSep()
 
 void PrintAggReport(const std::vector<ProcessResult> &results, const BenchConfig &cfg)
 {
-    ThreadStats total;
+    std::array<PerOpResult, kOpTypeCount> total{};
     double duration = 0;
     for (const auto &process : results) {
         duration = std::max(duration, process.durationSec);
         for (int i = 0; i < kOpTypeCount; ++i) {
-            total.successCount[i] += process.ops[i].successCount;
-            total.failureCount[i] += process.ops[i].failureCount;
-            total.histogram[i].MergeFrom(process.ops[i].histogram);
-            total.submission[i].MergeFrom(process.ops[i].submission);
-            total.transportFailures[i] += process.ops[i].transportFailures;
-            total.timeouts[i] += process.ops[i].timeouts;
+            total[i].successCount += process.ops[i].successCount;
+            total[i].failureCount += process.ops[i].failureCount;
+            total[i].transportFailures += process.ops[i].transportFailures;
+            total[i].timeouts += process.ops[i].timeouts;
         }
     }
     std::cout << "\nBenchmark report: queue depth/thread=" << cfg.queueDepth
@@ -917,7 +824,7 @@ void PrintAggReport(const std::vector<ProcessResult> &results, const BenchConfig
     auto operationName = [](OpType type) {
         return type == kOpAlloc ? "put-alloc" : type == kOpUpdate ? "put-update" : "get";
     };
-    auto printTable = [&](const char *title, bool submission) {
+    auto printTable = [&](const ProcessResult &process, const char *title, bool submission) {
         const auto savedFlags = std::cout.flags();
         const auto savedPrecision = std::cout.precision();
         std::cout << "\n" << title << "\n"
@@ -929,31 +836,34 @@ void PrintAggReport(const std::vector<ProcessResult> &results, const BenchConfig
         std::cout << "\n" << std::string(operationColumnWidth + metricColumnCount * valueColumnWidth, '-') << "\n";
         std::cout << std::fixed << std::setprecision(latencyPrecision);
         for (auto type : {kOpAlloc, kOpUpdate, kOpGet}) {
-            const auto &histogram = submission ? total.submission[type] : total.histogram[type];
+            const auto &histogram = submission ? process.ops[type].submission : process.ops[type].histogram;
             std::cout << std::left << std::setw(operationColumnWidth) << operationName(type)
                       << std::right << std::setw(valueColumnWidth) << histogram.count
-                      << std::setw(valueColumnWidth) << (histogram.count ? histogram.totalUs / histogram.count : 0)
-                      << std::setw(valueColumnWidth) << histogram.Percentile(kPercentileP50, kPercentileDivisor)
-                      << std::setw(valueColumnWidth) << histogram.Percentile(kPercentileP95, kPercentileDivisor)
-                      << std::setw(valueColumnWidth) << histogram.Percentile(kPercentileP99, kPercentileDivisor)
-                      << std::setw(valueColumnWidth) << histogram.Percentile(kPercentileP999, kPercentileP999Divisor)
+                      << std::setw(valueColumnWidth) << histogram.avgUs
+                      << std::setw(valueColumnWidth) << histogram.p50Us
+                      << std::setw(valueColumnWidth) << histogram.p95Us
+                      << std::setw(valueColumnWidth) << histogram.p99Us
+                      << std::setw(valueColumnWidth) << histogram.p999Us
                       << std::setw(valueColumnWidth) << histogram.minUs
                       << std::setw(valueColumnWidth) << histogram.maxUs << "\n";
         }
         std::cout.flags(savedFlags);
         std::cout.precision(savedPrecision);
     };
-    printTable("Client-observed RPC round-trip latency (us = microseconds)", false);
-    printTable("Submission duration (us = microseconds; overlaps RPC latency)", true);
-    std::cout << "\nLogical Put: success=" << total.successCount[kOpPut] << " fail=" << total.failureCount[kOpPut]
+    for (const auto &process : results) {
+        std::cout << "\nClient process: rank=" << process.rank << ", pid=" << process.pid << "\n";
+        printTable(process, "Client-observed RPC round-trip latency (us = microseconds)", false);
+        printTable(process, "Submission duration (us = microseconds; overlaps RPC latency)", true);
+    }
+    std::cout << "\nLogical Put: success=" << total[kOpPut].successCount << " fail=" << total[kOpPut].failureCount
               << "\nRPC outcomes:\n";
     for (auto type : {kOpAlloc, kOpUpdate, kOpGet}) {
-        std::cout << "  " << operationName(type) << ": success=" << total.successCount[type]
-                  << " fail=" << total.failureCount[type] << " transport failures=" << total.transportFailures[type]
-                  << " timeouts=" << total.timeouts[type] << "\n";
+        std::cout << "  " << operationName(type) << ": success=" << total[type].successCount
+                  << " fail=" << total[type].failureCount << " transport failures=" << total[type].transportFailures
+                  << " timeouts=" << total[type].timeouts << "\n";
     }
-    const uint64_t count = total.successCount[kOpPut] + total.failureCount[kOpPut] +
-        total.successCount[kOpGet] + total.failureCount[kOpGet];
+    const uint64_t count = total[kOpPut].successCount + total[kOpPut].failureCount +
+        total[kOpGet].successCount + total[kOpGet].failureCount;
     std::cout << "Total logical ops: " << count << ", achieved logical ops/sec: " << (duration > 0 ? count / duration : 0)
               << "\nRPC timing includes submission, transport, network, server queues and processing; excludes benchmark construction and response handling.\n";
 }
@@ -1187,7 +1097,7 @@ void WorkerWithPreparedKeys(bench::AsyncTransport &transport, const BenchConfig 
     WorkerWithPreparedKeys(transport, cfg, keys, stats, tid, rank);
 }
 
-void WriteResult(ProcessResult &out, const ThreadStats &stats, double durationSec, int rank, int pid)
+void WriteResult(ProcessResult &out, ThreadStats &stats, double durationSec, int rank, int pid)
 {
     out.rank = rank;
     out.pid = pid;
@@ -1195,10 +1105,8 @@ void WriteResult(ProcessResult &out, const ThreadStats &stats, double durationSe
     for (int i = 0; i < kOpTypeCount; ++i) {
         out.ops[i].successCount = stats.successCount[i];
         out.ops[i].failureCount = stats.failureCount[i];
-        stats.latency[i].ComputeStats(out.ops[i].avgUs, out.ops[i].p50Us, out.ops[i].p95Us, out.ops[i].p99Us,
-                                      out.ops[i].minUs, out.ops[i].maxUs);
-        out.ops[i].histogram = stats.histogram[i];
-        out.ops[i].submission = stats.submission[i];
+        out.ops[i].histogram = stats.histogram[i].Summarize();
+        out.ops[i].submission = stats.submission[i].Summarize();
         out.ops[i].transportFailures = stats.transportFailures[i];
         out.ops[i].timeouts = stats.timeouts[i];
     }
@@ -1401,20 +1309,23 @@ int RunClient(const BenchConfig &cfg, int clientIndex, ProcessResult *resultSlot
     double endUs = NowUs();
     double durationSec = (endUs - startUs) / static_cast<double>(kMicroSecPerSec);
 
+    // The duration above excludes this wait. Keep rank resources and callbacks alive for slower clients.
+    if (transport.Failed() ||
+        !bench::WaitForBarrier(barrierFd, bench::BarrierMessage::DRAINED, bench::BarrierMessage::TEARDOWN)) {
+        TermLog("[client %d] Teardown barrier aborted\n", clientIndex);
+        return 1;
+    }
     ThreadStats merged;
-    for (const auto &ts : threadStats) {
+    for (auto &ts : threadStats) {
         for (int i = 0; i < kOpTypeCount; ++i) {
             merged.successCount[i] += ts.successCount[i];
             merged.failureCount[i] += ts.failureCount[i];
-            merged.latency[i].MergeFrom(ts.latency[i]);
             merged.histogram[i].MergeFrom(ts.histogram[i]);
             merged.submission[i].MergeFrom(ts.submission[i]);
             merged.transportFailures[i] += ts.transportFailures[i];
             merged.timeouts[i] += ts.timeouts[i];
         }
     }
-
-    WriteResult(*resultSlot, merged, durationSec, static_cast<int>(rank), getpid());
 
     uint64_t totalSucc = 0, totalFail = 0;
     for (int i = 0; i < kOpAlloc; ++i) {
@@ -1424,10 +1335,10 @@ int RunClient(const BenchConfig &cfg, int clientIndex, ProcessResult *resultSlot
     TermLog("[client %d] Done: %llu succ, %llu fail, %.2fs\n", clientIndex, static_cast<unsigned long long>(totalSucc),
             static_cast<unsigned long long>(totalFail), durationSec);
 
-    // The duration above excludes this wait. Keep rank resources and callbacks alive for slower clients.
-    if (transport.Failed() ||
-        !bench::WaitForBarrier(barrierFd, bench::BarrierMessage::DRAINED, bench::BarrierMessage::TEARDOWN)) {
-        TermLog("[client %d] Teardown barrier aborted\n", clientIndex);
+    WriteResult(*resultSlot, merged, durationSec, static_cast<int>(rank), getpid());
+    // Keep all clients alive until every process has finished its exact summaries.
+    if (!bench::WaitForBarrier(barrierFd, bench::BarrierMessage::READY, bench::BarrierMessage::START)) {
+        TermLog("[client %d] Reporting barrier aborted\n", clientIndex);
         return 1;
     }
     client->Stop();
@@ -1779,6 +1690,11 @@ int main(int argc, char *argv[])
     bool clientsFailed = clientPids.size() != static_cast<size_t>(cfg.processCount);
     if (!clientsFailed) {
         clientsFailed = !bench::CoordinateClients(barrierFds, startProfiling, finishProfiling, &gStopSignal);
+        if (!clientsFailed) {
+            // Sorting is unbounded reporting work, not subject to the child shutdown timeout.
+            clientsFailed = !bench::CoordinateBarrier(barrierFds, bench::BarrierMessage::READY,
+                                                     bench::BarrierMessage::START, {}, &gStopSignal);
+        }
     }
     // Also stop an active recorder if coordination failed before every client drained.
     stopProfiling();
