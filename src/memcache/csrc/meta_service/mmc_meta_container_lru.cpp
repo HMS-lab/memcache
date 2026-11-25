@@ -48,12 +48,14 @@ public:
     };
 
 private:
+    using LruList = std::list<const Key *>;
+
     struct ValueLruItem {
         Value value_;
         // 访问时需持有 metaLock_ 写锁，或同时持有 metaLock_ 读锁和 lruLock_。
 	// Access requires holding the write lock for metaLock_, or holding both the read lock for metaLock_ and the lruLock_.
         MediaType mediaType_;
-        typename std::list<Key>::iterator lruIter_;
+        typename LruList::iterator lruIter_;
         // 最后一次被访问 的全局顺序号
 	// Global sequence number of the last access
         uint64_t accessSequence_;
@@ -61,13 +63,14 @@ private:
         bool lazy_ = false;
     };
     std::unordered_map<Key, ValueLruItem> metaMap_;
-    std::list<Key> lruLists_[MEDIA_NONE];
+    // Map key addresses survive rehash. Unlink list nodes under lruLock_ before erasing their map entries.
+    LruList lruLists_[MEDIA_NONE];
     // Lazy-suffix entry count for each memory medium; corresponds exactly to nodes with lazy_==true in lruLists_.
     size_t lazySuffixCounts_[MEDIA_NONE] = {};
     // First lazy-suffix node per memory medium (most recently Demoted key); end() when no lazy entries exist.
     // The lazy suffix is contiguous; maintaining its boundary makes insertion before it O(1), avoiding repeated
     // std::prev steps.
-    typename std::list<Key>::iterator lazySuffixBegin_[MEDIA_NONE];
+    typename LruList::iterator lazySuffixBegin_[MEDIA_NONE];
     // 保护链表和 LRU 状态；同时加锁时必须先获取 metaLock_，再获取 lruLock_。
     MmcReadWriteLock lruLock_;
     MmcReadWriteLock metaLock_;
@@ -103,13 +106,13 @@ private:
     // When the boundary node leaves the lazy suffix (erase/promote), move the boundary to the next node.
     // The suffix is contiguous, so next is either another lazy entry or end().
     // Caller must hold the lruLock_ write lock and call before the actual erase/splice.
-    void AdvanceLazySuffixBegin(std::list<Key> &lruList, MediaType mediaType, typename std::list<Key>::iterator iter)
+    void AdvanceLazySuffixBegin(LruList &lruList, MediaType mediaType, typename LruList::iterator iter)
     {
         if (iter != lazySuffixBegin_[mediaType]) {
             return;
         }
         auto next = std::next(iter);
-        if (next != lruList.end() && !IsLazySuffixEntry(*next)) {
+        if (next != lruList.end() && !IsLazySuffixEntry(**next)) {
             // Boundary no longer matches the list; let the subsequent reverse-scan fallback rebuild it.
             next = lruList.end();
         }
@@ -118,13 +121,12 @@ private:
 
     // Fallback: reverse-scan the lazy suffix and correct its count/boundary. Log errors only for inconsistent internal
     // state.
-    // Also handles orphan list nodes without map entries, where lazy state is unknown and a full recount is required.
-    typename std::list<Key>::iterator ScanLazySuffixBoundary(std::list<Key> &lruList, MediaType mediaType)
+    typename LruList::iterator ScanLazySuffixBoundary(LruList &lruList, MediaType mediaType)
     {
         const size_t previousCount = lazySuffixCounts_[mediaType];
         size_t lazyCount = 0;
         auto insertPos = lruList.end();
-        for (auto rit = lruList.rbegin(); rit != lruList.rend() && IsLazySuffixEntry(*rit); ++rit) {
+        for (auto rit = lruList.rbegin(); rit != lruList.rend() && IsLazySuffixEntry(**rit); ++rit) {
             insertPos = std::next(rit).base();
             ++lazyCount;
         }
@@ -138,7 +140,7 @@ private:
     }
 
     // Erase the lruLists_ node and update lazy count/boundary; MEDIA_NONE means the entry is not in any list.
-    void EraseLruEntry(MediaType mediaType, bool wasLazy, typename std::list<Key>::iterator iter)
+    void EraseLruEntry(MediaType mediaType, bool wasLazy, typename LruList::iterator iter)
     {
         if (mediaType == MEDIA_NONE) {
             return;
@@ -186,28 +188,31 @@ public:
             return MMC_DUPLICATED_OBJECT;
         }
 
-        // insert into LRU and create lruItem
-        MmcWriteGuard lrucLockGuard(lruLock_);
+        MmcWriteGuard lruLockGuard(lruLock_);
         MediaType blobType = GetBlobType(value);
         if (blobType == MEDIA_NONE) {
             MMC_LOG_ERROR("Failed to Insert, no medium registered. ");
             return MMC_ERROR;
         }
-        if (blobType != MEDIA_SSD) {
-            lruLists_[blobType].push_front(key);
+        auto mediaType = blobType == MEDIA_SSD ? MEDIA_NONE : blobType;
+        auto [mapIter, inserted] = metaMap_.try_emplace(key, ValueLruItem{value, mediaType, {}, NextAccessSequence()});
+        if (!inserted) {
+            MMC_LOG_ERROR("Fail to insert " << key << " into MmcMetaContainer. ErrCode: " << MMC_ERROR);
+            return MMC_ERROR;
         }
-        ValueLruItem lruItem{value, blobType != MEDIA_SSD ? blobType : MEDIA_NONE,
-                             blobType != MEDIA_SSD ? lruLists_[blobType].begin() : lruLists_[MEDIA_NONE].end(),
-                             NextAccessSequence()};
-
-        // insert into map
-        auto ret = metaMap_.emplace(key, lruItem);
-        if (ret.second) {
+        if (mediaType == MEDIA_NONE) {
             return MMC_OK;
         }
-        EraseLruEntry(lruItem.mediaType_, false, lruItem.lruIter_);
-        MMC_LOG_ERROR("Fail to insert " << key << " into MmcMetaContainer. ErrCode: " << MMC_ERROR);
-        return MMC_ERROR;
+
+        auto &lruList = lruLists_[mediaType];
+        try {
+            lruList.push_front(std::addressof(mapIter->first));
+        } catch (...) {
+            metaMap_.erase(mapIter);
+            throw;
+        }
+        mapIter->second.lruIter_ = lruList.begin();
+        return MMC_OK;
     }
 
     Result Get(const Key &key, Value &value) override
@@ -236,16 +241,13 @@ public:
             MMC_LOG_DEBUG("Key " << key << " not found in MmcMetaContainer. ErrCode: " << MMC_UNMATCHED_KEY);
             return MMC_UNMATCHED_KEY;
         }
-        auto valueItem = iter->second;
-        value = valueItem.value_;
-        if (metaMap_.erase(key) == 0) {
-            MMC_LOG_ERROR("Failed to erase " << key << " from MmcMetaContainer map. ErrCode: " << MMC_ERROR);
-            return MMC_ERROR;
-        }
+        value = iter->second.value_;
+        const auto &valueItem = iter->second;
         if (valueItem.mediaType_ != MEDIA_NONE) {
             MmcWriteGuard lruLockGuard(lruLock_);
             EraseLruEntry(valueItem.mediaType_, valueItem.lazy_, valueItem.lruIter_);
         }
+        metaMap_.erase(iter);
         return MMC_OK;
     }
 
@@ -261,15 +263,12 @@ public:
             MMC_LOG_WARN("EraseIfMatch: key=" << key << " was replaced concurrently, skip stale object");
             return MMC_UNMATCHED_KEY;
         }
-        auto valueItem = iter->second;
-        if (metaMap_.erase(key) == 0) {
-            MMC_LOG_ERROR("EraseIfMatch: failed to erase " << key << " from meta map. ErrCode: " << MMC_ERROR);
-            return MMC_ERROR;
-        }
+        const auto &valueItem = iter->second;
         if (valueItem.mediaType_ != MEDIA_NONE) {
             MmcWriteGuard lruLockGuard(lruLock_);
             EraseLruEntry(valueItem.mediaType_, valueItem.lazy_, valueItem.lruIter_);
         }
+        metaMap_.erase(iter);
         return MMC_OK;
     }
 
@@ -286,14 +285,12 @@ public:
         if (!isEmptyFunc(iter->second.value_)) {
             return MMC_ERROR;
         }
-        auto mediaType = iter->second.mediaType_;
-        auto lruIter = iter->second.lruIter_;
-        const bool wasLazy = iter->second.lazy_;
-        metaMap_.erase(iter);
-        if (mediaType != MEDIA_NONE) {
+        const auto &valueItem = iter->second;
+        if (valueItem.mediaType_ != MEDIA_NONE) {
             MmcWriteGuard lruLockGuard(lruLock_);
-            EraseLruEntry(mediaType, wasLazy, lruIter);
+            EraseLruEntry(valueItem.mediaType_, valueItem.lazy_, valueItem.lruIter_);
         }
+        metaMap_.erase(iter);
         return MMC_OK;
     }
 
@@ -306,12 +303,12 @@ public:
             removeFunc(pair.first, pair.second.value_);
         }
 
-        metaMap_.clear();
         for (MediaType type = MEDIA_HBM; type != MEDIA_NONE; type = MoveDown(type)) {
             lruLists_[type].clear();
             lazySuffixCounts_[type] = 0;
             lazySuffixBegin_[type] = lruLists_[type].end();
         }
+        metaMap_.clear();
         return MMC_OK;
     }
 
@@ -377,7 +374,7 @@ public:
         keys.reserve(std::min(count, lruLists_[mediaType].size()));
         for (auto iter = lruLists_[mediaType].rbegin(); iter != lruLists_[mediaType].rend() && keys.size() < count;
              ++iter) {
-            keys.push_back(*iter);
+            keys.push_back(**iter);
         }
         return keys;
     }
@@ -452,8 +449,7 @@ private:
             return MMC_OK; // Repeated lazy deletion is idempotent; keep the original position to preserve FIFO.
         }
         auto &lruList = lruLists_[iter->second.mediaType_];
-        lruList.erase(iter->second.lruIter_);
-        iter->second.lruIter_ = InsertBeforeLazySuffix(lruList, key, iter->second.mediaType_);
+        MoveBeforeLazySuffix(lruList, iter->second.lruIter_, iter->second.mediaType_);
         iter->second.lazy_ = true;
         iter->second.accessSequence_ = kLazyDemotedAccessSequence;
         return MMC_OK;
@@ -477,7 +473,7 @@ private:
             iter->second.mediaType_ = MEDIA_NONE;
         }
         if (type != MEDIA_NONE && type != MEDIA_SSD) {
-            lruLists_[type].push_front(key);
+            lruLists_[type].push_front(std::addressof(iter->first));
             iter->second.mediaType_ = type;
             iter->second.lruIter_ = lruLists_[type].begin();
             iter->second.accessSequence_ = NextAccessSequence();
@@ -522,23 +518,8 @@ public:
             MMC_LOG_ERROR("Unable to evict, LRU list is empty");
             return false;
         }
-        auto iter = std::prev(lruLists_[mediaType].end());
-        Key key = *iter;
-
-        // 1、查找value
-	// 1. Find value
+        const auto &key = *lruLists_[mediaType].back();
         auto mapIter = metaMap_.find(key);
-        if (mapIter == metaMap_.end()) {
-            lruLists_[mediaType].erase(iter);
-            // Orphan list node without a map entry: lazy state is unknown; recount the suffix to keep counts
-            // consistent.
-            ScanLazySuffixBoundary(lruLists_[mediaType], mediaType);
-            MMC_LOG_INFO("Key " << key << " not found in MmcMetaContainer.");
-            return true;
-        }
-
-        // 2、回调处理并按结果做容器操作（REMOVE/MOVE_DOWN/SKIP）
-	// 2. Handle the callback and perform container operations (REMOVE/MOVE_DOWN/SKIP) based on the result.
         return ApplyEvictResult(key, mapIter, moveFunc, mediaType);
     }
 
@@ -551,7 +532,7 @@ public:
         MmcReadGuard metaGuard(metaLock_);
         MmcReadGuard lruGuard(lruLock_);
         for (auto keyIter = lruLists_[mediaType].rbegin(); keyIter != lruLists_[mediaType].rend(); ++keyIter) {
-            const auto &key = *keyIter;
+            const auto &key = **keyIter;
             auto iter = metaMap_.find(key);
             if (iter == metaMap_.end() || iter->second.mediaType_ != mediaType) {
                 continue;
@@ -591,7 +572,7 @@ public:
         sequences.reserve(sequences.size() + std::min(limit, lruLists_[mediaType].size()));
         for (auto keyIter = lruLists_[mediaType].rbegin();
              keyIter != lruLists_[mediaType].rend() && sequences.size() < limit; ++keyIter) {
-            const auto &key = *keyIter;
+            const auto &key = **keyIter;
             auto iter = metaMap_.find(key);
             if (iter != metaMap_.end() && iter->second.mediaType_ == mediaType) {
                 sequences.push_back(iter->second.accessSequence_);
@@ -636,7 +617,7 @@ public:
                 mapIter->second.accessSequence_ == candidate.accessSequence) {
                 auto &lruList = lruLists_[mediaType];
                 if (wasLazy) {
-                    lruList.push_back(candidate.key);
+                    lruList.push_back(std::addressof(mapIter->first));
                     mapIter->second.lruIter_ = std::prev(lruList.end());
                     // The earliest Demoted key normally returns to the tail; it becomes the boundary only if the suffix
                     // was empty.
@@ -645,7 +626,8 @@ public:
                     }
                     IncreaseLazySuffixCount(mediaType);
                 } else {
-                    mapIter->second.lruIter_ = lruList.insert(lazySuffixBegin_[mediaType], candidate.key);
+                    mapIter->second.lruIter_ =
+                        lruList.insert(lazySuffixBegin_[mediaType], std::addressof(mapIter->first));
                 }
                 mapIter->second.mediaType_ = mediaType;
                 mapIter->second.lazy_ = wasLazy;
@@ -764,31 +746,28 @@ private:
         return nextAccessSequence_.fetch_add(1, std::memory_order_relaxed);
     }
 
-    // Insert at the head side of the lazy suffix, before all marked keys, preserving FIFO: earliest Demote nearest the
-    // tail.
-    // For an empty or all-lazy list, insert at tail/head, equivalent to push_back/push_front.
+    // Move the node before all marked keys so the earliest Demote stays nearest the tail.
+    // If the lazy suffix is empty, move the node to the tail.
     // Caller must hold metaLock_ for reading and lruLock_ for writing; lazySuffixBegin_ provides O(1) positioning.
     // If boundary and list disagree, reverse-scan and correct them (at worst linear positioning, without misplacement).
-    typename std::list<Key>::iterator InsertBeforeLazySuffix(std::list<Key> &lruList, const Key &key,
-                                                             MediaType mediaType)
+    void MoveBeforeLazySuffix(LruList &lruList, typename LruList::iterator iter, MediaType mediaType)
     {
         auto insertPos = lazySuffixBegin_[mediaType];
         bool boundaryOk = false;
         if (insertPos == lruList.end()) {
             // Without lazy entries, consistency requires an empty list or a non-lazy tail.
-            boundaryOk = lazySuffixCounts_[mediaType] == 0 && (lruList.empty() || !IsLazySuffixEntry(lruList.back()));
+            boundaryOk = lazySuffixCounts_[mediaType] == 0 && (lruList.empty() || !IsLazySuffixEntry(*lruList.back()));
         } else {
             // Boundary must be lazy, and its predecessor must not be lazy.
-            boundaryOk = IsLazySuffixEntry(*insertPos) &&
-                         (insertPos == lruList.begin() || !IsLazySuffixEntry(*std::prev(insertPos)));
+            boundaryOk = IsLazySuffixEntry(**insertPos) &&
+                         (insertPos == lruList.begin() || !IsLazySuffixEntry(**std::prev(insertPos)));
         }
         if (!boundaryOk) {
             insertPos = ScanLazySuffixBoundary(lruList, mediaType);
         }
         ++lazySuffixCounts_[mediaType];
-        auto newIter = lruList.insert(insertPos, key);
-        lazySuffixBegin_[mediaType] = newIter;
-        return newIter;
+        lruList.splice(insertPos, lruList, iter);
+        lazySuffixBegin_[mediaType] = iter;
     }
 
     MediaType GetBlobType(const Value &value)

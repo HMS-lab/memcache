@@ -49,6 +49,21 @@ TEST_F(TestMmcMetaContainerLRU, InsertAndGet)
     EXPECT_EQ(container->Get("key3", value), MMC_UNMATCHED_KEY);
 }
 
+// Candidate keys remain valid after temporary input keys expire and map growth triggers rehashes.
+TEST_F(TestMmcMetaContainerLRU, CandidateKeysSurviveMapGrowth)
+{
+    constexpr size_t keyCount = 256;
+    for (size_t i = 0; i < keyCount; ++i) {
+        ASSERT_EQ(container->Insert("long-cache-key-for-candidate-order-" + std::to_string(i), 0), MMC_OK);
+    }
+
+    const auto keys = container->GetEvictCandidateKeys(MEDIA_DRAM, keyCount);
+    ASSERT_EQ(keys.size(), keyCount);
+    for (size_t i = 0; i < keyCount; ++i) {
+        EXPECT_EQ(keys[i], "long-cache-key-for-candidate-order-" + std::to_string(i));
+    }
+}
+
 // After key recreation, KEEP_SSD parking of the old object must not affect the new object.
 TEST_F(TestMmcMetaContainerLRU, InsertLruIfMatchSkipsReplacedObject)
 {
