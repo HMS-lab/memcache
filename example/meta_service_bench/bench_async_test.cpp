@@ -14,6 +14,7 @@
 #define main BenchmarkMain
 #include "bench_meta_service.cpp"
 #undef main
+#include <memory>
 #include <stdexcept>
 
 namespace bench {
@@ -70,6 +71,7 @@ void RunChildReapingTest()
     Check(waitpid(child, nullptr, WNOHANG) == -1 && errno == ECHILD);
 }
 
+// Exercise asynchronous completion and failure scenarios; counters and latency samples must match each outcome.
 int main()
 {
     RunChildReapingTest();
@@ -84,7 +86,7 @@ int main()
         config.putPercent = allPut;
         config.minBatch = config.maxBatch = 1;
         config.waitCompletions = wait;
-        ThreadStats stats;
+        auto stats = std::make_unique<ThreadStats>();
         int allocations = 0;
         int updates = 0;
         bench::AsyncTransportTest::SetSend(transport, [&](uint32_t sequence, int16_t opcode, const std::string &) {
@@ -106,11 +108,11 @@ int main()
             bench::AsyncTransportTest::Reply(transport, sequence, packer.String());
             return MMC_OK;
         });
-        Worker(transport, config, stats, 0, 0);
+        Worker(transport, config, *stats, 0, 0);
         Check(allocations == testOperations && updates == testOperations);
-        Check(stats.successCount[kOpPut] == testOperations && stats.histogram[kOpPut].count == 0);
-        Check(stats.histogram[kOpAlloc].count == testOperations && stats.submission[kOpUpdate].count == testOperations);
-        Check(stats.failureCount[kOpPut] == 0);
+        Check(stats->successCount[kOpPut] == testOperations && stats->histogram[kOpPut].count == 0);
+        Check(stats->histogram[kOpAlloc].count == testOperations && stats->submission[kOpUpdate].count == testOperations);
+        Check(stats->failureCount[kOpPut] == 0);
     }
     // A rejected send must release each logical slot without producing RTT samples.
     bench::AsyncTransport transport;
@@ -118,10 +120,10 @@ int main()
     BenchConfig config;
     config.opsPerThread = testOperations;
     config.putPercent = allPut;
-    ThreadStats stats;
-    Worker(transport, config, stats, 0, 0);
-    Check(stats.failureCount[kOpPut] == testOperations && stats.histogram[kOpAlloc].count == 0);
-    Check(stats.submission[kOpAlloc].count == testOperations && stats.submission[kOpUpdate].count == 0);
+    auto stats = std::make_unique<ThreadStats>();
+    Worker(transport, config, *stats, 0, 0);
+    Check(stats->failureCount[kOpPut] == testOperations && stats->histogram[kOpAlloc].count == 0);
+    Check(stats->submission[kOpAlloc].count == testOperations && stats->submission[kOpUpdate].count == 0);
     // Hold replies until the full window has been submitted, then complete in reverse order.
     for (bool wait : {false, true}) {
         bench::AsyncTransport unorderedTransport;
@@ -132,7 +134,7 @@ int main()
         reads.putPercent = 0;
         reads.minBatch = reads.maxBatch = 1;
         reads.waitCompletions = wait;
-        ThreadStats readStats;
+        auto readStats = std::make_unique<ThreadStats>();
         bench::AsyncTransportTest::SetSend(unorderedTransport,
             [&](uint32_t sequence, int16_t opcode, const std::string &) {
                 Check(opcode == ML_GET_REQ);
@@ -150,19 +152,19 @@ int main()
                 }
                 return MMC_OK;
             });
-        Worker(unorderedTransport, reads, readStats, 0, 0);
-        Check(readStats.successCount[kOpGet] == testOperations);
-        Check(readStats.histogram[kOpGet].count == testOperations);
+        Worker(unorderedTransport, reads, *readStats, 0, 0);
+        Check(readStats->successCount[kOpGet] == testOperations);
+        Check(readStats->histogram[kOpGet].count == testOperations);
     }
     // No response: release slots as timeouts, without manufacturing RTT samples.
     bench::AsyncTransport silent;
     bench::AsyncTransportTest::SetSend(silent, [](uint32_t, int16_t, const std::string &) { return MMC_OK; });
     config.rpcTimeoutMs = 0;
-    ThreadStats timeoutStats;
-    Worker(silent, config, timeoutStats, 0, 0);
-    Check(timeoutStats.timeouts[kOpAlloc] == testOperations);
-    Check(timeoutStats.failureCount[kOpPut] == testOperations);
-    Check(timeoutStats.histogram[kOpAlloc].count == 0);
+    auto timeoutStats = std::make_unique<ThreadStats>();
+    Worker(silent, config, *timeoutStats, 0, 0);
+    Check(timeoutStats->timeouts[kOpAlloc] == testOperations);
+    Check(timeoutStats->failureCount[kOpPut] == testOperations);
+    Check(timeoutStats->histogram[kOpAlloc].count == 0);
     // Partial batch allocation updates its successful entries but fails the logical Put.
     bench::AsyncTransport partial;
     constexpr int testBatchSize = 2;
@@ -192,10 +194,10 @@ int main()
     batches.queueDepth = testDepth;
     batches.putPercent = allPut;
     batches.minBatch = batches.maxBatch = testBatchSize;
-    ThreadStats batchStats;
-    Worker(partial, batches, batchStats, 0, 0);
-    Check(batchUpdates == testOperations && batchStats.failureCount[kOpPut] == testOperations);
-    Check(batchStats.failureCount[kOpAlloc] == testOperations && batchStats.successCount[kOpUpdate] == testOperations);
+    auto batchStats = std::make_unique<ThreadStats>();
+    Worker(partial, batches, *batchStats, 0, 0);
+    Check(batchUpdates == testOperations && batchStats->failureCount[kOpPut] == testOperations);
+    Check(batchStats->failureCount[kOpAlloc] == testOperations && batchStats->successCount[kOpUpdate] == testOperations);
 
     // A disconnect aborts issuance and fails the in-flight logical operation once.
     bench::AsyncTransport disconnected;
@@ -203,9 +205,9 @@ int main()
         bench::AsyncTransportTest::Break(disconnected);
         return MMC_OK;
     });
-    ThreadStats disconnectedStats;
-    Worker(disconnected, config, disconnectedStats, 0, 0);
-    Check(disconnected.Failed() && disconnectedStats.failureCount[kOpPut] == 1);
+    auto disconnectedStats = std::make_unique<ThreadStats>();
+    Worker(disconnected, config, *disconnectedStats, 0, 0);
+    Check(disconnected.Failed() && disconnectedStats->failureCount[kOpPut] == 1);
 
     // Response arrival and submission return can overlap: never subtract the intervals.
     bench::AsyncTransport delayedReturn;
@@ -223,10 +225,10 @@ int main()
     reads.opsPerThread = testOperations;
     reads.putPercent = 0;
     reads.minBatch = reads.maxBatch = 1;
-    ThreadStats timingStats;
-    Worker(delayedReturn, reads, timingStats, 0, 0);
-    Check(timingStats.submission[kOpGet].totalUs > timingStats.histogram[kOpGet].totalUs);
-    Check(timingStats.histogram[kOpGet].count == testOperations);
+    auto timingStats = std::make_unique<ThreadStats>();
+    Worker(delayedReturn, reads, *timingStats, 0, 0);
+    Check(timingStats->submission[kOpGet].totalUs > timingStats->histogram[kOpGet].totalUs);
+    Check(timingStats->histogram[kOpGet].count == testOperations);
     AllocResponse malformed;
     Check(!DecodeResponse(std::string(), malformed));
     std::cout << "Async benchmark tests passed\n";
