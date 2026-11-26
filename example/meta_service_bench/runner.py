@@ -316,9 +316,10 @@ def stop_process_group(process):
     reap_descendants(block=True)
 
 
-def run(cmd, cwd, on_profile=None):
+def run(cmd, cwd, on_profile=None, *, configuration=""):
     """Run the command, echoing its output live. Returns (exit_code, output)."""
     chunks = []
+    pending = ""
     enable_child_subreaper()
     decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
     control, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
@@ -345,6 +346,17 @@ def run(cmd, cwd, on_profile=None):
                         if key.data == "output":
                             data = os.read(proc.stdout.fileno(), 65536)
                             text = decoder.decode(data, final=not data)
+                            if configuration:
+                                # Keep a partial line so a Configuration header split across reads still matches.
+                                text = pending + text
+                                if data:
+                                    complete, newline, pending = text.rpartition("\n")
+                                    text = complete + newline
+                                    if header := re.search(r"^Configuration:\r?\n", text, re.MULTILINE):
+                                        text = text[:header.end()] + configuration + text[header.end():] + pending
+                                        pending = configuration = ""
+                                else:
+                                    text += "\nConfiguration:\n" + configuration
                             print(text, end="", flush=True)
                             chunks.append(text)
                             if not data:
@@ -927,7 +939,15 @@ def run_workload(cfg, args, client, target_name, iteration_name, rerun):
     for run_number in range(1, rerun + 1):
         git_commit = read_git_commit(cwd)
         label = f"bench={target_name!r} iteration={iteration_name!r} run {run_number}/{rerun}"
-        print(f"{label}: {command}\n  Git commit: {git_commit or 'N/A'}", flush=True)
+        print(f"{label}: {command}", flush=True)
+        config_fields = {
+            "Bench name:": target_name,
+            "Iteration name:": iteration_name,
+            "Git commit:": git_commit or "N/A",
+        }
+        configuration = "".join(
+            f"  {field:<17}{value if value.isprintable() else repr(value)}\n" for field, value in config_fields.items()
+        )
         annotation_id = grafana_start_annotation(cfg, f"{label}: {command}")
         perf_data = os.path.join(cwd, "perf.data")
         profile = WorkloadProfile(cfg, perf_data)
@@ -935,7 +955,7 @@ def run_workload(cfg, args, client, target_name, iteration_name, rerun):
         started_at = datetime.now(timezone.utc)
         start = time.monotonic()
         try:
-            exit_code, output = run(cmd, cwd, profile.on_event)
+            exit_code, output = run(cmd, cwd, profile.on_event, configuration=configuration)
         finally:
             profile.close()
         duration_s = time.monotonic() - start

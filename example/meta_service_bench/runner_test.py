@@ -82,6 +82,20 @@ while True:
 
 
 class LatencyReportTest(unittest.TestCase):
+    # The runner must add both names to the live and saved output even if the header spans two writes.
+    def test_configuration_names_in_streamed_output(self):
+        command = [
+            sys.executable, "-c",
+            "import time; print('Config', end='', flush=True); time.sleep(0.05); "
+            "print('uration:\\n  Build mode: DEBUG')",
+        ]
+        fields = "  Bench name:      candidate\n  Iteration name:  read-heavy\n"
+        with contextlib.redirect_stdout(io.StringIO()) as stdout:
+            exit_code, output = RUNNER.run(command, None, configuration=fields)
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(output, f"Configuration:\n{fields}  Build mode: DEBUG\n")
+        self.assertEqual(stdout.getvalue(), output)
+
     # Both pool columns must reach MongoDB with numeric values, sample counts, and nulls for unavailable metrics.
     def test_transposed_net_worker_stats_in_mongo_document(self):
         cfg = {"bench": {"cwd": "."}, "mongo": {"database": "memcache", "collection": "bench_meta_service"}}
@@ -170,18 +184,22 @@ Benchmark finished.
                 client = mock.MagicMock()
                 with (
                     mock.patch.object(RUNNER, "build_command", return_value=["bench_meta_service"]),
-                    mock.patch.object(RUNNER, "run", return_value=(0, output)),
+                    mock.patch.object(RUNNER, "run", return_value=(0, output)) as run,
                     mock.patch.object(RUNNER.subprocess, "run", return_value=SimpleNamespace(stdout=git_commit + "\n"))
                     as git,
-                    contextlib.redirect_stdout(io.StringIO()) as stdout,
+                    contextlib.redirect_stdout(io.StringIO()),
                 ):
                     self.assertEqual(RUNNER.run_workload(cfg, SimpleNamespace(), client, "local", "mixed", 1), 0)
                 self.assertEqual(git.call_args.args[0], ["git", "rev-parse", "--verify", "HEAD"])
                 self.assertEqual(git.call_args.kwargs["cwd"], cwd)
-                self.assertIn(f"Git commit: {git_commit}", stdout.getvalue())
+                self.assertEqual(run.call_args.kwargs["configuration"], (
+                    f"  Bench name:      local\n  Iteration name:  mixed\n  Git commit:      {git_commit}\n"
+                ))
                 insert = client["memcache"]["bench_meta_service"].insert_one
                 insert.assert_called_once()
                 doc = insert.call_args.args[0]
+                self.assertEqual(doc["bench_name"], "local")
+                self.assertEqual(doc["iteration_name"], "mixed")
                 self.assertEqual(doc["git_commit"], git_commit)
                 self.assertEqual(doc["build_mode"], build_mode)
                 self.assertEqual(doc["meta_lru_type"], lru_type)
