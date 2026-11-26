@@ -187,13 +187,16 @@ The final report shows the mean and population standard deviation across MetaSer
 (`net_pool<N>` for MemCache async requests and `AccWrk:<N>` for TCP transport). The coordinator takes
 per-thread Linux `/proc` snapshots after warmup, immediately before it releases the workload, and after all
 clients drain, before teardown. CPU, user-space CPU, kernel CPU, runnable wait, and estimated sleep are
-percentages of elapsed wall time per worker. Voluntary and involuntary context switches are counts per worker
-over that interval. The sleep estimate subtracts on-CPU runtime and run-queue wait from elapsed time, with a
-floor of zero. CPU tick granularity and scheduler counters that update at scheduling boundaries can affect
-short runs. The Workers column counts the threads with valid measurements for each metric. Unavailable
-measurements, including wait and sleep on kernels without usable per-thread scheduler counters, show as
-`N/A`. With MongoDB enabled the runner stores these same rows under `meta_net_worker_stats`, keyed by pool
-and metric. Each row contains `workers`, `avg`, and `stddev`, with `null` for unavailable values.
+percentages of elapsed wall time per worker, with standard deviations in percentage points (pp). Voluntary and
+involuntary context switches are counts per worker over that interval. The table displays every average and
+standard deviation to two decimal places. The sleep estimate subtracts on-CPU runtime and run-queue wait from
+elapsed time, with a floor of zero. CPU tick
+granularity and scheduler counters that update at scheduling boundaries can affect short runs. The Worker count
+row counts threads observed at both snapshots, and `(n=...)` shows when a metric uses fewer threads. Counts use
+comma separators for thousands. Unavailable measurements, including wait and sleep on kernels without usable
+per-thread scheduler counters, show as `N/A`. With MongoDB enabled the runner stores these values under
+`meta_net_worker_stats`, keyed by pool and metric. Each metric contains numeric `workers`, `avg`, and `stddev`
+fields, with `null` for unavailable averages and standard deviations.
 
 Recording stores original `double` microsecond measurements in 64 power-of-two buckets, with capacity for at least
 1,024 observations reserved per bucket before measurement (3 MiB of sample capacity per generator thread across

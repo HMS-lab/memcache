@@ -82,6 +82,54 @@ while True:
 
 
 class LatencyReportTest(unittest.TestCase):
+    # Both pool columns must reach MongoDB with numeric values, sample counts, and nulls for unavailable metrics.
+    def test_transposed_net_worker_stats_in_mongo_document(self):
+        cfg = {"bench": {"cwd": "."}, "mongo": {"database": "memcache", "collection": "bench_meta_service"}}
+        output = """Benchmark report: maximum logical concurrency=2
+MetaService network worker statistics (across workers)
+Metric (avg / stddev)     net_pool (MemCache workers)      AccWrk (transport layer)
+Worker count                                   1,600                            4
+CPU                                 52.00% / 4.50 pp              32.00% / 6.00 pp
+User CPU                            43.25% / 4.00 pp              22.00% / 4.00 pp
+Kernel CPU                           8.75% / 0.50 pp              10.00% / 2.00 pp
+Runnable wait               2.00% / 1.00 pp (n=1,200)                         N/A
+Estimated sleep            46.00% / 5.50 pp (n=1,200)                         N/A
+Voluntary switches             12,345.75 / 12,000.50                324.00 / 6.00
+Involuntary switches                  123.00 / 25.00                  10.00 / 2.00
+Benchmark finished.
+"""
+        client = mock.MagicMock()
+        with (
+            mock.patch.object(RUNNER, "build_command", return_value=["bench_meta_service"]),
+            mock.patch.object(RUNNER, "run", return_value=(0, output)),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(RUNNER.run_workload(cfg, SimpleNamespace(), client, "local", "mixed", 1), 0)
+
+        insert = client["memcache"]["bench_meta_service"].insert_one
+        insert.assert_called_once()
+        stats = insert.call_args.args[0]["meta_net_worker_stats"]
+        self.assertEqual(stats, {
+            "net_pool": {
+                "cpu_pct": {"workers": 1600, "avg": 52.0, "stddev": 4.5},
+                "user_cpu_pct": {"workers": 1600, "avg": 43.25, "stddev": 4.0},
+                "kernel_cpu_pct": {"workers": 1600, "avg": 8.75, "stddev": 0.5},
+                "runnable_wait_pct": {"workers": 1200, "avg": 2.0, "stddev": 1.0},
+                "sleep_estimate_pct": {"workers": 1200, "avg": 46.0, "stddev": 5.5},
+                "voluntary_switches": {"workers": 1600, "avg": 12345.75, "stddev": 12000.5},
+                "involuntary_switches": {"workers": 1600, "avg": 123.0, "stddev": 25.0},
+            },
+            "AccWrk": {
+                "cpu_pct": {"workers": 4, "avg": 32.0, "stddev": 6.0},
+                "user_cpu_pct": {"workers": 4, "avg": 22.0, "stddev": 4.0},
+                "kernel_cpu_pct": {"workers": 4, "avg": 10.0, "stddev": 2.0},
+                "runnable_wait_pct": {"workers": 0, "avg": None, "stddev": None},
+                "sleep_estimate_pct": {"workers": 0, "avg": None, "stddev": None},
+                "voluntary_switches": {"workers": 4, "avg": 324.0, "stddev": 6.0},
+                "involuntary_switches": {"workers": 4, "avg": 10.0, "stddev": 2.0},
+            },
+        })
+
     # Each startup configuration line must reach MongoDB as a typed field alongside latency metrics.
     def test_meta_service_settings_in_mongo_document(self):
         cfg = {"bench": {"cwd": "."}, "mongo": {"database": "memcache", "collection": "bench_meta_service"}}

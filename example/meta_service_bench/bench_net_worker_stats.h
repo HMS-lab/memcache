@@ -61,6 +61,7 @@ public:
     {
         for (const auto &worker : workers_) {
             if (auto end = Sample(worker.path); end && end->startTicks == worker.start.startTicks) {
+                ++workerCounts_[worker.pool];
                 AddSample(rows_[worker.pool], worker.start, *end);
             }
         }
@@ -72,26 +73,36 @@ public:
         if (!completed_) {
             return;
         }
-        std::ostringstream report;
-        report.imbue(std::locale::classic());
-        report << "\nMetaService network worker statistics (across workers)\n"
-               << std::left << std::setw(kPoolWidth) << "Pool" << std::setw(kMetricWidth) << "Metric"
-               << std::right << std::setw(kColumnWidth) << "Workers" << std::setw(kColumnWidth) << "Avg"
-               << std::setw(kColumnWidth) << "Stddev" << '\n'
-               << std::fixed << std::setprecision(kReportPrecision);
+        const std::locale reportLocale(std::locale::classic(), new ReportNumberFormat);
+        std::array<std::array<std::string, METRIC_COUNT>, POOL_COUNT> cells;
+        std::array<int, POOL_COUNT> widths{};
         for (const auto &pool : kPools) {
+            widths[pool.index] = static_cast<int>(pool.label.size());
             for (size_t i = 0; i < kMetricNames.size(); ++i) {
-                const auto &metric = rows_[pool.index][i];
-                report << std::left << std::setw(kPoolWidth) << pool.label << std::setw(kMetricWidth) << kMetricNames[i]
-                       << std::right << std::setw(kColumnWidth) << metric.count;
-                if (metric.count == 0) {
-                    report << ' ' << std::setw(kColumnWidth) << "N/A" << ' ' << std::setw(kColumnWidth) << "N/A";
-                } else {
-                    report << ' ' << std::setw(kColumnWidth) << metric.mean
-                           << ' ' << std::setw(kColumnWidth) << std::sqrt(metric.squaredDeviation / metric.count);
-                }
-                report << '\n';
+                auto &cell = cells[pool.index][i];
+                cell = FormatMetric(rows_[pool.index][i], workerCounts_[pool.index], i <= SLEEP, reportLocale);
+                widths[pool.index] = std::max(widths[pool.index], static_cast<int>(cell.size()));
             }
+        }
+
+        std::ostringstream report;
+        report.imbue(reportLocale);
+        report << "\nMetaService network worker statistics (across workers)\n"
+               << std::left << std::setw(kMetricWidth) << "Metric (avg / stddev)" << std::right;
+        for (const auto &pool : kPools) {
+            report << "  " << std::setw(widths[pool.index]) << pool.label;
+        }
+        report << '\n' << std::left << std::setw(kMetricWidth) << "Worker count" << std::right;
+        for (const auto &pool : kPools) {
+            report << "  " << std::setw(widths[pool.index]) << workerCounts_[pool.index];
+        }
+        report << '\n';
+        for (size_t i = 0; i < kMetricNames.size(); ++i) {
+            report << std::left << std::setw(kMetricWidth) << kMetricNames[i] << std::right;
+            for (const auto &pool : kPools) {
+                report << "  " << std::setw(widths[pool.index]) << cells[pool.index][i];
+            }
+            report << '\n';
         }
         output << report.str();
     }
@@ -102,23 +113,21 @@ private:
     enum PoolIndex { ASYNC, TCP, POOL_COUNT };
     struct Pool {
         PoolIndex index;
-        const char *label;
+        std::string_view label;
         std::string_view prefix;
     };
     static constexpr std::array<Pool, POOL_COUNT> kPools{{
-        {ASYNC, "net_pool", "net_pool"},
-        {TCP, "AccWrk", "AccWrk:"},
+        {ASYNC, "net_pool (MemCache workers)", "net_pool"},
+        {TCP, "AccWrk (transport layer)", "AccWrk:"},
     }};
 
     enum MetricIndex { CPU, USER, KERNEL, RUNNABLE, SLEEP, VOLUNTARY, INVOLUNTARY, METRIC_COUNT };
     static constexpr std::array<const char *, METRIC_COUNT> kMetricNames{{
-        "cpu_pct", "user_cpu_pct", "kernel_cpu_pct", "runnable_wait_pct", "sleep_estimate_pct",
-        "voluntary_switches", "involuntary_switches",
+        "CPU", "User CPU", "Kernel CPU", "Runnable wait", "Estimated sleep",
+        "Voluntary switches", "Involuntary switches",
     }};
-    static constexpr int kPoolWidth = 12;
     static constexpr int kMetricWidth = 24;
-    static constexpr int kColumnWidth = 16;
-    static constexpr int kReportPrecision = 6;
+    static constexpr int kReportPrecision = 2;
     static constexpr double kPercent = 100.0;
     // /proc/<pid>/task/<tid>/stat field numbers (one-based).
     static constexpr int kStateField = 3;
@@ -158,6 +167,35 @@ private:
             squaredDeviation += difference * (value - mean);
         }
     };
+
+    class ReportNumberFormat : public std::numpunct<char> {
+    protected:
+        char do_thousands_sep() const override
+        {
+            return ',';
+        }
+
+        std::string do_grouping() const override
+        {
+            constexpr char digitsPerGroup = 3;
+            return {digitsPerGroup};
+        }
+    };
+
+    static std::string FormatMetric(const Metric &metric, size_t workers, bool percentage, const std::locale &locale)
+    {
+        if (metric.count == 0) {
+            return "N/A";
+        }
+        std::ostringstream cell;
+        cell.imbue(locale);
+        cell << std::fixed << std::setprecision(kReportPrecision) << metric.mean << (percentage ? "%" : "") << " / "
+             << std::sqrt(metric.squaredDeviation / metric.count) << (percentage ? " pp" : "");
+        if (metric.count != workers) {
+            cell << " (n=" << metric.count << ')';
+        }
+        return cell.str();
+    }
 
     static std::optional<CounterSample> Sample(const std::filesystem::path &path)
     {
@@ -240,6 +278,7 @@ private:
     const std::filesystem::path taskPath_;
     const long ticksPerSec_ = sysconf(_SC_CLK_TCK);
     std::vector<Worker> workers_;
+    std::array<size_t, POOL_COUNT> workerCounts_{};
     std::array<std::array<Metric, METRIC_COUNT>, POOL_COUNT> rows_{};
     bool completed_ = false;
 };

@@ -376,9 +376,23 @@ LATENCY_COLUMNS = ("samples", "avg_us", "p50_us", "p95_us", "p99_us", "p999_us",
 LATENCY_ROW_RE = re.compile(r"^(put-alloc|put-update|get)((?:\s+[\d.]+){8})$")
 OUTCOME_RE = re.compile(r"^(put-alloc|put-update|get): success=(\d+) fail=(\d+) "
                         r"transport failures=(\d+) timeouts=(\d+)$")
-NET_WORKER_ROW_RE = re.compile(
+LEGACY_NET_WORKER_ROW_RE = re.compile(
     r"^(net_pool|AccWrk)[ \t]+([a-z_]+)[ \t]+(\d+)[ \t]+(\d+\.\d+|N/A)[ \t]+(\d+\.\d+|N/A)$",
     re.MULTILINE,
+)
+NET_WORKER_POOLS = {"net_pool (MemCache workers)": "net_pool", "AccWrk (transport layer)": "AccWrk"}
+NET_WORKER_METRICS = {
+    "CPU": "cpu_pct",
+    "User CPU": "user_cpu_pct",
+    "Kernel CPU": "kernel_cpu_pct",
+    "Runnable wait": "runnable_wait_pct",
+    "Estimated sleep": "sleep_estimate_pct",
+    "Voluntary switches": "voluntary_switches",
+    "Involuntary switches": "involuntary_switches",
+}
+GROUPED_INTEGER = r"(?:\d{1,3}(?:,\d{3})+|\d+)"
+NET_WORKER_CELL_RE = re.compile(
+    rf"({GROUPED_INTEGER}\.\d+)%? / ({GROUPED_INTEGER}\.\d+)(?: pp)?(?: \(n=({GROUPED_INTEGER})\))?"
 )
 META_SERVICE_RE = re.compile(r"^[ \t]*MetaService: LRU=(lru|sharded_lru), LRU shards=(\d+|N/A), "
                              r"async network workers=(\d+), TCP transport workers=(\d+)$", re.MULTILINE)
@@ -390,6 +404,44 @@ CONFIG_FIELD_RE = re.compile(
     r"|TCP transport workers:[ \t]*(?P<meta_net_tcp_workers>\d+))[ \t]*$",
     re.MULTILINE,
 )
+
+
+def parse_net_worker_stats(output):
+    """Read the pool columns and preserve the MongoDB metric keys and worker counts."""
+    _, _, section = output.partition("MetaService network worker statistics (across workers)\n")
+    rows = [re.split(r"[ \t]{2,}", line) for line in section.splitlines()]
+    if (
+        len(rows) >= 2
+        and rows[0] == ["Metric (avg / stddev)", *NET_WORKER_POOLS]
+        and len(rows[1]) == len(rows[0])
+        and rows[1][0] == "Worker count"
+        and all(re.fullmatch(GROUPED_INTEGER, value) for value in rows[1][1:])
+    ):
+        stats = {pool: {} for pool in NET_WORKER_POOLS.values()}
+        for label, *cells in rows[2:]:
+            if len(cells) != len(stats) or label not in NET_WORKER_METRICS:
+                break
+            for pool, workers, cell in zip(stats, rows[1][1:], cells):
+                metric = NET_WORKER_METRICS[label]
+                if cell == "N/A":
+                    stats[pool][metric] = {"workers": 0, "avg": None, "stddev": None}
+                elif match := NET_WORKER_CELL_RE.fullmatch(cell):
+                    avg, stddev, count = match.groups()
+                    stats[pool][metric] = {
+                        "workers": int((count or workers).replace(",", "")),
+                        "avg": float(avg.replace(",", "")),
+                        "stddev": float(stddev.replace(",", "")),
+                    }
+        return stats
+
+    stats = {}
+    for pool, metric, workers, avg, stddev in LEGACY_NET_WORKER_ROW_RE.findall(output):
+        stats.setdefault(pool, {})[metric] = {
+            "workers": int(workers),
+            "avg": None if avg == "N/A" else float(avg),
+            "stddev": None if stddev == "N/A" else float(stddev),
+        }
+    return stats
 
 
 def parse_report(output):
@@ -413,14 +465,7 @@ def parse_report(output):
             results[field] = value
         else:
             results[field] = None if value == "N/A" else int(value)
-    worker_stats = {}
-    for pool, metric, workers, avg, stddev in NET_WORKER_ROW_RE.findall(output):
-        worker_stats.setdefault(pool, {})[metric] = {
-            "workers": int(workers),
-            "avg": None if avg == "N/A" else float(avg),
-            "stddev": None if stddev == "N/A" else float(stddev),
-        }
-    if worker_stats:
+    if worker_stats := parse_net_worker_stats(output):
         results["meta_net_worker_stats"] = worker_stats
     return add_run_markers(results, output)
 
