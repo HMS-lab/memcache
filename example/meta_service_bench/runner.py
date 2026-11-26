@@ -378,6 +378,14 @@ OUTCOME_RE = re.compile(r"^(put-alloc|put-update|get): success=(\d+) fail=(\d+) 
                         r"transport failures=(\d+) timeouts=(\d+)$")
 META_SERVICE_RE = re.compile(r"^[ \t]*MetaService: LRU=(lru|sharded_lru), LRU shards=(\d+|N/A), "
                              r"async network workers=(\d+), TCP transport workers=(\d+)$", re.MULTILINE)
+CONFIG_FIELD_RE = re.compile(
+    r"^[ \t]*(?:Build mode:[ \t]*(?P<build_mode>\S+)"
+    r"|MetaService LRU type:[ \t]*(?P<meta_lru_type>lru|sharded_lru)"
+    r"|LRU shards:[ \t]*(?P<meta_lru_shard_count>\d+|N/A)"
+    r"|Async network workers:[ \t]*(?P<meta_net_async_workers>\d+)"
+    r"|TCP transport workers:[ \t]*(?P<meta_net_tcp_workers>\d+))[ \t]*$",
+    re.MULTILINE,
+)
 
 
 def parse_report(output):
@@ -394,6 +402,13 @@ def parse_report(output):
             meta_net_async_workers=int(async_workers),
             meta_net_tcp_workers=int(tcp_workers),
         )
+    for match in CONFIG_FIELD_RE.finditer(output):
+        field = match.lastgroup
+        value = match[field]
+        if field in ("build_mode", "meta_lru_type"):
+            results[field] = value
+        else:
+            results[field] = None if value == "N/A" else int(value)
     return add_run_markers(results, output)
 
 

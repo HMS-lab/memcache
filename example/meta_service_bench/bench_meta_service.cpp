@@ -1655,6 +1655,7 @@ int main(int argc, char *argv[])
     const auto &metaService = sharedResults->metaService;
     const bool sharded = metaService.lruType == MMC_META_LRU_TYPE_SHARDED_LRU;
     std::cout << "\nConfiguration:\n"
+              << "  Build mode:   " << BENCH_BUILD_MODE << "\n"
               << "  Processes:    " << cfg.processCount << "\n"
               << "  Threads/proc: " << cfg.threadCount << "\n"
               << "  Ops/thread:   " << cfg.opsPerThread << "\n"
@@ -1679,10 +1680,10 @@ int main(int argc, char *argv[])
               << "  NUMA meta:     " << DescribeNumaBinding(metaNuma) << "\n"
               << "  NUMA worker:   " << DescribeNumaBinding(workerNuma) << "\n"
               << "  NUMA mem:      " << NumaMemPolicyName(cfg.numaMemPolicy) << "\n"
-              << "  MetaService: LRU=" << (sharded ? "sharded_lru" : "lru")
-              << ", LRU shards=" << (sharded ? std::to_string(metaService.lruShardCount) : "N/A")
-              << ", async network workers=" << metaService.asyncWorkerCount
-              << ", TCP transport workers=" << metaService.tcpWorkerCount << "\n"
+              << "  MetaService LRU type:    " << (sharded ? "sharded_lru" : "lru") << "\n"
+              << "  LRU shards:              " << (sharded ? std::to_string(metaService.lruShardCount) : "N/A") << "\n"
+              << "  Async network workers:   " << metaService.asyncWorkerCount << "\n"
+              << "  TCP transport workers:   " << metaService.tcpWorkerCount << "\n"
               << std::endl;
 
     MetricsSampler metricsSampler(cfg.metricsIntervalMs);

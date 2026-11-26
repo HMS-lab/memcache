@@ -178,9 +178,10 @@ Each row pools observations from single and batch RPCs across all client threads
 and per-RPC outcomes appear below the tables. Each percentile is the exact observation at the one-based rank
 `ceil(p × Samples)` in the pooled distribution. Samples counts RPC timing observations.
 
-The startup configuration section shows the effective MetaService LRU type, LRU shard count, async request
-workers, and TCP transport workers. The runner stores them in MongoDB as `meta_lru_type`, `meta_lru_shard_count`,
-`meta_net_async_workers`, and `meta_net_tcp_workers`. Plain LRU shows `N/A` for shards and stores that field as `null`.
+The startup configuration section shows the executable's build mode and the effective MetaService LRU type,
+LRU shard count, async request workers, and TCP transport workers on separate lines. The runner stores them in
+MongoDB as `build_mode`, `meta_lru_type`, `meta_lru_shard_count`, `meta_net_async_workers`, and
+`meta_net_tcp_workers`. Plain LRU shows `N/A` for shards and stores that field as `null`.
 
 Recording stores original `double` microsecond measurements in 64 power-of-two buckets, with capacity for at least
 1,024 observations reserved per bucket before measurement (3 MiB of sample capacity per generator thread across

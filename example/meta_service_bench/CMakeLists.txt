@@ -144,6 +144,10 @@ if (BENCH_LINK_DIRS)
 endif ()
 target_compile_options(bench_meta_service_async_test PRIVATE -W -fpermissive -Wno-float-equal)
 
+foreach (BENCH_TARGET IN ITEMS bench_meta_service bench_meta_service_async_test)
+    target_compile_definitions(${BENCH_TARGET} PRIVATE "BENCH_BUILD_MODE=\"$<UPPER_CASE:$<CONFIG>>\"")
+endforeach ()
+
 # The process protocol test has no MemCache, MemFabric, Python, or device runtime dependency.
 add_executable(bench_meta_service_barrier_test bench_process_barrier_test.cpp)
 target_link_libraries(bench_meta_service_barrier_test PRIVATE pthread)

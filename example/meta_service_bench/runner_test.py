@@ -82,14 +82,21 @@ while True:
 
 
 class LatencyReportTest(unittest.TestCase):
-    # For either LRU mode, startup configuration must reach MongoDB as typed fields alongside latency metrics.
+    # Each startup configuration line must reach MongoDB as a typed field alongside latency metrics.
     def test_meta_service_settings_in_mongo_document(self):
         cfg = {"bench": {"cwd": "."}, "mongo": {"database": "memcache", "collection": "bench_meta_service"}}
-        for lru_type, shards, expected_count in (("lru", "N/A", None), ("sharded_lru", "32", 32)):
-            with self.subTest(lru_type=lru_type):
+        for build_mode, lru_type, shards, expected_count in (
+            ("DEBUG", "lru", "N/A", None),
+            ("RELEASE", "sharded_lru", "32", 32),
+        ):
+            with self.subTest(build_mode=build_mode, lru_type=lru_type):
                 output = f"""Configuration:
+  Build mode:   {build_mode}
   Processes:    2
-  MetaService: LRU={lru_type}, LRU shards={shards}, async network workers=16, TCP transport workers=4
+  MetaService LRU type:    {lru_type}
+  LRU shards:              {shards}
+  Async network workers:   16
+  TCP transport workers:   4
 
 Benchmark report: maximum logical concurrency=2
 Client-observed RPC round-trip latency (us = microseconds)
@@ -106,6 +113,7 @@ Benchmark finished.
                 insert = client["memcache"]["bench_meta_service"].insert_one
                 insert.assert_called_once()
                 doc = insert.call_args.args[0]
+                self.assertEqual(doc["build_mode"], build_mode)
                 self.assertEqual(doc["meta_lru_type"], lru_type)
                 self.assertEqual(doc["meta_lru_shard_count"], expected_count)
                 self.assertEqual(doc["meta_net_async_workers"], 16)
@@ -116,7 +124,7 @@ Benchmark finished.
     # A run that stops after configuration still yields the available settings and a failed completion marker.
     def test_meta_service_settings_without_final_report(self):
         output = """Configuration:
-  MetaService: LRU=sharded_lru, LRU shards=32, async network workers=16, TCP transport workers=4
+  LRU shards:              32
 Benchmark failed.
 """
         results = RUNNER.parse_report(output)
