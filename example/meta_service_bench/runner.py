@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Run every configured workload against every benchmark binary in ./config.yml."""
+"""Run every configured workload against every configured benchmark binary."""
+import argparse
 import codecs
 import contextlib
 import ctypes
@@ -881,15 +882,16 @@ def run_workload(cfg, args, client, target_name, iteration_name, rerun):
 
 
 def main():
-    if len(sys.argv) != 1:
-        sys.exit("runner.py takes no command-line arguments. Edit ./config.yml before running it.")
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+    parser.add_argument("--config", required=True, help="YAML configuration path")
+    config_path = parser.parse_args().config
     try:
-        with open("config.yml", encoding="utf-8") as stream:
+        with open(config_path, encoding="utf-8") as stream:
             cfg = load_config(stream)
         targets, rerun = parse_targets(cfg["bench"])
         iterations = parse_iterations(cfg["iterations"])
     except (OSError, ValueError, yaml.YAMLError) as error:
-        sys.exit(f"config.yml: {error}")
+        sys.exit(f"{config_path}: {error}")
 
     profiling = apply_config_options(SimpleNamespace(), cfg)
     mongo = cfg.get("mongo", {})

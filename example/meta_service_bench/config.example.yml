@@ -1,4 +1,5 @@
-# Copy this file to config.yml. Set each cwd to a checkout with a built benchmark.
+# Set each cwd to a checkout with a built benchmark.
+# Run with: python3 runner.py --config config.example.yml
 # A binary path beginning with ./ is relative to its target's cwd.
 bench:
   baseline:
