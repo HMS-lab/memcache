@@ -16,7 +16,9 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdio>
 #include <cstdint>
+#include <numeric>
 #include <vector>
 
 namespace bench {
@@ -30,7 +32,6 @@ constexpr int kPercentileP99 = 99;
 constexpr int kPercentileP999 = 999;
 constexpr int kPercentileP999Divisor = 1000;
 
-// Only this fixed-size summary crosses process boundaries; samples stay in the client.
 struct LatencySummary {
     uint64_t count{0};
     double avgUs{0};
@@ -94,6 +95,46 @@ public:
         totalUs += other.totalUs;
         other.count = 0;
         other.totalUs = other.minUs = other.maxUs = 0;
+    }
+
+    bool WriteSamples(std::FILE *file) const
+    {
+        for (const auto &bucket : buckets_) {
+            const size_t size = bucket.size();
+            if (std::fwrite(&size, sizeof(size), 1, file) != 1 ||
+                (size != 0 && std::fwrite(bucket.data(), sizeof(double), size, file) != size)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool MergeSamples(std::FILE *file)
+    {
+        for (size_t i = 0; i < buckets_.size(); ++i) {
+            auto &bucket = buckets_[i];
+            size_t size = 0;
+            if (std::fread(&size, sizeof(size), 1, file) != 1 || size > bucket.max_size() - bucket.size()) {
+                return false;
+            }
+            if (size == 0) {
+                continue;
+            }
+            const size_t offset = bucket.size();
+            bucket.resize(offset + size);
+            double *first = bucket.data() + offset;
+            if (std::fread(first, sizeof(double), size, file) != size) {
+                bucket.resize(offset);
+                return false;
+            }
+            const auto bounds = std::minmax_element(first, first + size);
+            minUs = count == 0 ? *bounds.first : std::min(minUs, *bounds.first);
+            maxUs = count == 0 ? *bounds.second : std::max(maxUs, *bounds.second);
+            totalUs = std::accumulate(first, first + size, totalUs);
+            count += size;
+            sorted_[i] = false;
+        }
+        return true;
     }
 
     double Percentile(int numerator, int denominator)

@@ -400,7 +400,7 @@ def add_run_markers(results, output):
 
 
 def parse_async_report(output):
-    """Parse per-process latency tables and aggregate RPC outcomes; accept older reports too."""
+    """Parse aggregate latency and RPC outcomes, including older per-process latency tables."""
     _, _, report = output.rpartition("Benchmark report:")
     results = {}
     prefix = None

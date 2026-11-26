@@ -15,7 +15,9 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
-#include <type_traits>
+#include <sys/mman.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 namespace {
 constexpr size_t kTestSampleCount = 2500;
@@ -102,14 +104,54 @@ void TestBoundariesAndOverflow()
     }
     CheckNear(samples.Summarize().p50Us, kBoundaryUs - kBoundaryOffsetUs);
 }
+
+// Two processes with unequal sample counts must yield exact pooled ranks after transferring their samples.
+void TestProcessSampleMerge()
+{
+    constexpr size_t lowCount = 1000;
+    constexpr size_t highCount = 5;
+    constexpr double lowUs = kBoundaryUs + kBoundaryOffsetUs;
+    constexpr double highUs = kBoundaryUs + kMedianDivisor * kBoundaryOffsetUs;
+    bench::LatencyHistogram pooled;
+    for (const double us : {lowUs, highUs}) {
+        const int fd = memfd_create("bench-latency-test", MFD_CLOEXEC);
+        Check(fd >= 0);
+        std::FILE *file = fdopen(fd, "w+b");
+        Check(file != nullptr);
+        const pid_t pid = fork();
+        Check(pid >= 0);
+        if (pid == 0) {
+            bench::LatencyHistogram worker;
+            const size_t count = us == lowUs ? lowCount : highCount;
+            for (size_t i = 0; i < count; ++i) {
+                worker.Record(us);
+            }
+            _exit(worker.WriteSamples(file) && std::fflush(file) == 0 ? EXIT_SUCCESS : EXIT_FAILURE);
+        }
+        int status = 0;
+        Check(waitpid(pid, &status, 0) == pid && WIFEXITED(status) && WEXITSTATUS(status) == EXIT_SUCCESS);
+        Check(std::fseek(file, 0, SEEK_SET) == 0);
+        Check(pooled.MergeSamples(file));
+        Check(std::fclose(file) == 0);
+    }
+    const auto summary = pooled.Summarize();
+    Check(summary.count == lowCount + highCount);
+    CheckNear(summary.avgUs, (lowCount * lowUs + highCount * highUs) / summary.count);
+    CheckNear(summary.p50Us, lowUs);
+    CheckNear(summary.p95Us, lowUs);
+    CheckNear(summary.p99Us, lowUs);
+    CheckNear(summary.p999Us, highUs);
+    CheckNear(summary.minUs, lowUs);
+    CheckNear(summary.maxUs, highUs);
+}
 } // namespace
 
-// Summaries contain no process-local storage; all percentile and merge scenarios must pass.
+// All percentile and sample merge scenarios must pass.
 int main()
 {
-    static_assert(std::is_trivially_copyable<bench::LatencySummary>::value, "Summary must be shareable");
     TestEmptyAndSingleton();
     TestMergedPercentiles();
     TestBoundariesAndOverflow();
+    TestProcessSampleMerge();
     std::cout << "Latency tests passed\n";
 }

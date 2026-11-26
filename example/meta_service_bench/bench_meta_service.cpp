@@ -61,6 +61,7 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <netinet/in.h>
 #include <random>
@@ -552,12 +553,14 @@ void SetProcessName(const std::string &name, char *processTitle, size_t processT
 
 
 using bench::LatencyHistogram;
-using bench::LatencySummary;
+
+constexpr std::array kTimedOperations{kOpAlloc, kOpUpdate, kOpGet};
+using SampleFile = std::unique_ptr<std::FILE, decltype(&std::fclose)>;
 
 struct ThreadStats {
     ThreadStats()
     {
-        for (auto type : {kOpAlloc, kOpUpdate, kOpGet}) {
+        for (auto type : kTimedOperations) {
             histogram[type].ReserveBuckets();
             submission[type].ReserveBuckets();
         }
@@ -574,19 +577,33 @@ struct ThreadStats {
 struct PerOpResult {
     uint64_t successCount;
     uint64_t failureCount;
-    LatencySummary histogram;
-    LatencySummary submission;
     uint64_t transportFailures{};
     uint64_t timeouts{};
 };
 
 struct ProcessResult {
-    int rank;
-    int pid;
     int valid;
     PerOpResult ops[kOpTypeCount];
     double durationSec;
     int padding[8];
+};
+
+struct ProcessLatencies {
+    LatencyHistogram histogram[kOpTypeCount];
+    LatencyHistogram submission[kOpTypeCount];
+
+    bool MergeSamples(std::FILE *file)
+    {
+        if (std::fseek(file, 0, SEEK_SET) != 0) {
+            return false;
+        }
+        for (auto type : kTimedOperations) {
+            if (!histogram[type].MergeSamples(file) || !submission[type].MergeSamples(file)) {
+                return false;
+            }
+        }
+        return true;
+    }
 };
 
 inline double NowUs();
@@ -802,7 +819,7 @@ void PrintSep()
     std::cout << "+" << std::string(kTableWidth - 2, '-') << "+\n";
 }
 
-void PrintAggReport(const std::vector<ProcessResult> &results, const BenchConfig &cfg)
+void PrintAggReport(const std::vector<ProcessResult> &results, ProcessLatencies &latencies, const BenchConfig &cfg)
 {
     std::array<PerOpResult, kOpTypeCount> total{};
     double duration = 0;
@@ -825,7 +842,7 @@ void PrintAggReport(const std::vector<ProcessResult> &results, const BenchConfig
     auto operationName = [](OpType type) {
         return type == kOpAlloc ? "put-alloc" : type == kOpUpdate ? "put-update" : "get";
     };
-    auto printTable = [&](const ProcessResult &process, const char *title, bool submission) {
+    auto printTable = [&](LatencyHistogram (&samples)[kOpTypeCount], const char *title) {
         const auto savedFlags = std::cout.flags();
         const auto savedPrecision = std::cout.precision();
         std::cout << "\n" << title << "\n"
@@ -836,8 +853,8 @@ void PrintAggReport(const std::vector<ProcessResult> &results, const BenchConfig
         }
         std::cout << "\n" << std::string(operationColumnWidth + metricColumnCount * valueColumnWidth, '-') << "\n";
         std::cout << std::fixed << std::setprecision(latencyPrecision);
-        for (auto type : {kOpAlloc, kOpUpdate, kOpGet}) {
-            const auto &histogram = submission ? process.ops[type].submission : process.ops[type].histogram;
+        for (auto type : kTimedOperations) {
+            const auto histogram = samples[type].Summarize();
             std::cout << std::left << std::setw(operationColumnWidth) << operationName(type)
                       << std::right << std::setw(valueColumnWidth) << histogram.count
                       << std::setw(valueColumnWidth) << histogram.avgUs
@@ -851,14 +868,11 @@ void PrintAggReport(const std::vector<ProcessResult> &results, const BenchConfig
         std::cout.flags(savedFlags);
         std::cout.precision(savedPrecision);
     };
-    for (const auto &process : results) {
-        std::cout << "\nClient process: rank=" << process.rank << ", pid=" << process.pid << "\n";
-        printTable(process, "Client-observed RPC round-trip latency (us = microseconds)", false);
-        printTable(process, "Submission duration (us = microseconds; overlaps RPC latency)", true);
-    }
+    printTable(latencies.histogram, "Client-observed RPC round-trip latency (us = microseconds)");
+    printTable(latencies.submission, "Submission duration (us = microseconds; overlaps RPC latency)");
     std::cout << "\nLogical Put: success=" << total[kOpPut].successCount << " fail=" << total[kOpPut].failureCount
               << "\nRPC outcomes:\n";
-    for (auto type : {kOpAlloc, kOpUpdate, kOpGet}) {
+    for (auto type : kTimedOperations) {
         std::cout << "  " << operationName(type) << ": success=" << total[type].successCount
                   << " fail=" << total[type].failureCount << " transport failures=" << total[type].transportFailures
                   << " timeouts=" << total[type].timeouts << "\n";
@@ -1107,20 +1121,25 @@ void WorkerWithPreparedKeys(bench::AsyncTransport &transport, const BenchConfig 
     WorkerWithPreparedKeys(transport, cfg, keys, stats, tid, rank);
 }
 
-void WriteResult(ProcessResult &out, ThreadStats &stats, double durationSec, int rank, int pid)
+bool WriteResult(ProcessResult &out, const ThreadStats &stats, double durationSec, std::FILE *sampleFile)
 {
-    out.rank = rank;
-    out.pid = pid;
+    for (auto type : kTimedOperations) {
+        if (!stats.histogram[type].WriteSamples(sampleFile) || !stats.submission[type].WriteSamples(sampleFile)) {
+            return false;
+        }
+    }
+    if (std::fflush(sampleFile) != 0) {
+        return false;
+    }
     out.durationSec = durationSec;
     for (int i = 0; i < kOpTypeCount; ++i) {
         out.ops[i].successCount = stats.successCount[i];
         out.ops[i].failureCount = stats.failureCount[i];
-        out.ops[i].histogram = stats.histogram[i].Summarize();
-        out.ops[i].submission = stats.submission[i].Summarize();
         out.ops[i].transportFailures = stats.transportFailures[i];
         out.ops[i].timeouts = stats.timeouts[i];
     }
     out.valid = 1;
+    return true;
 }
 
 // perf record takes a comma separated pid list, so one perf can follow every client process.
@@ -1243,7 +1262,8 @@ int RunMetaService(const std::string &metaUrl, const std::string &bmUrl, const s
 }
 
 int RunClient(const BenchConfig &cfg, int clientIndex, ProcessResult *resultSlot, const std::string &metaUrl,
-              const std::string &logFile, int barrierFd, bench::QueueDepthMonitor &queueDepthMonitor)
+              const std::string &logFile, int barrierFd, bench::QueueDepthMonitor &queueDepthMonitor,
+              std::FILE *sampleFile)
 {
     RedirectLogsToFile(logFile);
 
@@ -1346,8 +1366,11 @@ int RunClient(const BenchConfig &cfg, int clientIndex, ProcessResult *resultSlot
     TermLog("[client %d] Done: %llu succ, %llu fail, %.2fs\n", clientIndex, static_cast<unsigned long long>(totalSucc),
             static_cast<unsigned long long>(totalFail), durationSec);
 
-    WriteResult(*resultSlot, merged, durationSec, static_cast<int>(rank), getpid());
-    // Keep all clients alive until every process has finished its exact summaries.
+    if (!WriteResult(*resultSlot, merged, durationSec, sampleFile)) {
+        TermLog("[client %d] Failed to write latency samples\n", clientIndex);
+        return 1;
+    }
+    // Keep all clients alive until every process has published its samples.
     if (!bench::WaitForBarrier(barrierFd, bench::BarrierMessage::READY, bench::BarrierMessage::START)) {
         TermLog("[client %d] Reporting barrier aborted\n", clientIndex);
         return 1;
@@ -1624,8 +1647,19 @@ int main(int argc, char *argv[])
     std::cout << "\n[2/3] Forking " << cfg.processCount << " client processes..." << std::endl;
     std::vector<pid_t> clientPids;
     std::vector<int> barrierFds;
+    std::vector<SampleFile> sampleFiles;
     for (int i = 0; i < cfg.processCount; ++i) {
         if (gStopSignal != 0) {
+            break;
+        }
+        // Each worker can publish after timing stops, while the coordinator waits at the reporting barrier.
+        const int sampleFd = memfd_create("bench-latency", MFD_CLOEXEC);
+        SampleFile sampleFile(sampleFd < 0 ? nullptr : fdopen(sampleFd, "w+b"), std::fclose);
+        if (!sampleFile) {
+            std::cerr << "Failed to open client latency sample file: " << strerror(errno) << std::endl;
+            if (sampleFd >= 0) {
+                close(sampleFd);
+            }
             break;
         }
         int controlSocket[bench::kBarrierSocketCount];
@@ -1644,8 +1678,9 @@ int main(int argc, char *argv[])
             for (int barrierFd : barrierFds) {
                 close(barrierFd);
             }
+            sampleFiles.clear();
             int ret = RunClient(cfg, i, &sharedResults[i], metaUrl, cfg.logFile,
-                                controlSocket[bench::kBarrierClientEnd], queueDepthMonitor);
+                                controlSocket[bench::kBarrierClientEnd], queueDepthMonitor, sampleFile.get());
             close(controlSocket[bench::kBarrierClientEnd]);
             _exit(ret);
         }
@@ -1657,6 +1692,7 @@ int main(int argc, char *argv[])
         } else {
             clientPids.push_back(pid);
             barrierFds.push_back(controlSocket[bench::kBarrierParentEnd]);
+            sampleFiles.push_back(std::move(sampleFile));
         }
     }
 
@@ -1715,7 +1751,7 @@ int main(int argc, char *argv[])
     if (!clientsFailed) {
         clientsFailed = !bench::CoordinateClients(barrierFds, startProfiling, finishProfiling, &gStopSignal);
         if (!clientsFailed) {
-            // Sorting is unbounded reporting work, not subject to the child shutdown timeout.
+            // Publishing latency samples may take longer than the child shutdown timeout.
             clientsFailed = !bench::CoordinateBarrier(barrierFds, bench::BarrierMessage::READY,
                                                      bench::BarrierMessage::START, {}, &gStopSignal);
         }
@@ -1744,14 +1780,22 @@ int main(int argc, char *argv[])
     }
 
     std::vector<ProcessResult> results;
-    for (int i = 0; i < cfg.processCount; ++i) {
+    ProcessLatencies latencies;
+    for (size_t i = 0; i < sampleFiles.size(); ++i) {
         if (sharedResults[i].valid) {
+            if (!latencies.MergeSamples(sampleFiles[i].get())) {
+                std::cerr << "Failed to read latency samples from client " << i << std::endl;
+                clientsFailed = true;
+                results.clear();
+                break;
+            }
             results.push_back(sharedResults[i]);
         }
+        sampleFiles[i].reset();
     }
 
     if (!results.empty()) {
-        PrintAggReport(results, cfg);
+        PrintAggReport(results, latencies, cfg);
     } else {
         std::cerr << "No valid results collected!" << std::endl;
     }

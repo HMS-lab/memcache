@@ -171,20 +171,21 @@ Each RPC captures steady-clock timestamps:
 
 RPC timing includes submission internals, transport queues and scheduling, network time, and server queues and processing. It excludes benchmark request construction, response copying/deserialization, completion-queue handling, and work between Alloc and Update. Client overhead still affects achieved throughput.
 
-The report prints two aligned latency tables for each client process (identified by rank and PID), each with exactly three rows: `put-alloc`, `put-update`, and `get`. The first table shows RPC round-trip latency and the second shows submission duration. Both contain Samples, Avg (us), P50 (us), P95 (us), P99 (us), P999 (us), Min (us), and Max (us); `us` means microseconds. Values have two decimal places. Rows combine single and batch RPCs. Logical Put counts and per-RPC outcomes are printed separately; there is no combined Put latency. Percentiles are exact nearest-rank values: sort observations and select the one-based rank `ceil(p × Samples)`.
-Samples is the number of RPC observations used for every percentile in that row, rather than the number of keys or
-successful logical operations. Latencies are combined across threads within each process; percentiles are never
-averaged or combined across processes. Aggregate outcome counts and throughput still cover all clients.
+The report prints one RPC round-trip latency table and one submission duration table for all client processes.
+Each table has rows for `put-alloc`, `put-update`, and `get`, with columns for Samples, Avg (us), P50 (us),
+P95 (us), P99 (us), P999 (us), Min (us), and Max (us). Latencies use microseconds and display two decimal places.
+Each row pools observations from single and batch RPCs across all client threads and processes. Logical Put counts
+and per-RPC outcomes appear below the tables. Each percentile is the exact observation at the one-based rank
+`ceil(p × Samples)` in the pooled distribution. Samples counts RPC timing observations.
 
 Recording stores original `double` microsecond measurements in 64 power-of-two buckets, with capacity for at least
 1,024 observations reserved per bucket before measurement (3 MiB of sample capacity per generator thread across
 three operations and two timing distributions). Buckets grow as needed. After every client drains and profiling stops,
-each client merges its thread samples and sorts only buckets containing requested percentile ranks, once per bucket.
-Only fixed-size summaries reach the coordinator; raw samples remain in their client process. Sorting and merging
-are outside workload timing and the built-in profiling window. Memory grows with the number of recorded RPCs;
-vector growth during recording can affect performance. P999 means P99.9; with fewer than 1,000 samples it is the
-maximum. Values still print to two decimal places, so displayed values are rounded. Older reports used coarse
-bucket boundaries and are not directly comparable to these percentiles.
+each client merges its thread samples and writes the buckets to an anonymous memory-backed file.
+The coordinator merges those buckets and sorts only the buckets containing requested percentile ranks.
+Transfer, merging, and sorting take place outside workload timing and the built-in profiling window. Memory grows
+with the number of recorded RPCs, and vector growth during recording can affect performance. P999 means P99.9.
+With fewer than 1,000 samples it is the maximum.
 
 Success requires valid response structure and successful application statuses, including all requested entries for batches. Send failures and 30-second RPC timeouts count as failures but contribute no round-trip samples. Submission calls that returned contribute submission samples. Late and duplicate completions are discarded. A broken workload connection aborts the run; requests are not automatically retried.
 
