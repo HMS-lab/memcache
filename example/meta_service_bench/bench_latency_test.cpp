@@ -18,6 +18,7 @@
 #include <sys/mman.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <utility>
 
 namespace {
 constexpr size_t kTestSampleCount = 2500;
@@ -113,7 +114,7 @@ void TestProcessSampleMerge()
     constexpr double lowUs = kBoundaryUs + kBoundaryOffsetUs;
     constexpr double highUs = kBoundaryUs + kMedianDivisor * kBoundaryOffsetUs;
     bench::LatencyHistogram pooled;
-    for (const double us : {lowUs, highUs}) {
+    for (const auto &[us, count] : {std::pair{lowUs, lowCount}, std::pair{highUs, highCount}}) {
         const int fd = memfd_create("bench-latency-test", MFD_CLOEXEC);
         Check(fd >= 0);
         std::FILE *file = fdopen(fd, "w+b");
@@ -122,7 +123,6 @@ void TestProcessSampleMerge()
         Check(pid >= 0);
         if (pid == 0) {
             bench::LatencyHistogram worker;
-            const size_t count = us == lowUs ? lowCount : highCount;
             for (size_t i = 0; i < count; ++i) {
                 worker.Record(us);
             }
