@@ -1,0 +1,80 @@
+# Copy this file to config.yml. Set each cwd to a checkout with a built benchmark.
+# A binary path beginning with ./ is relative to its target's cwd.
+bench:
+  baseline:
+    cwd: /workspace/memcache-baseline
+    binary: ./build/example/meta_service_bench/bench_meta_service
+  candidate:
+    cwd: /workspace/memcache-candidate
+    binary: ./build/example/meta_service_bench/bench_meta_service
+  rerun: 3
+
+iterations:
+  read-heavy:
+    processes: 4                       # 1–32
+    threads: 4
+    ops: 5000
+    keyspace: 20000
+    warmup: 5000
+    blobsize: 32768
+    put_percent: 10                    # 1–99
+    batch: "1,32"                      # "min,max" or "max" for 1,max
+    capacity_mb: 16384
+    log_file: read-heavy.log
+    metrics_interval_ms: 1000          # 0 disables sampling
+    queue_depth: 1                     # 1–65535, with threads × queue_depth ≤ 65535
+    completion_mode: poll              # poll | wait
+    meta_numa: null                    # null (unbound) or a quoted node list, e.g. "4-7"
+    worker_numa: null                  # null (unbound) or a quoted node list, e.g. "4,6"
+    numa_mem: bind                     # bind | preferred | none
+
+  mixed:
+    processes: 4                       # 1–32
+    threads: 4
+    ops: 5000
+    keyspace: 20000
+    warmup: 5000
+    blobsize: 32768
+    put_percent: 50                    # 1–99
+    batch: "1,32"                      # "min,max" or "max" for 1,max
+    capacity_mb: 16384
+    log_file: mixed.log
+    metrics_interval_ms: 1000          # 0 disables sampling
+    queue_depth: 1                     # 1–65535, with threads × queue_depth ≤ 65535
+    completion_mode: poll              # poll | wait
+    meta_numa: null                    # null (unbound) or a quoted node list, e.g. "4-7"
+    worker_numa: null                  # null (unbound) or a quoted node list, e.g. "4,6"
+    numa_mem: bind                     # bind | preferred | none
+
+perf:
+  enabled: false                       # true | false
+  freq: 99
+  target: meta                         # meta | clients | client0
+  max_stack: 0                         # 0 keeps full stacks
+
+offcpu:
+  enabled: false                       # true | false
+  tool: offcputime-fixed
+  min_block_us: 1
+  comm_filter: ''
+  max_seconds: 86400
+  startup_wait_seconds: 2
+
+pyroscope:
+  enabled: false                       # true | false
+  url: http://localhost:4040
+  name: ''
+
+grafana:
+  enabled: false                       # true | false
+  url_local: http://localhost:3000
+  api_key: ''
+  dashboard_uuid: ''
+  tags:
+    - memcache-bench
+
+mongo:
+  enabled: false                       # true | false
+  url: mongodb://localhost:27017
+  database: memcache
+  collection: bench_meta_service

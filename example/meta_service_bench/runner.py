@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Run bench_meta_service and store the result in MongoDB.
-
-Bench parameters come from the CLI, environment settings from config.yml.
-Usage: python3 runner.py [--config config.yml] [-p 8 -t 2 ...]
-"""
-import argparse
+"""Run every configured workload against every benchmark binary in ./config.yml."""
 import codecs
 import contextlib
 import ctypes
@@ -12,6 +7,8 @@ import json
 import os
 import re
 import selectors
+import shlex
+import shutil
 import signal
 import socket
 import subprocess
@@ -19,12 +16,13 @@ import sys
 import threading
 import time
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import yaml
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
-# name, flag, type, default, help
+# name, flag, type, example, description
 PARAMS = [
     ("processes", "-p", int, 4, "Client process count"),
     ("threads", "-t", int, 4, "Threads per process"),
@@ -42,58 +40,184 @@ PARAMS = [
 ]
 
 
-def positive_int(text):
-    value = int(text)
-    if value < 1:
-        raise argparse.ArgumentTypeError("must be at least 1")
-    return value
+NUMA_NODES_RE = re.compile(r"!?[0-9]+(-[0-9]+)?(,[0-9]+(-[0-9]+)?)*")
+BATCH_RE = re.compile(r"[0-9]+(,[0-9]+)?")
+MAX_INT = (1 << 31) - 1
+MAX_TRANSPORT_DEPTH = (1 << 16) - 1
+MAX_PROCESSES = 32
+MAX_NUMA_NODE = 1023
+WORKLOAD_OPTIONS = {
+    "completion_mode": ("poll", "wait"),
+    "numa_mem": ("bind", "preferred", "none"),
+}
+NUMA_OPTIONS = ("meta_numa", "worker_numa")
 
 
-NUMA_NODES_RE = re.compile(r"!?\d+(-\d+)?(,\d+(-\d+)?)*")
+def check_explicit_keys(loader, node, location):
+    """Check matrix mappings before SafeLoader can merge or overwrite their keys."""
+    if not isinstance(node, yaml.MappingNode):
+        return
+    seen = set()
+    for key_node, value_node in node.value:
+        if key_node.tag == "tag:yaml.org,2002:merge":
+            raise ValueError(f"{location} cannot use YAML merge keys")
+        if not isinstance(key_node, yaml.ScalarNode) or key_node.tag != "tag:yaml.org,2002:str":
+            raise ValueError(f"{location} keys must be strings")
+        key = loader.construct_object(key_node)
+        if key in seen:
+            raise ValueError(f"{location} has duplicate key {key!r}")
+        seen.add(key)
+        if location in ("bench", "iterations"):
+            check_explicit_keys(loader, value_node, f"{location}[{key!r}]")
 
 
-def numa_nodes(text):
-    """Accept a NUMA node list such as 5, 4,6, 4-7 or !5."""
-    if not NUMA_NODES_RE.fullmatch(text):
-        raise argparse.ArgumentTypeError("expected e.g. 5, 4,6, 4-7 or !5")
-    return text
+def load_config(stream):
+    """Load YAML normally outside the two explicit matrix sections."""
+    class ConfigLoader(yaml.SafeLoader):
+        depth = 0
+        matrix_section = None
+
+        def compose_node(self, parent, index):
+            previous_section = self.matrix_section
+            if self.depth == 1 and isinstance(index, yaml.ScalarNode) and index.value in ("bench", "iterations"):
+                self.matrix_section = index.value
+            self.depth += 1
+            try:
+                if self.matrix_section and self.check_event(yaml.AliasEvent):
+                    raise ValueError(f"{self.matrix_section} cannot use YAML aliases")
+                return super().compose_node(parent, index)
+            finally:
+                self.depth -= 1
+                self.matrix_section = previous_section
+
+    loader = ConfigLoader(stream)
+    try:
+        root = loader.get_single_node()
+        if not isinstance(root, yaml.MappingNode):
+            raise ValueError("expected a configuration mapping")
+        sections = set()
+        for key, value in root.value:
+            if not isinstance(key, yaml.ScalarNode) or key.value not in ("bench", "iterations"):
+                continue
+            if key.value in sections:
+                raise ValueError(f"duplicate section {key.value!r}")
+            sections.add(key.value)
+            check_explicit_keys(loader, value, key.value)
+        if missing := {"bench", "iterations"} - sections:
+            raise ValueError(f"missing explicit section(s): {', '.join(sorted(missing))}")
+        return loader.construct_document(root)
+    finally:
+        loader.dispose()
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Run bench_meta_service and store the result in MongoDB.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    parser.add_argument("--config", default="config.yml", help="Path to config file")
-    for name, flag, type_, default, help_ in PARAMS:
-        parser.add_argument(flag, dest=name, type=type_, default=default, help=help_)
-    parser.add_argument("--completion-mode", dest="completion_mode",
-                        choices=["poll", "wait"], default="poll",
-                        help="How client threads reap completions")
-    parser.add_argument("--meta-numa", dest="meta_numa", type=numa_nodes, default=None,
-                        help="NUMA nodes for meta_service: 5, 4,6, 4-7 or !5 (default: unbound)")
-    parser.add_argument("--worker-numa", dest="worker_numa", type=numa_nodes, default=None,
-                        help="NUMA nodes for coordinator + clients, same format (default: unbound)")
-    parser.add_argument("--numa-mem", dest="numa_mem", choices=["bind", "preferred", "none"],
-                        default="bind", help="NUMA memory policy")
-    return parser.parse_args()
+def validate_fields(values, required, location):
+    if not isinstance(values, dict):
+        raise ValueError(f"{location} must be a mapping")
+    if missing := required - values.keys():
+        raise ValueError(f"{location} is missing required field(s): {', '.join(sorted(missing))}")
+    if unknown := values.keys() - required:
+        raise ValueError(f"{location} has unknown field(s): {', '.join(sorted(unknown))}")
+
+
+def validate_int(value, minimum, maximum, location):
+    if type(value) is not int or not minimum <= value <= maximum:
+        raise ValueError(f"{location} must be an integer between {minimum} and {maximum}")
+
+
+def validate_string(value, location):
+    if not isinstance(value, str) or not value or "\0" in value:
+        raise ValueError(f"{location} must be a nonempty string without NUL characters")
+
+
+def parse_targets(bench):
+    if not isinstance(bench, dict) or not bench.keys() - {"rerun"}:
+        raise ValueError("bench must contain at least one named benchmark binary")
+    rerun = bench.get("rerun")
+    validate_int(rerun, 1, sys.maxsize, "bench.rerun")
+
+    targets = {}
+    for name, target in bench.items():
+        if name == "rerun":
+            continue
+        location = f"bench[{name!r}]"
+        validate_fields(target, {"binary", "cwd"}, location)
+        validate_string(target["cwd"], f"{location}.cwd")
+        validate_string(target["binary"], f"{location}.binary")
+        cwd = os.path.join(os.getcwd(), target["cwd"])
+        if not os.path.isdir(cwd) or not os.access(cwd, os.X_OK):
+            raise ValueError(f"{location}.cwd is not an accessible directory: {cwd!r}")
+
+        binary = target["binary"]
+        if os.path.dirname(binary):
+            executable = os.path.join(cwd, binary)
+        else:
+            # Popen searches PATH after changing to cwd, including for relative PATH entries.
+            path = os.pathsep.join(os.path.join(cwd, entry) for entry in os.get_exec_path())
+            executable = shutil.which(binary, path=path)
+        if not executable or not os.path.isfile(executable) or not os.access(executable, os.X_OK):
+            raise ValueError(f"{location}.binary is not an executable file: {binary!r} (cwd {cwd!r})")
+        targets[name] = {"binary": executable, "cwd": cwd}
+    return targets, rerun
+
+
+def parse_iterations(iterations):
+    if not isinstance(iterations, dict) or not iterations:
+        raise ValueError("iterations must contain at least one named workload")
+    required = {name for name, _, _, _, _ in PARAMS} | WORKLOAD_OPTIONS.keys() | set(NUMA_OPTIONS)
+    ranges = {
+        "processes": (1, MAX_PROCESSES),
+        "warmup": (0, MAX_INT),
+        "metrics_interval_ms": (0, MAX_INT),
+        "put_percent": (1, 99),
+        "queue_depth": (1, MAX_TRANSPORT_DEPTH),
+    }
+    for name, values in iterations.items():
+        location = f"iterations[{name!r}]"
+        validate_fields(values, required, location)
+        for field, _, field_type, example, description in PARAMS:
+            value = values[field]
+            field_location = f"{location}.{field}"
+            if field_type is int:
+                validate_int(value, *ranges.get(field, (1, MAX_INT)), field_location)
+            else:
+                validate_string(value, field_location)
+            if field == "batch":
+                if not BATCH_RE.fullmatch(value):
+                    raise ValueError(f"{field_location} must be a {description.lower()}, e.g. {example!r}")
+                bounds = [int(bound) for bound in value.split(",")]
+                if not 1 <= bounds[0] <= bounds[-1] <= MAX_INT:
+                    raise ValueError(f"{field_location} must use positive, ascending bounds")
+        if values["threads"] * values["queue_depth"] > MAX_TRANSPORT_DEPTH:
+            raise ValueError(f"{location}: threads times queue_depth exceeds {MAX_TRANSPORT_DEPTH}")
+        for field, choices in WORKLOAD_OPTIONS.items():
+            if values[field] not in choices:
+                raise ValueError(f"{location}.{field} must be one of {', '.join(choices)}")
+        for field in NUMA_OPTIONS:
+            value = values[field]
+            if value is None:
+                continue
+            if not isinstance(value, str) or not NUMA_NODES_RE.fullmatch(value):
+                raise ValueError(f"{location}.{field} must be null or a quoted NUMA node list, e.g. '4-7'")
+            for entry in value.lstrip("!").split(","):
+                bounds = [int(bound) for bound in entry.split("-")]
+                if not bounds[0] <= bounds[-1] <= MAX_NUMA_NODE:
+                    raise ValueError(f"{location}.{field} must use ascending node ranges within 0-{MAX_NUMA_NODE}")
+    return iterations
 
 
 PERF_TARGETS = ("meta", "clients", "client0")
 
 
 def apply_config_options(args, cfg):
-    """Pull the profiling and rerun knobs out of the config and onto args."""
+    """Pull the profiling options out of the config and onto args."""
     perf = cfg.get("perf", {})
     pyroscope = cfg.get("pyroscope", {})
-    bench = cfg.get("bench", {})
 
     args.perf = bool(perf.get("enabled", False))
     args.perf_freq = int(perf.get("freq", 99))
     args.perf_target = str(perf.get("target", "meta"))
     args.flamegraph_max_stack = int(perf.get("max_stack", 0) or 0)
     args.pyroscope_name = pyroscope.get("name") or None
-    args.rerun = int(bench.get("rerun", 1))
 
     if args.perf_target not in PERF_TARGETS:
         sys.exit(f"config perf.target: {args.perf_target!r} (expected {'|'.join(PERF_TARGETS)})")
@@ -101,8 +225,6 @@ def apply_config_options(args, cfg):
         sys.exit("config perf.freq must be at least 1")
     if args.flamegraph_max_stack < 0:
         sys.exit("config perf.max_stack must be 0 (full stacks) or more")
-    if args.rerun < 1:
-        sys.exit("config bench.rerun must be at least 1")
     return args
 
 
@@ -692,39 +814,31 @@ def connect_mongo(url):
     return client
 
 
-def main():
-    args = parse_args()
-    with open(args.config) as f:
-        cfg = yaml.safe_load(f)
-    apply_config_options(args, cfg)
-
+def run_workload(cfg, args, client, target_name, iteration_name, rerun):
     mongo = cfg.get("mongo", {})
-    client = connect_mongo(mongo["url"]) if tool_enabled(cfg, "mongo") else None
-
     cmd = build_command(cfg, args)
+    command = shlex.join(cmd)
     params = vars(args).copy()
-    del params["config"]
-
+    params["rerun"] = rerun
     final_exit_code = 0
-    for run_number in range(1, args.rerun + 1):
-        print(f"Run {run_number}/{args.rerun}:", " ".join(cmd), flush=True)
-
-        label = f"run {run_number}/{args.rerun}" if args.rerun > 1 else "run"
-        annotation_id = grafana_start_annotation(cfg, f"{label}: {' '.join(cmd)}")
-        perf_data = os.path.join(cfg["bench"].get("cwd") or ".", "perf.data")
+    for run_number in range(1, rerun + 1):
+        label = f"bench={target_name!r} iteration={iteration_name!r} run {run_number}/{rerun}"
+        print(f"{label}: {command}", flush=True)
+        annotation_id = grafana_start_annotation(cfg, f"{label}: {command}")
+        perf_data = os.path.join(cfg["bench"]["cwd"], "perf.data")
         profile = WorkloadProfile(cfg, perf_data)
 
         started_at = datetime.now(timezone.utc)
         start = time.monotonic()
         try:
-            exit_code, output = run(cmd, cfg["bench"].get("cwd"), profile.on_event)
+            exit_code, output = run(cmd, cfg["bench"]["cwd"], profile.on_event)
         finally:
             profile.close()
         duration_s = time.monotonic() - start
         final_exit_code = final_exit_code or exit_code
 
         grafana_end_annotation(cfg, annotation_id,
-                               f"{label} ({duration_s:.0f}s, exit={exit_code}): {' '.join(cmd)}")
+                               f"{label} ({duration_s:.0f}s, exit={exit_code}): {command}")
 
         offcpu_name = None
         if profile.duration_s is not None:
@@ -747,7 +861,10 @@ def main():
                 "workload_started_at": profile.started_at,
                 "workload_duration_s": profile.duration_s,
                 "host": socket.gethostname(),
-                "command": " ".join(cmd),
+                "command": command,
+                "bench_name": target_name,
+                "iteration_name": iteration_name,
+                "cwd": cfg["bench"]["cwd"],
                 "exit_code": exit_code,
                 "run": run_number,
                 "flamegraph_name": flamegraph_name,
@@ -760,8 +877,34 @@ def main():
             result = client[mongo["database"]][mongo["collection"]].insert_one(doc)
             print(f"Saved to MongoDB: {result.inserted_id}", flush=True)
 
-    if client is not None:
-        client.close()
+    return final_exit_code
+
+
+def main():
+    if len(sys.argv) != 1:
+        sys.exit("runner.py takes no command-line arguments. Edit ./config.yml before running it.")
+    try:
+        with open("config.yml", encoding="utf-8") as stream:
+            cfg = load_config(stream)
+        targets, rerun = parse_targets(cfg["bench"])
+        iterations = parse_iterations(cfg["iterations"])
+    except (OSError, ValueError, yaml.YAMLError) as error:
+        sys.exit(f"config.yml: {error}")
+
+    profiling = apply_config_options(SimpleNamespace(), cfg)
+    mongo = cfg.get("mongo", {})
+    client = connect_mongo(mongo["url"]) if tool_enabled(cfg, "mongo") else None
+
+    final_exit_code = 0
+    try:
+        for iteration_name, values in iterations.items():
+            args = SimpleNamespace(**values, **vars(profiling))
+            for target_name, target in targets.items():
+                exit_code = run_workload({**cfg, "bench": target}, args, client, target_name, iteration_name, rerun)
+                final_exit_code = final_exit_code or exit_code
+    finally:
+        if client is not None:
+            client.close()
     sys.exit(final_exit_code)
 
 
