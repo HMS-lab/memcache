@@ -376,6 +376,8 @@ LATENCY_COLUMNS = ("samples", "avg_us", "p50_us", "p95_us", "p99_us", "p999_us",
 LATENCY_ROW_RE = re.compile(r"^(put-alloc|put-update|get)((?:\s+[\d.]+){8})$")
 OUTCOME_RE = re.compile(r"^(put-alloc|put-update|get): success=(\d+) fail=(\d+) "
                         r"transport failures=(\d+) timeouts=(\d+)$")
+META_SERVICE_RE = re.compile(r"MetaService: LRU=(lru|sharded_lru), LRU shards=(\d+|N/A), "
+                             r"async network workers=(\d+), TCP transport workers=(\d+)")
 
 
 def parse_report(output):
@@ -408,7 +410,15 @@ def parse_async_report(output):
 
     for line in report.splitlines():
         line = line.strip()
-        if match := re.match(r"Client process: rank=(\d+), pid=(\d+)$", line):
+        if match := META_SERVICE_RE.fullmatch(line):
+            lru_type, shards, async_workers, tcp_workers = match.groups()
+            results.update(
+                meta_lru_type=lru_type,
+                meta_lru_shard_count=None if shards == "N/A" else int(shards),
+                meta_net_async_workers=int(async_workers),
+                meta_net_tcp_workers=int(tcp_workers),
+            )
+        elif match := re.match(r"Client process: rank=(\d+), pid=(\d+)$", line):
             process = {"rank": int(match.group(1)), "pid": int(match.group(2))}
             results.setdefault("per_process", []).append(process)
             prefix = None

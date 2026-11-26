@@ -82,6 +82,34 @@ while True:
 
 
 class LatencyReportTest(unittest.TestCase):
+    # Each LRU mode must store the effective settings as typed MongoDB fields alongside the latency metrics.
+    def test_meta_service_settings_in_mongo_document(self):
+        cfg = {"bench": {"cwd": "."}, "mongo": {"database": "memcache", "collection": "bench_meta_service"}}
+        for lru_type, shards, expected_count in (("lru", "N/A", None), ("sharded_lru", "32", 32)):
+            with self.subTest(lru_type=lru_type):
+                output = f"""Benchmark report: maximum logical concurrency=2
+MetaService: LRU={lru_type}, LRU shards={shards}, async network workers=16, TCP transport workers=4
+Client-observed RPC round-trip latency (us = microseconds)
+put-alloc 2 5.50 5.00 6.00 6.00 6.00 5.00 6.00
+Benchmark finished.
+"""
+                client = mock.MagicMock()
+                with (
+                    mock.patch.object(RUNNER, "build_command", return_value=["bench_meta_service"]),
+                    mock.patch.object(RUNNER, "run", return_value=(0, output)),
+                    contextlib.redirect_stdout(io.StringIO()),
+                ):
+                    self.assertEqual(RUNNER.run_workload(cfg, SimpleNamespace(), client, "local", "mixed", 1), 0)
+                insert = client["memcache"]["bench_meta_service"].insert_one
+                insert.assert_called_once()
+                doc = insert.call_args.args[0]
+                self.assertEqual(doc["meta_lru_type"], lru_type)
+                self.assertEqual(doc["meta_lru_shard_count"], expected_count)
+                self.assertEqual(doc["meta_net_async_workers"], 16)
+                self.assertEqual(doc["meta_net_tcp_workers"], 4)
+                self.assertEqual(doc["rpc_put_alloc_p99_us"], 6.0)
+                self.assertEqual(doc["output"], output)
+
     # Separate client distributions must retain their counts and percentiles without overwriting or averaging.
     def test_per_process_percentiles(self):
         output = """Benchmark report: queue depth/thread=1, completion mode=poll, maximum logical concurrency=2

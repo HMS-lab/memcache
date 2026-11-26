@@ -78,6 +78,10 @@ public:
     const std::string &Name() const;
 
     const mmc_meta_service_config_t &Options() const;
+    uint16_t GetTcpWorkerCount() const
+    {
+        return netOptions_.threadCount;
+    }
 
     const MmcMetaMgrProxyPtr &GetMetaMgrProxy() const;
 

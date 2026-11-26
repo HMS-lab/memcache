@@ -64,6 +64,7 @@
 #include <memory>
 #include <mutex>
 #include <netinet/in.h>
+#include <new>
 #include <random>
 #include <sched.h>
 #include <set>
@@ -588,6 +589,19 @@ struct ProcessResult {
     int padding[8];
 };
 
+struct MetaServiceReport {
+    uint32_t lruType;
+    uint32_t lruShardCount;
+    uint32_t asyncWorkerCount;
+    uint16_t tcpWorkerCount;
+    bool valid;
+};
+
+struct SharedResults {
+    MetaServiceReport metaService;
+    ProcessResult clients[kMaxProcessCount];
+};
+
 struct ProcessLatencies {
     LatencyHistogram histogram[kOpTypeCount];
     LatencyHistogram submission[kOpTypeCount];
@@ -819,7 +833,8 @@ void PrintSep()
     std::cout << "+" << std::string(kTableWidth - 2, '-') << "+\n";
 }
 
-void PrintAggReport(const std::vector<ProcessResult> &results, ProcessLatencies &latencies, const BenchConfig &cfg)
+void PrintAggReport(const std::vector<ProcessResult> &results, ProcessLatencies &latencies, const BenchConfig &cfg,
+                    const MetaServiceReport &metaService)
 {
     std::array<PerOpResult, kOpTypeCount> total{};
     double duration = 0;
@@ -835,6 +850,13 @@ void PrintAggReport(const std::vector<ProcessResult> &results, ProcessLatencies 
     std::cout << "\nBenchmark report: queue depth/thread=" << cfg.queueDepth
               << ", completion mode=" << (cfg.waitCompletions ? "wait" : "poll")
               << ", maximum logical concurrency=" << static_cast<uint64_t>(cfg.processCount) * cfg.threadCount * cfg.queueDepth << "\n";
+    if (metaService.valid) {
+        const bool sharded = metaService.lruType == MMC_META_LRU_TYPE_SHARDED_LRU;
+        std::cout << "MetaService: LRU=" << (sharded ? "sharded_lru" : "lru")
+                  << ", LRU shards=" << (sharded ? std::to_string(metaService.lruShardCount) : "N/A")
+                  << ", async network workers=" << metaService.asyncWorkerCount
+                  << ", TCP transport workers=" << metaService.tcpWorkerCount << "\n";
+    }
     constexpr int operationColumnWidth = 14;
     constexpr int valueColumnWidth = 12;
     constexpr int metricColumnCount = 8;
@@ -1200,7 +1222,7 @@ void StopPerf(pid_t perfPid)
 }
 
 int RunMetaService(const std::string &metaUrl, const std::string &bmUrl, const std::string &metricsUrl,
-                   const std::string &logFile, uint64_t capacityMB)
+                   const std::string &logFile, uint64_t capacityMB, MetaServiceReport &report)
 {
     // Block before Start() creates threads so every service thread inherits the mask.
     sigset_t mask;
@@ -1240,6 +1262,8 @@ int RunMetaService(const std::string &metaUrl, const std::string &bmUrl, const s
         ptracer_uninit();
         return 1;
     }
+    const auto &options = svc->Options();
+    report = {options.lruType, options.lruShardCount, options.netPoolBase, svc->GetTcpWorkerCount(), true};
     TermLog("[meta_service] Started at %s\n", metaUrl.c_str());
 
     int sig = 0;
@@ -1594,14 +1618,13 @@ int main(int argc, char *argv[])
     std::string bmUrl = "tcp://127.0.0.1:" + std::to_string(kConfigStorePort);
     std::string metricsUrl = "http://127.0.0.1:" + std::to_string(kMetricsPort);
 
-    size_t shmSize = sizeof(ProcessResult) * static_cast<size_t>(cfg.processCount);
-    auto *sharedResults =
-        static_cast<ProcessResult *>(mmap(nullptr, shmSize, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0));
-    if (sharedResults == MAP_FAILED) {
+    constexpr size_t shmSize = sizeof(SharedResults);
+    void *resultMapping = mmap(nullptr, shmSize, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (resultMapping == MAP_FAILED) {
         std::cerr << "Failed to create shared memory!" << std::endl;
         return 1;
     }
-    std::memset(sharedResults, 0, shmSize);
+    auto *sharedResults = new (resultMapping) SharedResults{};
 
     bench::QueueDepthMonitor queueDepthMonitor(cfg.processCount, cfg.threadCount);
     if (!queueDepthMonitor.Valid()) {
@@ -1622,7 +1645,7 @@ int main(int argc, char *argv[])
         if (!ApplyNumaBinding(metaNuma, cfg.numaMemPolicy, kMetaServiceProcName)) {
             _exit(1);
         }
-        return RunMetaService(metaUrl, bmUrl, metricsUrl, cfg.logFile, cfg.capacityMB);
+        return RunMetaService(metaUrl, bmUrl, metricsUrl, cfg.logFile, cfg.capacityMB, sharedResults->metaService);
     }
     if (metaPid < 0) {
         std::cerr << "Failed to fork meta_service!" << std::endl;
@@ -1679,7 +1702,7 @@ int main(int argc, char *argv[])
                 close(barrierFd);
             }
             sampleFiles.clear();
-            int ret = RunClient(cfg, i, &sharedResults[i], metaUrl, cfg.logFile,
+            int ret = RunClient(cfg, i, &sharedResults->clients[i], metaUrl, cfg.logFile,
                                 controlSocket[bench::kBarrierClientEnd], queueDepthMonitor, sampleFile.get());
             close(controlSocket[bench::kBarrierClientEnd]);
             _exit(ret);
@@ -1782,20 +1805,20 @@ int main(int argc, char *argv[])
     std::vector<ProcessResult> results;
     ProcessLatencies latencies;
     for (size_t i = 0; i < sampleFiles.size(); ++i) {
-        if (sharedResults[i].valid) {
+        if (sharedResults->clients[i].valid) {
             if (!latencies.MergeSamples(sampleFiles[i].get())) {
                 std::cerr << "Failed to read latency samples from client " << i << std::endl;
                 clientsFailed = true;
                 results.clear();
                 break;
             }
-            results.push_back(sharedResults[i]);
+            results.push_back(sharedResults->clients[i]);
         }
         sampleFiles[i].reset();
     }
 
     if (!results.empty()) {
-        PrintAggReport(results, latencies, cfg);
+        PrintAggReport(results, latencies, cfg, sharedResults->metaService);
     } else {
         std::cerr << "No valid results collected!" << std::endl;
     }
