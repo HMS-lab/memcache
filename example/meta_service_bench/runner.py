@@ -376,6 +376,10 @@ LATENCY_COLUMNS = ("samples", "avg_us", "p50_us", "p95_us", "p99_us", "p999_us",
 LATENCY_ROW_RE = re.compile(r"^(put-alloc|put-update|get)((?:\s+[\d.]+){8})$")
 OUTCOME_RE = re.compile(r"^(put-alloc|put-update|get): success=(\d+) fail=(\d+) "
                         r"transport failures=(\d+) timeouts=(\d+)$")
+NET_WORKER_ROW_RE = re.compile(
+    r"^(net_pool|AccWrk)[ \t]+([a-z_]+)[ \t]+(\d+)[ \t]+(\d+\.\d+|N/A)[ \t]+(\d+\.\d+|N/A)$",
+    re.MULTILINE,
+)
 META_SERVICE_RE = re.compile(r"^[ \t]*MetaService: LRU=(lru|sharded_lru), LRU shards=(\d+|N/A), "
                              r"async network workers=(\d+), TCP transport workers=(\d+)$", re.MULTILINE)
 CONFIG_FIELD_RE = re.compile(
@@ -409,6 +413,15 @@ def parse_report(output):
             results[field] = value
         else:
             results[field] = None if value == "N/A" else int(value)
+    worker_stats = {}
+    for pool, metric, workers, avg, stddev in NET_WORKER_ROW_RE.findall(output):
+        worker_stats.setdefault(pool, {})[metric] = {
+            "workers": int(workers),
+            "avg": None if avg == "N/A" else float(avg),
+            "stddev": None if stddev == "N/A" else float(stddev),
+        }
+    if worker_stats:
+        results["meta_net_worker_stats"] = worker_stats
     return add_run_markers(results, output)
 
 

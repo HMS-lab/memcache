@@ -81,6 +81,7 @@
 
 #include "bench_async_transport.h"
 #include "bench_latency.h"
+#include "bench_net_worker_stats.h"
 #include "bench_process_barrier.h"
 #include "bench_queue_depth.h"
 #include "mmc_blob_allocator.h"
@@ -1743,6 +1744,7 @@ int main(int argc, char *argv[])
         }
     }
 
+    bench::NetWorkerStats netWorkerStats(metaPid);
     const auto startProfiling = [&]() {
         if (gStopSignal != 0) {
             return false;
@@ -1757,22 +1759,21 @@ int main(int argc, char *argv[])
         if (cfg.perfEnable) {
             perfPid = StartPerfChecked(targets, cfg);
         }
-        if (cfg.profileControlFd < 0) {
-            queueDepthMonitor.Start();
-            return true;
+        if (cfg.profileControlFd >= 0) {
+            // Include target process IDs so the runner can capture every named pool thread.
+            std::string request = "R " + JoinPids(targets);
+            ssize_t sent;
+            do {
+                sent = send(cfg.profileControlFd, request.data(), request.size(), MSG_NOSIGNAL);
+            } while (sent < 0 && errno == EINTR);
+            if (sent != static_cast<ssize_t>(request.size()) ||
+                !bench::ReceiveBarrierMessage(cfg.profileControlFd, bench::BarrierMessage::START, &gStopSignal)) {
+                return false;
+            }
         }
-        // Include target process IDs so the runner can capture every named pool thread.
-        std::string request = "R " + JoinPids(targets);
-        ssize_t sent;
-        do {
-            sent = send(cfg.profileControlFd, request.data(), request.size(), MSG_NOSIGNAL);
-        } while (sent < 0 && errno == EINTR);
-        const bool ready = sent == static_cast<ssize_t>(request.size()) &&
-            bench::ReceiveBarrierMessage(cfg.profileControlFd, bench::BarrierMessage::START, &gStopSignal);
-        if (ready) {
-            queueDepthMonitor.Start();
-        }
-        return ready;
+        queueDepthMonitor.Start();
+        netWorkerStats.Start();
+        return true;
     };
     const auto stopProfiling = [&]() {
         if (perfPid <= 0) {
@@ -1784,6 +1785,7 @@ int main(int argc, char *argv[])
         return true;
     };
     const auto finishProfiling = [&]() {
+        netWorkerStats.Stop();
         queueDepthMonitor.Stop();
         stopProfiling();
         // Ask the runner to freeze its collection before releasing any client to disconnect.
@@ -1846,6 +1848,7 @@ int main(int argc, char *argv[])
     } else {
         std::cerr << "No valid results collected!" << std::endl;
     }
+    netWorkerStats.PrintReport(std::cout);
     metricsSampler.PrintReport();
 
     munmap(sharedResults, shmSize);

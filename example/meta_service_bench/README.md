@@ -183,6 +183,18 @@ LRU shard count, async request workers, and TCP transport workers on separate li
 MongoDB as `build_mode`, `meta_lru_type`, `meta_lru_shard_count`, `meta_net_async_workers`, and
 `meta_net_tcp_workers`. Plain LRU shows `N/A` for shards and stores that field as `null`.
 
+The final report shows the mean and population standard deviation across MetaService workers in each pool
+(`net_pool<N>` for MemCache async requests and `AccWrk:<N>` for TCP transport). The coordinator takes
+per-thread Linux `/proc` snapshots after warmup, immediately before it releases the workload, and after all
+clients drain, before teardown. CPU, user-space CPU, kernel CPU, runnable wait, and estimated sleep are
+percentages of elapsed wall time per worker. Voluntary and involuntary context switches are counts per worker
+over that interval. The sleep estimate subtracts on-CPU runtime and run-queue wait from elapsed time, with a
+floor of zero. CPU tick granularity and scheduler counters that update at scheduling boundaries can affect
+short runs. The Workers column counts the threads with valid measurements for each metric. Unavailable
+measurements, including wait and sleep on kernels without usable per-thread scheduler counters, show as
+`N/A`. With MongoDB enabled the runner stores these same rows under `meta_net_worker_stats`, keyed by pool
+and metric. Each row contains `workers`, `avg`, and `stddev`, with `null` for unavailable values.
+
 Recording stores original `double` microsecond measurements in 64 power-of-two buckets, with capacity for at least
 1,024 observations reserved per bucket before measurement (3 MiB of sample capacity per generator thread across
 three operations and two timing distributions). Buckets grow as needed. After every client drains and profiling stops,
