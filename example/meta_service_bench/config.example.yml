@@ -1,4 +1,5 @@
 # Set each cwd to a checkout with a built benchmark.
+# The runner reads the Git HEAD commit from this directory for each run.
 # Run with: python3 runner.py --config config.example.yml
 # A binary path beginning with ./ is relative to its target's cwd.
 bench:

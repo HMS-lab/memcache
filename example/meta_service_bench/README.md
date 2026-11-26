@@ -183,6 +183,10 @@ LRU shard count, async request workers, and TCP transport workers on separate li
 MongoDB as `build_mode`, `meta_lru_type`, `meta_lru_shard_count`, `meta_net_async_workers`, and
 `meta_net_tcp_workers`. Plain LRU shows `N/A` for shards and stores that field as `null`.
 
+For each run, the runner prints the full Git HEAD commit from that benchmark target's configured `cwd`
+and stores it in MongoDB as `git_commit`. If Git cannot resolve HEAD, the runner prints `N/A` and
+stores `null`.
+
 The final report shows the mean and population standard deviation across MetaService workers in each pool
 (`net_pool<N>` for MemCache async requests and `AccWrk:<N>` for TCP transport). The coordinator takes
 per-thread Linux `/proc` snapshots after warmup, immediately before it releases the workload, and after all

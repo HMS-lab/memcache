@@ -130,9 +130,11 @@ Benchmark finished.
             },
         })
 
-    # Each startup configuration line must reach MongoDB as a typed field alongside latency metrics.
+    # Startup settings and the commit read from the target cwd must reach MongoDB alongside latency metrics.
     def test_meta_service_settings_in_mongo_document(self):
-        cfg = {"bench": {"cwd": "."}, "mongo": {"database": "memcache", "collection": "bench_meta_service"}}
+        cwd = "/workspace/target-checkout"
+        git_commit = "0123456789abcdef" * 2 + "01234567"
+        cfg = {"bench": {"cwd": cwd}, "mongo": {"database": "memcache", "collection": "bench_meta_service"}}
         for build_mode, lru_type, shards, expected_count in (
             ("DEBUG", "lru", "N/A", None),
             ("RELEASE", "sharded_lru", "32", 32),
@@ -155,12 +157,18 @@ Benchmark finished.
                 with (
                     mock.patch.object(RUNNER, "build_command", return_value=["bench_meta_service"]),
                     mock.patch.object(RUNNER, "run", return_value=(0, output)),
-                    contextlib.redirect_stdout(io.StringIO()),
+                    mock.patch.object(RUNNER.subprocess, "run", return_value=SimpleNamespace(stdout=git_commit + "\n"))
+                    as git,
+                    contextlib.redirect_stdout(io.StringIO()) as stdout,
                 ):
                     self.assertEqual(RUNNER.run_workload(cfg, SimpleNamespace(), client, "local", "mixed", 1), 0)
+                self.assertEqual(git.call_args.args[0], ["git", "rev-parse", "--verify", "HEAD"])
+                self.assertEqual(git.call_args.kwargs["cwd"], cwd)
+                self.assertIn(f"Git commit: {git_commit}", stdout.getvalue())
                 insert = client["memcache"]["bench_meta_service"].insert_one
                 insert.assert_called_once()
                 doc = insert.call_args.args[0]
+                self.assertEqual(doc["git_commit"], git_commit)
                 self.assertEqual(doc["build_mode"], build_mode)
                 self.assertEqual(doc["meta_lru_type"], lru_type)
                 self.assertEqual(doc["meta_lru_shard_count"], expected_count)

@@ -900,24 +900,38 @@ def connect_mongo(url):
     return client
 
 
+def read_git_commit(cwd):
+    """Read the full HEAD commit from the benchmark's working directory."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD"],
+            cwd=cwd, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return result.stdout.strip()
+
+
 def run_workload(cfg, args, client, target_name, iteration_name, rerun):
     mongo = cfg.get("mongo", {})
+    cwd = cfg["bench"]["cwd"]
     cmd = build_command(cfg, args)
     command = shlex.join(cmd)
     params = vars(args).copy()
     params["rerun"] = rerun
     final_exit_code = 0
     for run_number in range(1, rerun + 1):
+        git_commit = read_git_commit(cwd)
         label = f"bench={target_name!r} iteration={iteration_name!r} run {run_number}/{rerun}"
-        print(f"{label}: {command}", flush=True)
+        print(f"{label}: {command}\n  Git commit: {git_commit or 'N/A'}", flush=True)
         annotation_id = grafana_start_annotation(cfg, f"{label}: {command}")
-        perf_data = os.path.join(cfg["bench"]["cwd"], "perf.data")
+        perf_data = os.path.join(cwd, "perf.data")
         profile = WorkloadProfile(cfg, perf_data)
 
         started_at = datetime.now(timezone.utc)
         start = time.monotonic()
         try:
-            exit_code, output = run(cmd, cfg["bench"]["cwd"], profile.on_event)
+            exit_code, output = run(cmd, cwd, profile.on_event)
         finally:
             profile.close()
         duration_s = time.monotonic() - start
@@ -950,7 +964,8 @@ def run_workload(cfg, args, client, target_name, iteration_name, rerun):
                 "command": command,
                 "bench_name": target_name,
                 "iteration_name": iteration_name,
-                "cwd": cfg["bench"]["cwd"],
+                "cwd": cwd,
+                "git_commit": git_commit,
                 "exit_code": exit_code,
                 "run": run_number,
                 "flamegraph_name": flamegraph_name,
