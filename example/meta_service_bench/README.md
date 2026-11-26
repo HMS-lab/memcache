@@ -202,6 +202,11 @@ per-thread scheduler counters, show as `N/A`. With MongoDB enabled the runner st
 `meta_net_worker_stats`, keyed by pool and metric. Each metric contains numeric `workers`, `avg`, and `stddev`
 fields, with `null` for unavailable averages and standard deviations.
 
+The final report also shows the signed change in MetaService resident memory (RSS) between the start and end
+of the workload, excluding warmup and teardown. The report scales the unit to match the size of the change.
+If either snapshot is unavailable, the report shows `N/A`. With MongoDB enabled, `meta_rss_delta` stores the
+displayed numeric `value` and `unit`, or `null` when the change is unavailable.
+
 Recording stores original `double` microsecond measurements in 64 power-of-two buckets, with capacity for at least
 1,024 observations reserved per bucket before measurement (3 MiB of sample capacity per generator thread across
 three operations and two timing distributions). Buckets grow as needed. After every client drains and profiling stops,

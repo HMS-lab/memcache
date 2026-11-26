@@ -96,6 +96,8 @@ Runnable wait               2.00% / 1.00 pp (n=1,200)                         N/
 Estimated sleep            46.00% / 5.50 pp (n=1,200)                         N/A
 Voluntary switches             12,345.75 / 12,000.50                324.00 / 6.00
 Involuntary switches                  123.00 / 25.00                  10.00 / 2.00
+
+MetaService RSS change: -12.50 MiB
 Benchmark finished.
 """
         client = mock.MagicMock()
@@ -108,6 +110,7 @@ Benchmark finished.
 
         insert = client["memcache"]["bench_meta_service"].insert_one
         insert.assert_called_once()
+        self.assertEqual(insert.call_args.args[0]["meta_rss_delta"], {"value": -12.5, "unit": "MiB"})
         stats = insert.call_args.args[0]["meta_net_worker_stats"]
         self.assertEqual(stats, {
             "net_pool": {
@@ -129,6 +132,17 @@ Benchmark finished.
                 "involuntary_switches": {"workers": 4, "avg": 10.0, "stddev": 2.0},
             },
         })
+
+    # Signed increases, zero, and unavailable RSS changes must retain their values and units.
+    def test_meta_service_rss_delta(self):
+        for text, expected in (
+            ("+1.25 GiB", {"value": 1.25, "unit": "GiB"}),
+            ("0 KiB", {"value": 0, "unit": "KiB"}),
+            ("N/A", None),
+        ):
+            with self.subTest(text=text):
+                results = RUNNER.parse_report(f"Benchmark report:\nMetaService RSS change: {text}\nBenchmark finished.")
+                self.assertEqual(results["meta_rss_delta"], expected)
 
     # Startup settings and the commit read from the target cwd must reach MongoDB alongside latency metrics.
     def test_meta_service_settings_in_mongo_document(self):

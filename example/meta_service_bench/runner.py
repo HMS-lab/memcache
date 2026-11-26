@@ -394,6 +394,7 @@ GROUPED_INTEGER = r"(?:\d{1,3}(?:,\d{3})+|\d+)"
 NET_WORKER_CELL_RE = re.compile(
     rf"({GROUPED_INTEGER}\.\d+)%? / ({GROUPED_INTEGER}\.\d+)(?: pp)?(?: \(n=({GROUPED_INTEGER})\))?"
 )
+META_RSS_CHANGE_RE = re.compile(r"^MetaService RSS change: (?:([+-]?\d+(?:\.\d+)?) ([KMGTPE]iB)|N/A)$", re.MULTILINE)
 META_SERVICE_RE = re.compile(r"^[ \t]*MetaService: LRU=(lru|sharded_lru), LRU shards=(\d+|N/A), "
                              r"async network workers=(\d+), TCP transport workers=(\d+)$", re.MULTILINE)
 CONFIG_FIELD_RE = re.compile(
@@ -467,6 +468,9 @@ def parse_report(output):
             results[field] = None if value == "N/A" else int(value)
     if worker_stats := parse_net_worker_stats(output):
         results["meta_net_worker_stats"] = worker_stats
+    if match := META_RSS_CHANGE_RE.search(output):
+        value, unit = match.groups()
+        results["meta_rss_delta"] = {"value": number(value), "unit": unit} if value is not None else None
     return add_run_markers(results, output)
 
 

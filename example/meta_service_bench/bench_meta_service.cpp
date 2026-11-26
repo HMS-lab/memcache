@@ -60,16 +60,19 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <locale>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <netinet/in.h>
 #include <new>
+#include <optional>
 #include <random>
 #include <sched.h>
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <sys/mman.h>
 #include <sys/prctl.h>
 #include <sys/socket.h>
@@ -140,6 +143,8 @@ constexpr int kMetricsConnectTimeoutMs = 500;
 constexpr int kMetricsReceiveBufferSize = 16 * 1024;
 
 constexpr uint64_t kBytesPerMB = 1024 * 1024;
+constexpr int kIecUnitScale = 1024;
+constexpr int kScaledMemoryPrecision = 2;
 
 constexpr int kMaxNumaNodeCount = 1024;
 constexpr int kDecimalBase = 10;
@@ -1204,6 +1209,55 @@ pid_t StartPerfChecked(const std::vector<pid_t> &pids, const BenchConfig &cfg)
     return perfPid;
 }
 
+std::optional<int64_t> ReadRssKiB(pid_t pid)
+{
+    constexpr std::string_view field = "VmRSS:";
+    std::ifstream status("/proc/" + std::to_string(pid) + "/status");
+    std::string line;
+    while (std::getline(status, line)) {
+        if (line.compare(0, field.size(), field) == 0) {
+            std::istringstream value(line.substr(field.size()));
+            int64_t rss = 0;
+            std::string unit;
+            // procfs labels its KiB values as kB.
+            if ((value >> rss >> unit) && rss >= 0 && unit == "kB") {
+                return rss;
+            }
+            break;
+        }
+    }
+    return std::nullopt;
+}
+
+void PrintRssDelta(std::optional<int64_t> startRssKiB, std::optional<int64_t> endRssKiB)
+{
+    std::ostringstream report;
+    report.imbue(std::locale::classic());
+    report << "\nMetaService RSS change: ";
+    if (!startRssKiB || !endRssKiB) {
+        report << "N/A";
+    } else {
+        constexpr std::array units{"KiB", "MiB", "GiB", "TiB", "PiB", "EiB"};
+        const int64_t delta = *endRssKiB - *startRssKiB;
+        int64_t scale = 1;
+        size_t unit = 0;
+        while (unit + 1 < units.size() && std::abs(delta) / scale >= kIecUnitScale) {
+            scale *= kIecUnitScale;
+            ++unit;
+        }
+        if (delta > 0) {
+            report << '+';
+        }
+        if (unit == 0) {
+            report << delta;
+        } else {
+            report << std::fixed << std::setprecision(kScaledMemoryPrecision) << static_cast<double>(delta) / scale;
+        }
+        report << ' ' << units[unit];
+    }
+    std::cout << report.str() << '\n';
+}
+
 void StopPerf(pid_t perfPid)
 {
     if (perfPid <= 0) {
@@ -1745,6 +1799,8 @@ int main(int argc, char *argv[])
     }
 
     bench::NetWorkerStats netWorkerStats(metaPid);
+    std::optional<int64_t> startRssKiB;
+    std::optional<int64_t> endRssKiB;
     const auto startProfiling = [&]() {
         if (gStopSignal != 0) {
             return false;
@@ -1773,6 +1829,7 @@ int main(int argc, char *argv[])
         }
         queueDepthMonitor.Start();
         netWorkerStats.Start();
+        startRssKiB = ReadRssKiB(metaPid);
         return true;
     };
     const auto stopProfiling = [&]() {
@@ -1785,6 +1842,7 @@ int main(int argc, char *argv[])
         return true;
     };
     const auto finishProfiling = [&]() {
+        endRssKiB = ReadRssKiB(metaPid);
         netWorkerStats.Stop();
         queueDepthMonitor.Stop();
         stopProfiling();
@@ -1849,6 +1907,7 @@ int main(int argc, char *argv[])
         std::cerr << "No valid results collected!" << std::endl;
     }
     netWorkerStats.PrintReport(std::cout);
+    PrintRssDelta(startRssKiB, endRssKiB);
     metricsSampler.PrintReport();
 
     munmap(sharedResults, shmSize);
