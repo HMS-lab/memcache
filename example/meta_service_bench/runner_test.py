@@ -82,13 +82,16 @@ while True:
 
 
 class LatencyReportTest(unittest.TestCase):
-    # Each LRU mode must store the effective settings as typed MongoDB fields alongside the latency metrics.
+    # For either LRU mode, startup configuration must reach MongoDB as typed fields alongside latency metrics.
     def test_meta_service_settings_in_mongo_document(self):
         cfg = {"bench": {"cwd": "."}, "mongo": {"database": "memcache", "collection": "bench_meta_service"}}
         for lru_type, shards, expected_count in (("lru", "N/A", None), ("sharded_lru", "32", 32)):
             with self.subTest(lru_type=lru_type):
-                output = f"""Benchmark report: maximum logical concurrency=2
-MetaService: LRU={lru_type}, LRU shards={shards}, async network workers=16, TCP transport workers=4
+                output = f"""Configuration:
+  Processes:    2
+  MetaService: LRU={lru_type}, LRU shards={shards}, async network workers=16, TCP transport workers=4
+
+Benchmark report: maximum logical concurrency=2
 Client-observed RPC round-trip latency (us = microseconds)
 put-alloc 2 5.50 5.00 6.00 6.00 6.00 5.00 6.00
 Benchmark finished.
@@ -109,6 +112,16 @@ Benchmark finished.
                 self.assertEqual(doc["meta_net_tcp_workers"], 4)
                 self.assertEqual(doc["rpc_put_alloc_p99_us"], 6.0)
                 self.assertEqual(doc["output"], output)
+
+    # A run that stops after configuration still yields the available settings and a failed completion marker.
+    def test_meta_service_settings_without_final_report(self):
+        output = """Configuration:
+  MetaService: LRU=sharded_lru, LRU shards=32, async network workers=16, TCP transport workers=4
+Benchmark failed.
+"""
+        results = RUNNER.parse_report(output)
+        self.assertEqual(results["meta_lru_shard_count"], 32)
+        self.assertFalse(results["finished"])
 
     # Separate client distributions must retain their counts and percentiles without overwriting or averaging.
     def test_per_process_percentiles(self):
@@ -140,9 +153,10 @@ Benchmark finished.
         self.assertEqual(results["get_success"], 2600)
         self.assertTrue(results["finished"])
 
-    # Older aggregate reports must still parse using their original top-level fields.
+    # Older aggregate reports must retain top-level latency and settings printed in the final report.
     def test_legacy_aggregate_async_report(self):
         output = """Benchmark report:
+MetaService: LRU=lru, LRU shards=N/A, async network workers=16, TCP transport workers=4
 Client-observed RPC round-trip latency
 get 100 70 64 128 128 256 10 200
 Submission duration
@@ -151,6 +165,8 @@ get 100 5 4 8 8 16 1 12
         results = RUNNER.parse_report(output)
         self.assertEqual(results["rpc_get_p99_us"], 128)
         self.assertEqual(results["sub_get_samples"], 100)
+        self.assertIsNone(results["meta_lru_shard_count"])
+        self.assertEqual(results["meta_net_tcp_workers"], 4)
         self.assertNotIn("per_process", results)
 
 

@@ -376,15 +376,25 @@ LATENCY_COLUMNS = ("samples", "avg_us", "p50_us", "p95_us", "p99_us", "p999_us",
 LATENCY_ROW_RE = re.compile(r"^(put-alloc|put-update|get)((?:\s+[\d.]+){8})$")
 OUTCOME_RE = re.compile(r"^(put-alloc|put-update|get): success=(\d+) fail=(\d+) "
                         r"transport failures=(\d+) timeouts=(\d+)$")
-META_SERVICE_RE = re.compile(r"MetaService: LRU=(lru|sharded_lru), LRU shards=(\d+|N/A), "
-                             r"async network workers=(\d+), TCP transport workers=(\d+)")
+META_SERVICE_RE = re.compile(r"^[ \t]*MetaService: LRU=(lru|sharded_lru), LRU shards=(\d+|N/A), "
+                             r"async network workers=(\d+), TCP transport workers=(\d+)$", re.MULTILINE)
 
 
 def parse_report(output):
-    """Parse the benchmark report, async format first, then the legacy one."""
+    """Parse the configuration and the async or legacy benchmark report."""
     if "Benchmark report:" in output:
-        return add_run_markers(parse_async_report(output), output)
-    return add_run_markers(parse_legacy_report(output), output)
+        results = parse_async_report(output)
+    else:
+        results = parse_legacy_report(output)
+    if match := META_SERVICE_RE.search(output):
+        lru_type, shards, async_workers, tcp_workers = match.groups()
+        results.update(
+            meta_lru_type=lru_type,
+            meta_lru_shard_count=None if shards == "N/A" else int(shards),
+            meta_net_async_workers=int(async_workers),
+            meta_net_tcp_workers=int(tcp_workers),
+        )
+    return add_run_markers(results, output)
 
 
 def add_run_markers(results, output):
@@ -410,15 +420,7 @@ def parse_async_report(output):
 
     for line in report.splitlines():
         line = line.strip()
-        if match := META_SERVICE_RE.fullmatch(line):
-            lru_type, shards, async_workers, tcp_workers = match.groups()
-            results.update(
-                meta_lru_type=lru_type,
-                meta_lru_shard_count=None if shards == "N/A" else int(shards),
-                meta_net_async_workers=int(async_workers),
-                meta_net_tcp_workers=int(tcp_workers),
-            )
-        elif match := re.match(r"Client process: rank=(\d+), pid=(\d+)$", line):
+        if match := re.match(r"Client process: rank=(\d+), pid=(\d+)$", line):
             process = {"rank": int(match.group(1)), "pid": int(match.group(2))}
             results.setdefault("per_process", []).append(process)
             prefix = None
@@ -856,7 +858,7 @@ def run_workload(cfg, args, client, target_name, iteration_name, rerun):
             offcpu_name = finish_offcpu(cfg, args, profile.offcpu, profile.started_at, profile.duration_s)
 
         metrics = parse_report(output)
-        if not metrics:
+        if not metrics or ("Benchmark report:" not in output and "Benchmark Report" not in output):
             print("Warning: Benchmark Report not found in output", file=sys.stderr)
 
         flamegraph_name, flamegraph_pid = None, None

@@ -128,7 +128,6 @@ constexpr int kMetaServiceRankId = 0;
 constexpr int kMicroSecPerSec = 1000000;
 constexpr int kPercentileDivisor = 100;
 constexpr int kTableWidth = 100;
-constexpr int kMetaServiceReadyWaitSec = 3;
 constexpr int kMaxProcessCount = 32;
 constexpr int kPerfReadyWaitSec = 1;
 constexpr int kPerfStopTimeoutSec = 10;
@@ -594,7 +593,6 @@ struct MetaServiceReport {
     uint32_t lruShardCount;
     uint32_t asyncWorkerCount;
     uint16_t tcpWorkerCount;
-    bool valid;
 };
 
 struct SharedResults {
@@ -833,8 +831,7 @@ void PrintSep()
     std::cout << "+" << std::string(kTableWidth - 2, '-') << "+\n";
 }
 
-void PrintAggReport(const std::vector<ProcessResult> &results, ProcessLatencies &latencies, const BenchConfig &cfg,
-                    const MetaServiceReport &metaService)
+void PrintAggReport(const std::vector<ProcessResult> &results, ProcessLatencies &latencies, const BenchConfig &cfg)
 {
     std::array<PerOpResult, kOpTypeCount> total{};
     double duration = 0;
@@ -850,13 +847,6 @@ void PrintAggReport(const std::vector<ProcessResult> &results, ProcessLatencies 
     std::cout << "\nBenchmark report: queue depth/thread=" << cfg.queueDepth
               << ", completion mode=" << (cfg.waitCompletions ? "wait" : "poll")
               << ", maximum logical concurrency=" << static_cast<uint64_t>(cfg.processCount) * cfg.threadCount * cfg.queueDepth << "\n";
-    if (metaService.valid) {
-        const bool sharded = metaService.lruType == MMC_META_LRU_TYPE_SHARDED_LRU;
-        std::cout << "MetaService: LRU=" << (sharded ? "sharded_lru" : "lru")
-                  << ", LRU shards=" << (sharded ? std::to_string(metaService.lruShardCount) : "N/A")
-                  << ", async network workers=" << metaService.asyncWorkerCount
-                  << ", TCP transport workers=" << metaService.tcpWorkerCount << "\n";
-    }
     constexpr int operationColumnWidth = 14;
     constexpr int valueColumnWidth = 12;
     constexpr int metricColumnCount = 8;
@@ -1222,7 +1212,7 @@ void StopPerf(pid_t perfPid)
 }
 
 int RunMetaService(const std::string &metaUrl, const std::string &bmUrl, const std::string &metricsUrl,
-                   const std::string &logFile, uint64_t capacityMB, MetaServiceReport &report)
+                   const std::string &logFile, uint64_t capacityMB, MetaServiceReport &report, int readyFd)
 {
     // Block before Start() creates threads so every service thread inherits the mask.
     sigset_t mask;
@@ -1263,8 +1253,15 @@ int RunMetaService(const std::string &metaUrl, const std::string &bmUrl, const s
         return 1;
     }
     const auto &options = svc->Options();
-    report = {options.lruType, options.lruShardCount, options.netPoolBase, svc->GetTcpWorkerCount(), true};
+    report = {options.lruType, options.lruShardCount, options.netPoolBase, svc->GetTcpWorkerCount()};
     TermLog("[meta_service] Started at %s\n", metaUrl.c_str());
+    const bool ready = bench::SendBarrierMessage(readyFd, bench::BarrierMessage::READY);
+    close(readyFd);
+    if (!ready) {
+        svc->Stop();
+        ptracer_uninit();
+        return 1;
+    }
 
     int sig = 0;
     sigwait(&mask, &sig);
@@ -1581,33 +1578,7 @@ int main(int argc, char *argv[])
 
     std::cout << "============================================================\n"
               << "  MetaService Multi-Process Benchmark (Put/Get)\n"
-              << "============================================================\n"
-              << "Configuration:\n"
-              << "  Processes:    " << cfg.processCount << "\n"
-              << "  Threads/proc: " << cfg.threadCount << "\n"
-              << "  Ops/thread:   " << cfg.opsPerThread << "\n"
-              << "  Total ops:    " << (cfg.processCount * cfg.threadCount * cfg.opsPerThread) << "\n"
-              << "  Key space:    " << cfg.keySpaceSize << "\n"
-              << "  Blob size:    " << cfg.blobSize << " bytes\n"
-              << "  Warmup keys:  " << cfg.warmupKeyCount << "\n"
-              << "  Put percent:  " << cfg.putPercent << "%\n"
-              << "  Batch range:  [" << cfg.minBatch << ", " << cfg.maxBatch << "]\n"
-              << "  HBM/proc:     " << cfg.capacityMB << " MB\n"
-              << "  Log file:      " << cfg.logFile << "\n"
-              << "  Queue depth:  " << cfg.queueDepth << " (in flight/proc: "
-              << (cfg.threadCount * cfg.queueDepth) << ")\n"
-              << "  Perf:          "
-              << (cfg.perfEnable ? std::string("record ") + PerfTargetName(cfg.perfTarget) + " -> " +
-                                       kDefaultPerfDataFile
-                                 : std::string("off"))
-              << "\n"
-              << "  Metrics:       "
-              << (cfg.metricsIntervalMs > 0 ? std::to_string(cfg.metricsIntervalMs) + " ms" : std::string("off"))
-              << "\n"
-              << "  NUMA meta:     " << DescribeNumaBinding(metaNuma) << "\n"
-              << "  NUMA worker:   " << DescribeNumaBinding(workerNuma) << "\n"
-              << "  NUMA mem:      " << NumaMemPolicyName(cfg.numaMemPolicy) << "\n"
-              << std::endl;
+              << "============================================================" << std::endl;
     for (int node : metaNuma.nodes) {
         if (std::find(workerNuma.nodes.begin(), workerNuma.nodes.end(), node) != workerNuma.nodes.end()) {
             TermLog("[numa] Warning, meta_service and workers share NUMA node %d\n", node);
@@ -1633,11 +1604,18 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    int metaControl[bench::kBarrierSocketCount];
+    if (socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, metaControl) != 0) {
+        std::cerr << "Failed to create MetaService startup channel: " << strerror(errno) << std::endl;
+        munmap(sharedResults, shmSize);
+        return 1;
+    }
     std::cout << "[1/3] Starting meta_service process..." << std::endl;
     const pid_t coordinatorPid = getpid();
     pid_t metaPid = fork();
     if (metaPid == 0) {
         PrepareChildProcess(coordinatorPid);
+        close(metaControl[bench::kBarrierParentEnd]);
         if (cfg.profileControlFd >= 0) {
             close(cfg.profileControlFd);
         }
@@ -1645,22 +1623,67 @@ int main(int argc, char *argv[])
         if (!ApplyNumaBinding(metaNuma, cfg.numaMemPolicy, kMetaServiceProcName)) {
             _exit(1);
         }
-        return RunMetaService(metaUrl, bmUrl, metricsUrl, cfg.logFile, cfg.capacityMB, sharedResults->metaService);
+        return RunMetaService(metaUrl, bmUrl, metricsUrl, cfg.logFile, cfg.capacityMB, sharedResults->metaService,
+                              metaControl[bench::kBarrierClientEnd]);
     }
+    close(metaControl[bench::kBarrierClientEnd]);
     if (metaPid < 0) {
         std::cerr << "Failed to fork meta_service!" << std::endl;
+        close(metaControl[bench::kBarrierParentEnd]);
         munmap(sharedResults, shmSize);
         return 1;
     }
     // Bind the coordinator only after meta_service is forked, so that perf, the metrics sampler and all
     // client processes (forked below) inherit the worker nodes while meta_service keeps its own nodes.
     if (!ApplyNumaBinding(workerNuma, cfg.numaMemPolicy, "coordinator/clients")) {
+        close(metaControl[bench::kBarrierParentEnd]);
         ReapChildren({metaPid}, SIGTERM);
         munmap(sharedResults, shmSize);
         return 1;
     }
-    sleep(kMetaServiceReadyWaitSec);
+    const bool metaReady =
+        bench::ReceiveBarrierMessage(metaControl[bench::kBarrierParentEnd], bench::BarrierMessage::READY, &gStopSignal);
+    close(metaControl[bench::kBarrierParentEnd]);
+    if (!metaReady) {
+        std::cerr << "MetaService startup did not complete." << std::endl;
+        ReapChildren({metaPid}, SIGTERM);
+        munmap(sharedResults, shmSize);
+        return gStopSignal != 0 ? kSignalExitCodeBase + gStopSignal : 1;
+    }
     std::cout << "meta_service started (pid=" << metaPid << ")" << std::endl;
+
+    const auto &metaService = sharedResults->metaService;
+    const bool sharded = metaService.lruType == MMC_META_LRU_TYPE_SHARDED_LRU;
+    std::cout << "\nConfiguration:\n"
+              << "  Processes:    " << cfg.processCount << "\n"
+              << "  Threads/proc: " << cfg.threadCount << "\n"
+              << "  Ops/thread:   " << cfg.opsPerThread << "\n"
+              << "  Total ops:    " << (cfg.processCount * cfg.threadCount * cfg.opsPerThread) << "\n"
+              << "  Key space:    " << cfg.keySpaceSize << "\n"
+              << "  Blob size:    " << cfg.blobSize << " bytes\n"
+              << "  Warmup keys:  " << cfg.warmupKeyCount << "\n"
+              << "  Put percent:  " << cfg.putPercent << "%\n"
+              << "  Batch range:  [" << cfg.minBatch << ", " << cfg.maxBatch << "]\n"
+              << "  HBM/proc:     " << cfg.capacityMB << " MB\n"
+              << "  Log file:      " << cfg.logFile << "\n"
+              << "  Queue depth:  " << cfg.queueDepth << " (in flight/proc: "
+              << (cfg.threadCount * cfg.queueDepth) << ")\n"
+              << "  Perf:          "
+              << (cfg.perfEnable ? std::string("record ") + PerfTargetName(cfg.perfTarget) + " -> " +
+                                       kDefaultPerfDataFile
+                                 : std::string("off"))
+              << "\n"
+              << "  Metrics:       "
+              << (cfg.metricsIntervalMs > 0 ? std::to_string(cfg.metricsIntervalMs) + " ms" : std::string("off"))
+              << "\n"
+              << "  NUMA meta:     " << DescribeNumaBinding(metaNuma) << "\n"
+              << "  NUMA worker:   " << DescribeNumaBinding(workerNuma) << "\n"
+              << "  NUMA mem:      " << NumaMemPolicyName(cfg.numaMemPolicy) << "\n"
+              << "  MetaService: LRU=" << (sharded ? "sharded_lru" : "lru")
+              << ", LRU shards=" << (sharded ? std::to_string(metaService.lruShardCount) : "N/A")
+              << ", async network workers=" << metaService.asyncWorkerCount
+              << ", TCP transport workers=" << metaService.tcpWorkerCount << "\n"
+              << std::endl;
 
     MetricsSampler metricsSampler(cfg.metricsIntervalMs);
     metricsSampler.Start();
@@ -1818,7 +1841,7 @@ int main(int argc, char *argv[])
     }
 
     if (!results.empty()) {
-        PrintAggReport(results, latencies, cfg, sharedResults->metaService);
+        PrintAggReport(results, latencies, cfg);
     } else {
         std::cerr << "No valid results collected!" << std::endl;
     }
