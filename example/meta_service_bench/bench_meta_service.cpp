@@ -117,7 +117,7 @@ constexpr const char *kDefaultLogFile = "bench_meta_service.log";
 
 constexpr int kMetaServicePort = 16078;
 constexpr int kConfigStorePort = 16081;
-constexpr int kMetricsPort = 16080;
+constexpr int kMetricsPort = 16180;
 constexpr uint64_t kMockHbmGvaBase = 0x200000000ULL;
 constexpr uint64_t kMockHbmGvaStride = 0x100000000ULL;
 constexpr uint16_t kEvictThresholdHigh = 95;
@@ -1642,7 +1642,7 @@ int main(int argc, char *argv[])
 
     std::string metaUrl = "tcp://127.0.0.1:" + std::to_string(kMetaServicePort);
     std::string bmUrl = "tcp://127.0.0.1:" + std::to_string(kConfigStorePort);
-    std::string metricsUrl = "http://127.0.0.1:" + std::to_string(kMetricsPort);
+    std::string metricsUrl = "http://0.0.0.0:" + std::to_string(kMetricsPort);
 
     constexpr size_t shmSize = sizeof(SharedResults);
     void *resultMapping = mmap(nullptr, shmSize, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);

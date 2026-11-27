@@ -4,6 +4,7 @@ import argparse
 import codecs
 import contextlib
 import ctypes
+import html
 import json
 import os
 import re
@@ -891,15 +892,15 @@ def grafana_start_annotation(cfg, text):
     if body is None:
         return None
     annotation_id = body.get("id")
-    print(f"Grafana annotation {annotation_id} opened: {text}", flush=True)
+    print(f"Grafana annotation {annotation_id} opened", flush=True)
     return annotation_id
 
 
-def grafana_end_annotation(cfg, annotation_id, text):
+def grafana_end_annotation(cfg, annotation_id):
     """Stretch the annotation over the whole run, so it shows up as a region."""
     if not tool_enabled(cfg, "grafana") or annotation_id is None:
         return
-    payload = {"timeEnd": int(time.time() * 1000), "text": text}
+    payload = {"timeEnd": int(time.time() * 1000)}
     if grafana_request(cfg, "PATCH", f"/api/annotations/{annotation_id}", payload) is not None:
         print(f"Grafana annotation {annotation_id} closed", flush=True)
 
@@ -947,7 +948,16 @@ def run_workload(cfg, args, client, target_name, iteration_name, run_number, rer
     configuration = "".join(
         f"  {field:<19}{value if value.isprintable() else repr(value)}\n" for field, value in config_fields.items()
     )
-    annotation_id = grafana_start_annotation(cfg, f"{label}: {command}")
+    annotation_lines = (
+        f"bench: {target_name}",
+        f"workload: {iteration_name}",
+        f"run: {run_number}/{rerun}",
+        f"commit: {git_commit or 'N/A'}",
+        git_commit_title or "N/A",
+        f"cmd: {command}",
+    )
+    annotation_text = "<br>\n".join(html.escape(line, quote=False) for line in annotation_lines)
+    annotation_id = grafana_start_annotation(cfg, annotation_text)
     perf_data = os.path.join(cwd, "perf.data")
     profile = WorkloadProfile(cfg, perf_data)
 
@@ -959,8 +969,7 @@ def run_workload(cfg, args, client, target_name, iteration_name, run_number, rer
         profile.close()
     duration_s = time.monotonic() - start
 
-    grafana_end_annotation(cfg, annotation_id,
-                           f"{label} ({duration_s:.0f}s, exit={exit_code}): {command}")
+    grafana_end_annotation(cfg, annotation_id)
 
     offcpu_name = None
     if profile.duration_s is not None:

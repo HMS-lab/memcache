@@ -191,6 +191,9 @@ fields display as `N/A` and are stored as `null`.
 The runner executes `bench.rerun` rounds. Each round visits the workloads in `iterations` order and runs
 each workload against all builds in `bench` order before moving to the next workload.
 
+When Grafana annotations are enabled, each run creates a multiline annotation with the build name, workload,
+run number, commit hash, commit title, and command. The command includes the executable's full path.
+
 The final report shows the mean and population standard deviation across MetaService workers in each pool
 (`net_pool<N>` for MemCache async requests and `AccWrk:<N>` for TCP transport). The coordinator takes
 per-thread Linux `/proc` snapshots after warmup, immediately before it releases the workload, and after all

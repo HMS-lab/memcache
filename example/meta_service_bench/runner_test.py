@@ -111,6 +111,34 @@ class SchedulingTest(unittest.TestCase):
 
 
 class LatencyReportTest(unittest.TestCase):
+    # The annotation must show all six lines and preserve the quoted absolute command after the run ends.
+    def test_multiline_grafana_annotation_preserves_full_command(self):
+        binary = "/workspace/candidate & debug/build/bench_meta_service"
+        cfg = {"bench": {"cwd": "/workspace/candidate & debug", "binary": binary}, "grafana": {"enabled": True}}
+        git_commit = "0123456789abcdef" * 2 + "01234567"
+        output = "Benchmark report: maximum logical concurrency=2\nBenchmark finished.\n"
+        with (
+            mock.patch.object(RUNNER, "build_command", return_value=[binary, "-p", "2"]),
+            mock.patch.object(RUNNER, "read_git_commit", return_value=(git_commit, "Optimize <lookup>")),
+            mock.patch.object(RUNNER, "run", return_value=(0, output)),
+            mock.patch.object(RUNNER, "grafana_request", side_effect=[{"id": 42}, {}]) as request,
+            mock.patch.object(RUNNER.time, "time", side_effect=[100, 101]),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(RUNNER.run_workload(cfg, SimpleNamespace(), None, "candidate", "read-heavy", 2, 3), 0)
+
+        create, close = (call.args for call in request.call_args_list)
+        self.assertEqual(create[1:3], ("POST", "/api/annotations"))
+        self.assertEqual(create[3]["text"].split("<br>\n"), [
+            "bench: candidate",
+            "workload: read-heavy",
+            "run: 2/3",
+            f"commit: {git_commit}",
+            "Optimize &lt;lookup&gt;",
+            "cmd: '/workspace/candidate &amp; debug/build/bench_meta_service' -p 2",
+        ])
+        self.assertEqual(close[1:], ("PATCH", "/api/annotations/42", {"timeEnd": 101000}))
+
     # The runner must add both names to the live and saved output even if the header spans two writes.
     def test_configuration_names_in_streamed_output(self):
         command = [
