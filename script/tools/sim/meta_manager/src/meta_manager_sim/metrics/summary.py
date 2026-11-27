@@ -95,6 +95,12 @@ def _overview_table(summary: DataFrame) -> DataFrame:
     overview[rss_columns] = overview[rss_columns] / (1 << 20)
     overview.columns = overview.columns.str.replace("_bytes", "_MiB")
 
+    overview["RSS/key (KiB)"] = (
+        summary["rss_end_bytes"]
+        / overview["cached_keys"].replace(0, float("nan"))
+        / (1 << 10)
+    )
+
     return overview
 
 

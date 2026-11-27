@@ -36,22 +36,28 @@ def test_rss_is_read_from_the_requested_pid_in_bytes(
     assert read_rss(123) == 42 * 1024
 
 
-def test_exact_totals_and_decreasing_rss(capsys: CaptureFixture[str]) -> None:
+# Final RSS gives 12 KiB per key for two cached keys and n/a for zero keys
+@pytest.mark.parametrize(
+    ("cached_keys", "rss_per_key"), [(2, "12.000000"), (0, "n/a")]
+)
+def test_exact_totals_and_decreasing_rss(
+    capsys: CaptureFixture[str], cached_keys: int, rss_per_key: str
+) -> None:
     large = (1 << 53) + 1
     metrics = {
         "summary": DataFrame(
             [
                 {
                     "reads": large,
-                    "hits": large - 1,
-                    "misses": 1,
+                    "hits": large - 2,
+                    "misses": 2,
                     "read_bytes": large,
-                    "hit_bytes": large - 1,
-                    "allocs": 1,
-                    "alloc_ok": 1,
+                    "hit_bytes": large - 2,
+                    "allocs": 2,
+                    "alloc_ok": 2,
                     "alloc_fail": 0,
-                    "cached_keys": 1,
-                    "evicted": 0,
+                    "cached_keys": cached_keys,
+                    "evicted": 2 - cached_keys,
                     "detailed_stats": False,
                 }
             ]
@@ -59,8 +65,8 @@ def test_exact_totals_and_decreasing_rss(capsys: CaptureFixture[str]) -> None:
         "pools": DataFrame(
             {
                 "capacity_bytes": [(1 << 63) + 1, (1 << 63) + 1],
-                "used_bytes": [4096, 0],
-                "padding_bytes": [4095, 0],
+                "used_bytes": [4096 * cached_keys, 0],
+                "padding_bytes": [4095 * cached_keys, 0],
             },
             dtype="uint64",
         ),
@@ -70,7 +76,7 @@ def test_exact_totals_and_decreasing_rss(capsys: CaptureFixture[str]) -> None:
     summary = metrics["summary"]
     assert summary.at[0, "reads"] == large
     assert summary.at[0, "pool_capacity_bytes"] == (1 << 64) + 2
-    assert summary.at[0, "pool_logical_bytes"] == 1
+    assert summary.at[0, "pool_logical_bytes"] == cached_keys
     assert summary.at[0, "rss_delta_bytes"] == -8192
     assert summary.at[0, "rss_max_bytes"] == 32768
 
@@ -79,6 +85,11 @@ def test_exact_totals_and_decreasing_rss(capsys: CaptureFixture[str]) -> None:
     output = capsys.readouterr().out
     assert str(large) in output
     assert "100.00%" in output
+    assert [
+        row.split()[-1]
+        for row in output.splitlines()
+        if row.startswith("RSS/key (KiB)")
+    ] == [rss_per_key]
     for name, original in originals.items():
         assert_frame_equal(metrics[name], original)
 
