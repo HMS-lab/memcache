@@ -81,6 +81,35 @@ while True:
 """
 
 
+class SchedulingTest(unittest.TestCase):
+    # Every repeat must finish the full iteration-by-build matrix, even if a benchmark exits unsuccessfully.
+    def test_main_runs_repeats_before_iterations_and_builds(self):
+        targets = {"baseline": {}, "candidate": {}}
+        iterations = {"read-heavy": {}, "mixed": {}}
+        cfg = {"bench": targets, "iterations": iterations}
+        exit_codes = [0, 3, 0, 0, 0, 0, 5, 0]
+        with (
+            mock.patch.object(sys, "argv", ["runner.py", "--config", __file__]),
+            mock.patch.object(RUNNER, "load_config", return_value=cfg),
+            mock.patch.object(RUNNER, "parse_targets", return_value=(targets, 2)),
+            mock.patch.object(RUNNER, "parse_iterations", return_value=iterations),
+            mock.patch.object(RUNNER, "run_workload", side_effect=exit_codes) as run_workload,
+        ):
+            with self.assertRaises(SystemExit) as exit_status:
+                RUNNER.main()
+        self.assertEqual(exit_status.exception.code, 3)
+        self.assertEqual([call.args[3:] for call in run_workload.call_args_list], [
+            ("baseline", "read-heavy", 1, 2),
+            ("candidate", "read-heavy", 1, 2),
+            ("baseline", "mixed", 1, 2),
+            ("candidate", "mixed", 1, 2),
+            ("baseline", "read-heavy", 2, 2),
+            ("candidate", "read-heavy", 2, 2),
+            ("baseline", "mixed", 2, 2),
+            ("candidate", "mixed", 2, 2),
+        ])
+
+
 class LatencyReportTest(unittest.TestCase):
     # The runner must add both names to the live and saved output even if the header spans two writes.
     def test_configuration_names_in_streamed_output(self):
@@ -120,10 +149,12 @@ Benchmark finished.
             mock.patch.object(RUNNER, "run", return_value=(0, output)),
             contextlib.redirect_stdout(io.StringIO()),
         ):
-            self.assertEqual(RUNNER.run_workload(cfg, SimpleNamespace(), client, "local", "mixed", 1), 0)
+            self.assertEqual(RUNNER.run_workload(cfg, SimpleNamespace(), client, "local", "mixed", 2, 3), 0)
 
         insert = client["memcache"]["bench_meta_service"].insert_one
         insert.assert_called_once()
+        self.assertEqual(insert.call_args.args[0]["run"], 2)
+        self.assertEqual(insert.call_args.args[0]["rerun"], 3)
         self.assertEqual(insert.call_args.args[0]["meta_rss_delta"], {"value": -12.5, "unit": "MiB"})
         stats = insert.call_args.args[0]["meta_net_worker_stats"]
         self.assertEqual(stats, {
@@ -190,7 +221,7 @@ Benchmark finished.
                     mock.patch.object(RUNNER.subprocess, "run", return_value=git_output) as git,
                     contextlib.redirect_stdout(io.StringIO()),
                 ):
-                    self.assertEqual(RUNNER.run_workload(cfg, SimpleNamespace(), client, "local", "mixed", 1), 0)
+                    self.assertEqual(RUNNER.run_workload(cfg, SimpleNamespace(), client, "local", "mixed", 1, 1), 0)
                 self.assertEqual(git.call_args.args[0][-2:], ["--format=%H%n%s", "HEAD"])
                 self.assertEqual(git.call_args.kwargs["cwd"], cwd)
                 self.assertEqual(

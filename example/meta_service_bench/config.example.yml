@@ -9,7 +9,7 @@ bench:
   candidate:
     cwd: /workspace/memcache-candidate
     binary: ./build/example/meta_service_bench/bench_meta_service
-  rerun: 3
+  rerun: 3                             # repeats of the full iteration-by-build matrix
 
 iterations:
   read-heavy:

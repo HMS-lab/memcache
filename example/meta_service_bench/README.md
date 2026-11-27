@@ -188,6 +188,9 @@ For each run, the startup configuration section shows Bench name from `bench`, I
 stores them as `bench_name`, `iteration_name`, `git_commit`, and `git_commit_title`. Unavailable Git
 fields display as `N/A` and are stored as `null`.
 
+The runner executes `bench.rerun` rounds. Each round visits the workloads in `iterations` order and runs
+each workload against all builds in `bench` order before moving to the next workload.
+
 The final report shows the mean and population standard deviation across MetaService workers in each pool
 (`net_pool<N>` for MemCache async requests and `AccWrk:<N>` for TCP transport). The coordinator takes
 per-thread Linux `/proc` snapshots after warmup, immediately before it releases the workload, and after all

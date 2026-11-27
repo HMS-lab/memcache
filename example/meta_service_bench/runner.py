@@ -929,83 +929,79 @@ def read_git_commit(cwd):
     return git_commit or None, git_commit_title or None
 
 
-def run_workload(cfg, args, client, target_name, iteration_name, rerun):
+def run_workload(cfg, args, client, target_name, iteration_name, run_number, rerun):
     mongo = cfg.get("mongo", {})
     cwd = cfg["bench"]["cwd"]
     cmd = build_command(cfg, args)
     command = shlex.join(cmd)
-    params = vars(args).copy()
-    params["rerun"] = rerun
-    final_exit_code = 0
-    for run_number in range(1, rerun + 1):
-        git_commit, git_commit_title = read_git_commit(cwd)
-        label = f"bench={target_name!r} iteration={iteration_name!r} run {run_number}/{rerun}"
-        print(f"{label}: {command}", flush=True)
-        config_fields = {
-            "Bench name:": target_name,
-            "Iteration name:": iteration_name,
-            "Git commit:": git_commit or "N/A",
-            "Git commit title:": git_commit_title or "N/A",
+    params = {**vars(args), "rerun": rerun}
+    git_commit, git_commit_title = read_git_commit(cwd)
+    label = f"bench={target_name!r} iteration={iteration_name!r} run {run_number}/{rerun}"
+    print(f"{label}: {command}", flush=True)
+    config_fields = {
+        "Bench name:": target_name,
+        "Iteration name:": iteration_name,
+        "Git commit:": git_commit or "N/A",
+        "Git commit title:": git_commit_title or "N/A",
+    }
+    configuration = "".join(
+        f"  {field:<19}{value if value.isprintable() else repr(value)}\n" for field, value in config_fields.items()
+    )
+    annotation_id = grafana_start_annotation(cfg, f"{label}: {command}")
+    perf_data = os.path.join(cwd, "perf.data")
+    profile = WorkloadProfile(cfg, perf_data)
+
+    started_at = datetime.now(timezone.utc)
+    start = time.monotonic()
+    try:
+        exit_code, output = run(cmd, cwd, profile.on_event, configuration=configuration)
+    finally:
+        profile.close()
+    duration_s = time.monotonic() - start
+
+    grafana_end_annotation(cfg, annotation_id,
+                           f"{label} ({duration_s:.0f}s, exit={exit_code}): {command}")
+
+    offcpu_name = None
+    if profile.duration_s is not None:
+        offcpu_name = finish_offcpu(cfg, args, profile.offcpu, profile.started_at, profile.duration_s)
+
+    metrics = parse_report(output)
+    if not metrics or ("Benchmark report:" not in output and "Benchmark Report" not in output):
+        print("Warning: Benchmark Report not found in output", file=sys.stderr)
+
+    flamegraph_name, flamegraph_pid = None, None
+    if tool_enabled(cfg, "pyroscope") and profile.duration_s is not None:
+        flamegraph_name = send_flamegraph(cfg, args, perf_data, profile.started_at, profile.duration_s)
+        if flamegraph_name:
+            flamegraph_pid = metrics.get("meta_service_pid")
+
+    if client is not None:
+        doc = {
+            "started_at": started_at,
+            "duration_s": duration_s,
+            "workload_started_at": profile.started_at,
+            "workload_duration_s": profile.duration_s,
+            "host": socket.gethostname(),
+            "command": command,
+            "bench_name": target_name,
+            "iteration_name": iteration_name,
+            "cwd": cwd,
+            "git_commit": git_commit,
+            "git_commit_title": git_commit_title,
+            "exit_code": exit_code,
+            "run": run_number,
+            "flamegraph_name": flamegraph_name,
+            "offcpu_name": offcpu_name,
+            "flamegraph_pid": flamegraph_pid,
+            **params,
+            **metrics,
+            "output": output,
         }
-        configuration = "".join(
-            f"  {field:<19}{value if value.isprintable() else repr(value)}\n" for field, value in config_fields.items()
-        )
-        annotation_id = grafana_start_annotation(cfg, f"{label}: {command}")
-        perf_data = os.path.join(cwd, "perf.data")
-        profile = WorkloadProfile(cfg, perf_data)
+        result = client[mongo["database"]][mongo["collection"]].insert_one(doc)
+        print(f"Saved to MongoDB: {result.inserted_id}", flush=True)
 
-        started_at = datetime.now(timezone.utc)
-        start = time.monotonic()
-        try:
-            exit_code, output = run(cmd, cwd, profile.on_event, configuration=configuration)
-        finally:
-            profile.close()
-        duration_s = time.monotonic() - start
-        final_exit_code = final_exit_code or exit_code
-
-        grafana_end_annotation(cfg, annotation_id,
-                               f"{label} ({duration_s:.0f}s, exit={exit_code}): {command}")
-
-        offcpu_name = None
-        if profile.duration_s is not None:
-            offcpu_name = finish_offcpu(cfg, args, profile.offcpu, profile.started_at, profile.duration_s)
-
-        metrics = parse_report(output)
-        if not metrics or ("Benchmark report:" not in output and "Benchmark Report" not in output):
-            print("Warning: Benchmark Report not found in output", file=sys.stderr)
-
-        flamegraph_name, flamegraph_pid = None, None
-        if tool_enabled(cfg, "pyroscope") and profile.duration_s is not None:
-            flamegraph_name = send_flamegraph(cfg, args, perf_data, profile.started_at, profile.duration_s)
-            if flamegraph_name:
-                flamegraph_pid = metrics.get("meta_service_pid")
-
-        if client is not None:
-            doc = {
-                "started_at": started_at,
-                "duration_s": duration_s,
-                "workload_started_at": profile.started_at,
-                "workload_duration_s": profile.duration_s,
-                "host": socket.gethostname(),
-                "command": command,
-                "bench_name": target_name,
-                "iteration_name": iteration_name,
-                "cwd": cwd,
-                "git_commit": git_commit,
-                "git_commit_title": git_commit_title,
-                "exit_code": exit_code,
-                "run": run_number,
-                "flamegraph_name": flamegraph_name,
-                "offcpu_name": offcpu_name,
-                "flamegraph_pid": flamegraph_pid,
-                **params,
-                **metrics,
-                "output": output,
-            }
-            result = client[mongo["database"]][mongo["collection"]].insert_one(doc)
-            print(f"Saved to MongoDB: {result.inserted_id}", flush=True)
-
-    return final_exit_code
+    return exit_code
 
 
 def main():
@@ -1026,11 +1022,14 @@ def main():
 
     final_exit_code = 0
     try:
-        for iteration_name, values in iterations.items():
-            args = SimpleNamespace(**values, **vars(profiling))
-            for target_name, target in targets.items():
-                exit_code = run_workload({**cfg, "bench": target}, args, client, target_name, iteration_name, rerun)
-                final_exit_code = final_exit_code or exit_code
+        for run_number in range(1, rerun + 1):
+            for iteration_name, values in iterations.items():
+                args = SimpleNamespace(**values, **vars(profiling))
+                for target_name, target in targets.items():
+                    exit_code = run_workload(
+                        {**cfg, "bench": target}, args, client, target_name, iteration_name, run_number, rerun,
+                    )
+                    final_exit_code = final_exit_code or exit_code
     finally:
         if client is not None:
             client.close()
