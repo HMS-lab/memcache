@@ -158,10 +158,12 @@ Benchmark finished.
                 results = RUNNER.parse_report(f"Benchmark report:\nMetaService RSS change: {text}\nBenchmark finished.")
                 self.assertEqual(results["meta_rss_delta"], expected)
 
-    # Startup settings and the commit read from the target cwd must reach MongoDB alongside latency metrics.
+    # Startup settings and the commit hash and title from the target cwd must reach MongoDB.
     def test_meta_service_settings_in_mongo_document(self):
         cwd = "/workspace/target-checkout"
         git_commit = "0123456789abcdef" * 2 + "01234567"
+        git_commit_title = "Optimize metadata lookups"
+        git_output = SimpleNamespace(stdout=f"{git_commit}\n{git_commit_title}\n")
         cfg = {"bench": {"cwd": cwd}, "mongo": {"database": "memcache", "collection": "bench_meta_service"}}
         for build_mode, lru_type, shards, expected_count in (
             ("DEBUG", "lru", "N/A", None),
@@ -185,22 +187,24 @@ Benchmark finished.
                 with (
                     mock.patch.object(RUNNER, "build_command", return_value=["bench_meta_service"]),
                     mock.patch.object(RUNNER, "run", return_value=(0, output)) as run,
-                    mock.patch.object(RUNNER.subprocess, "run", return_value=SimpleNamespace(stdout=git_commit + "\n"))
-                    as git,
+                    mock.patch.object(RUNNER.subprocess, "run", return_value=git_output) as git,
                     contextlib.redirect_stdout(io.StringIO()),
                 ):
                     self.assertEqual(RUNNER.run_workload(cfg, SimpleNamespace(), client, "local", "mixed", 1), 0)
-                self.assertEqual(git.call_args.args[0], ["git", "rev-parse", "--verify", "HEAD"])
+                self.assertEqual(git.call_args.args[0][-2:], ["--format=%H%n%s", "HEAD"])
                 self.assertEqual(git.call_args.kwargs["cwd"], cwd)
-                self.assertEqual(run.call_args.kwargs["configuration"], (
-                    f"  Bench name:      local\n  Iteration name:  mixed\n  Git commit:      {git_commit}\n"
-                ))
+                self.assertEqual(
+                    run.call_args.kwargs["configuration"],
+                    f"  Bench name:        local\n  Iteration name:    mixed\n"
+                    f"  Git commit:        {git_commit}\n  Git commit title:  {git_commit_title}\n",
+                )
                 insert = client["memcache"]["bench_meta_service"].insert_one
                 insert.assert_called_once()
                 doc = insert.call_args.args[0]
                 self.assertEqual(doc["bench_name"], "local")
                 self.assertEqual(doc["iteration_name"], "mixed")
                 self.assertEqual(doc["git_commit"], git_commit)
+                self.assertEqual(doc["git_commit_title"], git_commit_title)
                 self.assertEqual(doc["build_mode"], build_mode)
                 self.assertEqual(doc["meta_lru_type"], lru_type)
                 self.assertEqual(doc["meta_lru_shard_count"], expected_count)

@@ -917,15 +917,16 @@ def connect_mongo(url):
 
 
 def read_git_commit(cwd):
-    """Read the full HEAD commit from the benchmark's working directory."""
+    """Read the full HEAD hash and subject from the benchmark's working directory."""
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "--verify", "HEAD"],
-            cwd=cwd, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            ["git", "log", "-1", "--no-show-signature", "--no-notes", "--encoding=UTF-8", "--format=%H%n%s", "HEAD"],
+            cwd=cwd, check=True, encoding="utf-8", errors="replace", stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
         )
     except (OSError, subprocess.CalledProcessError):
-        return None
-    return result.stdout.strip()
+        return None, None
+    git_commit, _, git_commit_title = result.stdout.rstrip("\n").partition("\n")
+    return git_commit or None, git_commit_title or None
 
 
 def run_workload(cfg, args, client, target_name, iteration_name, rerun):
@@ -937,16 +938,17 @@ def run_workload(cfg, args, client, target_name, iteration_name, rerun):
     params["rerun"] = rerun
     final_exit_code = 0
     for run_number in range(1, rerun + 1):
-        git_commit = read_git_commit(cwd)
+        git_commit, git_commit_title = read_git_commit(cwd)
         label = f"bench={target_name!r} iteration={iteration_name!r} run {run_number}/{rerun}"
         print(f"{label}: {command}", flush=True)
         config_fields = {
             "Bench name:": target_name,
             "Iteration name:": iteration_name,
             "Git commit:": git_commit or "N/A",
+            "Git commit title:": git_commit_title or "N/A",
         }
         configuration = "".join(
-            f"  {field:<17}{value if value.isprintable() else repr(value)}\n" for field, value in config_fields.items()
+            f"  {field:<19}{value if value.isprintable() else repr(value)}\n" for field, value in config_fields.items()
         )
         annotation_id = grafana_start_annotation(cfg, f"{label}: {command}")
         perf_data = os.path.join(cwd, "perf.data")
@@ -990,6 +992,7 @@ def run_workload(cfg, args, client, target_name, iteration_name, rerun):
                 "iteration_name": iteration_name,
                 "cwd": cwd,
                 "git_commit": git_commit,
+                "git_commit_title": git_commit_title,
                 "exit_code": exit_code,
                 "run": run_number,
                 "flamegraph_name": flamegraph_name,

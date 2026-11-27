@@ -183,10 +183,10 @@ LRU shard count, async request workers, and TCP transport workers on separate li
 MongoDB as `build_mode`, `meta_lru_type`, `meta_lru_shard_count`, `meta_net_async_workers`, and
 `meta_net_tcp_workers`. Plain LRU shows `N/A` for shards and stores that field as `null`.
 
-For each run, the runner adds three separate fields to the startup configuration section. Bench name is the
-selected key under `bench`, Iteration name is the selected key under `iterations`, and Git commit is the full
-Git HEAD commit from the selected benchmark's `cwd`. MongoDB stores these as `bench_name`, `iteration_name`,
-and `git_commit`. If Git cannot resolve HEAD, the runner prints `N/A` and stores `null`.
+For each run, the startup configuration section shows Bench name from `bench`, Iteration name from
+`iterations`, and the Git commit hash and title from HEAD in the selected benchmark's `cwd`. MongoDB
+stores them as `bench_name`, `iteration_name`, `git_commit`, and `git_commit_title`. Unavailable Git
+fields display as `N/A` and are stored as `null`.
 
 The final report shows the mean and population standard deviation across MetaService workers in each pool
 (`net_pool<N>` for MemCache async requests and `AccWrk:<N>` for TCP transport). The coordinator takes
