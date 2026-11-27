@@ -21,7 +21,7 @@
       }
     ]
   },
-  "description": "Memcache Monitoring Dashboard - 请确保已配置 Prometheus 数据源",
+  "description": "Memcache Monitoring Dashboard. Configure a Prometheus data source before using this dashboard.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
@@ -34,7 +34,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Memcache stored keys 状态",
+      "description": "Number of keys currently stored in Memcache.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -101,7 +101,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Alloc、Get、Remove 请求计数",
+      "description": "Request counts for Alloc, Get, and Remove.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -233,7 +233,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Alloc、Get 成功计数",
+      "description": "Successful Alloc and Get request counts.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -365,7 +365,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Alloc、Get 失败计数",
+      "description": "Failed Alloc and Get request counts.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -497,7 +497,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "ExistKey 请求统计",
+      "description": "ExistKey request statistics.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -617,7 +617,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Batch 操作请求统计",
+      "description": "Batch operation request statistics.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -737,7 +737,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "内存分配情况",
+      "description": "Memory allocation.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -833,7 +833,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "内存容量",
+      "description": "Memory capacity.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -929,7 +929,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Segment 分配情况",
+      "description": "Segment allocation.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1025,7 +1025,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Segment 容量",
+      "description": "Segment capacity.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1121,7 +1121,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "其他操作",
+      "description": "Other operations.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1241,7 +1241,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Query 和 GetAllKeys 操作",
+      "description": "Query and GetAllKeys operations.",
       "fieldConfig": {
         "defaults": {
           "color": {

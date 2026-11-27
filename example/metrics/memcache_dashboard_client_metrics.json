@@ -89,7 +89,7 @@
       ],
       "title": "GET Latency",
       "type": "timeseries",
-      "description": "GET 操作延迟分位数，窗口瞬时值，支持 $rank / $quantile 过滤",
+      "description": "GET latency quantiles for the current reporting window. Filter by $rank and $quantile.",
       "datasource": "${datasource}"
     },
     {
@@ -126,7 +126,7 @@
       ],
       "title": "PUT Latency",
       "type": "timeseries",
-      "description": "PUT 操作延迟分位数，窗口瞬时值，支持 $rank / $quantile 过滤",
+      "description": "PUT latency quantiles for the current reporting window. Filter by $rank and $quantile.",
       "datasource": "${datasource}"
     },
     {
@@ -163,7 +163,7 @@
       ],
       "title": "GET Bytes",
       "type": "timeseries",
-      "description": "GET 窗口内传输字节量(gauge, 上报后归零)，支持 $rank 过滤",
+      "description": "Bytes transferred by GET during the reporting window. This gauge resets after each report. Filter by $rank.",
       "datasource": "${datasource}"
     },
     {
@@ -200,7 +200,7 @@
       ],
       "title": "PUT Bytes",
       "type": "timeseries",
-      "description": "PUT 窗口内传输字节量(gauge, 上报后归零)，支持 $rank 过滤",
+      "description": "Bytes transferred by PUT during the reporting window. This gauge resets after each report. Filter by $rank.",
       "datasource": "${datasource}"
     },
     {
@@ -237,7 +237,7 @@
       ],
       "title": "GET Bandwidth",
       "type": "timeseries",
-      "description": "GET 窗口瞬时吞吐率 = totalBytes × 1000 / totalDurationMs (Bps)，支持 $rank 过滤",
+      "description": "GET throughput for the current reporting window in bytes per second (totalBytes × 1000 / totalDurationMs). Filter by $rank.",
       "datasource": "${datasource}"
     },
     {
@@ -274,7 +274,7 @@
       ],
       "title": "PUT Bandwidth",
       "type": "timeseries",
-      "description": "PUT 窗口瞬时吞吐率 = totalBytes × 1000 / totalDurationMs (Bps)，支持 $rank 过滤",
+      "description": "PUT throughput for the current reporting window in bytes per second (totalBytes × 1000 / totalDurationMs). Filter by $rank.",
       "datasource": "${datasource}"
     },
     {
@@ -324,7 +324,7 @@
       ],
       "title": "Cumulative Latency",
       "type": "timeseries",
-      "description": "累计IO耗时 = cumTotalDurationMs / 1000，进程启动以来总IO耗时(秒)，counter永不复位，支持 $rank 过滤",
+      "description": "Total I/O time since process startup in seconds (cumTotalDurationMs / 1000). This counter does not reset during the process lifetime. Filter by $rank.",
       "datasource": "${datasource}"
     },
     {
@@ -361,7 +361,7 @@
       ],
       "title": "Cumulative Bytes",
       "type": "timeseries",
-      "description": "累计传输字节 = cumTotalBytes，进程启动以来总传输量(bytes)，counter永不复位，支持 $rank 过滤",
+      "description": "Total bytes transferred since process startup (cumTotalBytes). This counter does not reset during the process lifetime. Filter by $rank.",
       "datasource": "${datasource}"
     },
     {
@@ -398,7 +398,7 @@
       ],
       "title": "Cumulative Bandwidth",
       "type": "timeseries",
-      "description": "累计带宽 = cumTotalBytes / (cumTotalDurationMs / 1000)，生命周期平均吞吐率(Bps)，无IO时除零无线。支持 $rank 过滤",
+      "description": "Average throughput since process startup in bytes per second (cumTotalBytes / (cumTotalDurationMs / 1000)). With no I/O, the denominator is zero. Filter by $rank.",
       "datasource": "${datasource}"
     },
     {
