@@ -95,7 +95,7 @@
           "refId": "A"
         }
       ],
-      "title": "DRAM 使用率",
+      "title": "DRAM Utilization",
       "type": "gauge"
     },
     {
@@ -168,7 +168,7 @@
           "refId": "A"
         }
       ],
-      "title": "GET 缓存命中率",
+      "title": "GET Cache Hit Rate",
       "type": "gauge"
     },
     {
@@ -241,7 +241,7 @@
           "refId": "A"
         }
       ],
-      "title": "ExistKey 命中率",
+      "title": "ExistKey Hit Rate",
       "type": "gauge"
     },
     {
@@ -314,7 +314,7 @@
           "refId": "A"
         }
       ],
-      "title": "GET 错误率",
+      "title": "GET Error Rate",
       "type": "gauge"
     },
     {
@@ -387,7 +387,7 @@
           "refId": "A"
         }
       ],
-      "title": "ExistKey 错误率",
+      "title": "ExistKey Error Rate",
       "type": "gauge"
     },
     {
@@ -461,7 +461,7 @@
           "refId": "A"
         }
       ],
-      "title": "驱逐总次数",
+      "title": "Total Evictions",
       "type": "stat"
     },
     {
@@ -535,7 +535,7 @@
           "refId": "A"
         }
       ],
-      "title": "分配失败总次数",
+      "title": "Total Allocation Failures",
       "type": "stat"
     },
     {
@@ -646,7 +646,7 @@
           "refId": "B"
         }
       ],
-      "title": "缓存命中率",
+      "title": "Cache Hit Rate",
       "type": "timeseries"
     },
     {
@@ -825,7 +825,7 @@
           "refId": "H"
         }
       ],
-      "title": "主要操作 QPS",
+      "title": "Requests per Second by Operation",
       "type": "timeseries"
     },
     {
@@ -925,7 +925,7 @@
           "refId": "A"
         }
       ],
-      "title": "已存储 Key 数量趋势",
+      "title": "Stored Keys Over Time",
       "type": "timeseries"
     },
     {
@@ -1069,7 +1069,7 @@
           "refId": "E"
         }
       ],
-      "title": "异常事件速率",
+      "title": "Eviction and Failure Rates",
       "type": "timeseries"
     },
     {
@@ -1145,7 +1145,7 @@
           "refId": "A"
         }
       ],
-      "title": "各 Segment 使用率 (阈值 80%)",
+      "title": "Segment Utilization (80% Threshold)",
       "type": "bargauge"
     }
   ],
@@ -1184,7 +1184,7 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "vLLM MemCache 监控看板",
+  "title": "vLLM MemCache Monitoring",
   "uid": "vllm-memcache-dashboard-v2",
   "version": 4,
   "weekStart": ""
