@@ -90,6 +90,7 @@
 #include "mmc_blob_allocator.h"
 #include "mmc_blob_state.h"
 #include "mmc_def.h"
+#include "mmc_http_runtime.h"
 #include "mmc_logger.h"
 #include "mmc_meta_net_client.h"
 #include "mmc_meta_service.h"
@@ -97,6 +98,7 @@
 #include "mmc_net_common.h"
 #include "mmc_ptracer.h"
 #include "mmc_ref.h"
+#include "mmc_rest_api_facade.h"
 #include "mmc_types.h"
 
 using namespace std;
@@ -118,6 +120,7 @@ constexpr const char *kDefaultLogFile = "bench_meta_service.log";
 constexpr int kMetaServicePort = 16078;
 constexpr int kConfigStorePort = 16081;
 constexpr int kMetricsPort = 16180;
+constexpr char kMetricsListenIp[] = "0.0.0.0";
 constexpr uint64_t kMockHbmGvaBase = 0x200000000ULL;
 constexpr uint64_t kMockHbmGvaStride = 0x100000000ULL;
 constexpr uint16_t kEvictThresholdHigh = 95;
@@ -1266,8 +1269,35 @@ void StopPerf(pid_t perfPid)
     ReapChildren({perfPid}, SIGINT, kPerfStopTimeoutSec);
 }
 
-int RunMetaService(const std::string &metaUrl, const std::string &bmUrl, const std::string &metricsUrl,
-                   const std::string &logFile, uint64_t capacityMB, MetaServiceReport &report, int readyFd)
+ock::mmc_acc::AccHttpServerPtr StartMetricsServer(MmcMetaService &service)
+{
+    using namespace ock::mmc_acc;
+    auto facade = MmcMakeRef<MmcRestApiFacade>(&service, service.GetMetaMgrProxy());
+    auto server = AccHttpServer::Create();
+    if (facade == nullptr || server == nullptr) {
+        return nullptr;
+    }
+
+    server->RegisterHttpHandler(AccHttpMethod::GET, "/metrics", [facade](AccHttpRequestContext &request) {
+        constexpr auto unavailable = static_cast<AccHttpStatusCode>(503);
+        std::string metrics;
+        if (facade->BuildPrometheusMetrics(true, metrics) != MMC_OK) {
+            return request.Reply(unavailable, "text/plain", "Metrics unavailable\n");
+        }
+        return request.Reply(AccHttpStatusCode::OK, "text/plain; version=0.0.4", metrics);
+    });
+
+    AccHttpServerOptions options;
+    options.listenIp = kMetricsListenIp;
+    options.listenPort = kMetricsPort;
+    if (server->Start(options, {}) != ock::mmc_acc::ACC_OK) {
+        return nullptr;
+    }
+    return server;
+}
+
+int RunMetaService(const std::string &metaUrl, const std::string &bmUrl, const std::string &logFile,
+                   uint64_t capacityMB, MetaServiceReport &report, int readyFd)
 {
     // Block before Start() creates threads so every service thread inherits the mask.
     sigset_t mask;
@@ -1280,7 +1310,6 @@ int RunMetaService(const std::string &metaUrl, const std::string &bmUrl, const s
     mmc_meta_service_config_t cfg{};
     CopyStr(metaUrl, cfg.discoveryURL, sizeof(cfg.discoveryURL));
     CopyStr(bmUrl, cfg.configStoreURL, sizeof(cfg.configStoreURL));
-    CopyStr(metricsUrl, cfg.httpURL, sizeof(cfg.httpURL));
     cfg.haEnable = false;
     cfg.lruShardCount = MMC_DEFAULT_META_LRU_SHARD_COUNT;
     cfg.logLevel = WARN_LEVEL;
@@ -1307,12 +1336,21 @@ int RunMetaService(const std::string &metaUrl, const std::string &bmUrl, const s
         ptracer_uninit();
         return 1;
     }
+    auto metricsServer = StartMetricsServer(*svc.Get());
+    if (metricsServer == nullptr) {
+        TermLog("[meta_service] Failed to listen for metrics at %s:%d\n", kMetricsListenIp, kMetricsPort);
+        svc->Stop();
+        ptracer_uninit();
+        return 1;
+    }
+    TermLog("[meta_service] Metrics listening at http://%s:%d/metrics\n", kMetricsListenIp, kMetricsPort);
     const auto &options = svc->Options();
     report = {options.lruType, options.lruShardCount, options.netPoolBase, svc->GetTcpWorkerCount()};
     TermLog("[meta_service] Started at %s\n", metaUrl.c_str());
     const bool ready = bench::SendBarrierMessage(readyFd, bench::BarrierMessage::READY);
     close(readyFd);
     if (!ready) {
+        metricsServer->Stop();
         svc->Stop();
         ptracer_uninit();
         return 1;
@@ -1320,6 +1358,7 @@ int RunMetaService(const std::string &metaUrl, const std::string &bmUrl, const s
 
     int sig = 0;
     sigwait(&mask, &sig);
+    metricsServer->Stop();
 
     // The parent sends SIGTERM after all benchmark clients exit. Take one final
     // snapshot before Stop() clears the meta manager and its container.
@@ -1642,7 +1681,6 @@ int main(int argc, char *argv[])
 
     std::string metaUrl = "tcp://127.0.0.1:" + std::to_string(kMetaServicePort);
     std::string bmUrl = "tcp://127.0.0.1:" + std::to_string(kConfigStorePort);
-    std::string metricsUrl = "http://0.0.0.0:" + std::to_string(kMetricsPort);
 
     constexpr size_t shmSize = sizeof(SharedResults);
     void *resultMapping = mmap(nullptr, shmSize, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
@@ -1678,7 +1716,7 @@ int main(int argc, char *argv[])
         if (!ApplyNumaBinding(metaNuma, cfg.numaMemPolicy, kMetaServiceProcName)) {
             _exit(1);
         }
-        return RunMetaService(metaUrl, bmUrl, metricsUrl, cfg.logFile, cfg.capacityMB, sharedResults->metaService,
+        return RunMetaService(metaUrl, bmUrl, cfg.logFile, cfg.capacityMB, sharedResults->metaService,
                               metaControl[bench::kBarrierClientEnd]);
     }
     close(metaControl[bench::kBarrierClientEnd]);
