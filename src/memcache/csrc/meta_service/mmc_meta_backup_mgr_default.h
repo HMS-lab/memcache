@@ -51,7 +51,6 @@ struct MMCMetaBackUpConfDefault : public MMCMetaBackUpConf {
     uint32_t asyncFlushBatchLimit = 8;
     std::function<bool(uint32_t)> isSsdAvailableFunc_;
     std::function<Result(const std::string &, const MmcMemBlobDesc &, BackupReadLease &)> acquireReadLease;
-    std::function<void(const BackupReadLease &)> releaseReadLease;
     std::function<void(uint32_t, const std::vector<std::pair<std::string, MmcMemBlobDesc>> &)> onAsyncFlushComplete_;
 
     explicit MMCMetaBackUpConfDefault(MetaNetServerPtr serverPtr) : serverPtr_(serverPtr) {}
@@ -95,7 +94,6 @@ public:
         isSsdAvailableFunc_ = defaultPtr->isSsdAvailableFunc_;
         onAsyncFlushComplete_ = defaultPtr->onAsyncFlushComplete_;
         acquireReadLease_ = defaultPtr->acquireReadLease;
-        releaseReadLease_ = defaultPtr->releaseReadLease;
         // Backup RPCs can block for up to 60 seconds. Keep them off the latency-sensitive rewarm pool.
         backupPool_ = MmcMakeRef<MmcThreadPool>("backup_pool", META_BACKUP_POOL_BASE);
         MMC_ASSERT_LOG_AND_RETURN(backupPool_ != nullptr, "backupPool_ is nullptr", MMC_MALLOC_FAILED);
@@ -194,7 +192,6 @@ private:
     MmcThreadPoolPtr backupPool_;
     std::function<bool(uint32_t)> isSsdAvailableFunc_;
     std::function<Result(const std::string &, const MmcMemBlobDesc &, BackupReadLease &)> acquireReadLease_;
-    std::function<void(const BackupReadLease &)> releaseReadLease_;
     std::function<void(uint32_t, const std::vector<std::pair<std::string, MmcMemBlobDesc>> &)> onAsyncFlushComplete_;
 };
 } // namespace mmc

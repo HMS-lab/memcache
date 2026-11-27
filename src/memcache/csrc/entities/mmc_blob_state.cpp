@@ -29,22 +29,9 @@ Result LeaseAdd(MmcMetaLeaseManager &leaseMgr, uint32_t rankId, uint32_t request
     return leaseMgr.Add(rankId, requestId, leaseMgr.DefaultTtlMs());
 }
 
-Result LeaseRemove(MmcMetaLeaseManager &leaseMgr, uint32_t rankId, uint32_t requestId)
-{
-    return leaseMgr.Remove(rankId, requestId);
-}
-
 Result LeaseWait(MmcMetaLeaseManager &leaseMgr, uint32_t rankId, uint32_t requestId)
 {
-    if (leaseMgr.UseCount() == 0) {
-        return MMC_OK;
-    }
     return leaseMgr.Wait();
-}
-
-Result LeaseExtend(MmcMetaLeaseManager &leaseMgr, uint32_t rankId, uint32_t requestId)
-{
-    return leaseMgr.Extend(leaseMgr.DefaultTtlMs());
 }
 
 StateTransTable BlobStateMachine::GetGlobalTransTable()
@@ -54,9 +41,9 @@ StateTransTable BlobStateMachine::GetGlobalTransTable()
      * @brief State transition table of mem object meta in meta service
     */
     StateTransitionItem g_metaStateTransItemTable[]{
-        {ALLOCATED, MMC_ALLOCATED_OK, ALLOCATED, LeaseAdd}, // prepare write，add <client, reqid> --> lease
-        {ALLOCATED, MMC_WRITE_OK, READABLE, LeaseRemove},   // write ok,    remove <client, reqid> --> lease
-        {ALLOCATED, MMC_WRITE_FAIL, REMOVING, LeaseRemove}, // write fail,  remove <client, reqid> --> lease
+        {ALLOCATED, MMC_ALLOCATED_OK, ALLOCATED, LeaseAdd}, // Establish the write lease.
+        {ALLOCATED, MMC_WRITE_OK, READABLE, {}},            // Keep the write lease deadline.
+        {ALLOCATED, MMC_WRITE_FAIL, REMOVING, {}},          // write fail
 
         {ALLOCATED, MMC_REMOVE_START, REMOVING, LeaseWait}, // remove blob, wait write lease timeout or no lease
 
@@ -64,13 +51,13 @@ StateTransTable BlobStateMachine::GetGlobalTransTable()
         {ALLOCATED, MMC_REPEAT_ALLOC, ALLOCATED, LeaseAdd},
         // layerwise 会重复来申请一个已经写完的key，需要返回blob，触发加租约
         {READABLE, MMC_REPEAT_ALLOC, READABLE, LeaseAdd},
-        // layerwise 会同一个进程并发写，写完可能已经是readable，需要释放租约
-        {READABLE, MMC_WRITE_OK, READABLE, LeaseRemove},
-        {READABLE, MMC_WRITE_FAIL, READABLE, LeaseRemove},
+        // Layer-wise writes can complete on a readable blob. Completion preserves its lease deadline.
+        {READABLE, MMC_WRITE_OK, READABLE, {}},
+        {READABLE, MMC_WRITE_FAIL, READABLE, {}},
 
-        {READABLE, MMC_READ_START, READABLE, LeaseAdd},     // prepare read，add <client, reqid> --> lease
-        {READABLE, MMC_READ_FINISH, READABLE, LeaseRemove}, // read finish, remove <client, reqid> --> lease
-        {READABLE, MMC_REMOVE_START, REMOVING, LeaseWait},  // remove blob, wait all lease timeout or no lease
+        {READABLE, MMC_READ_START, READABLE, LeaseAdd},    // Establish or extend the read lease.
+        {READABLE, MMC_READ_FINISH, READABLE, {}},         // Keep the read lease deadline.
+        {READABLE, MMC_REMOVE_START, REMOVING, LeaseWait}, // Wait for the lease deadline before removal.
     };
     for (size_t i = 0; i < sizeof(g_metaStateTransItemTable) / sizeof(StateTransitionItem); i++) {
         BlobStateAction action(g_metaStateTransItemTable[i].nextState, g_metaStateTransItemTable[i].function);

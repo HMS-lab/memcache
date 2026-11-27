@@ -9,57 +9,57 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
 */
+#include <chrono>
+
 #include "gtest/gtest.h"
 #include "mmc_meta_lease_manager.h"
 
 namespace ock {
 namespace mmc {
-TEST(TestMmcMetaLeaseManager, LastReleaseClearsDeadline)
+namespace {
+constexpr uint32_t kClientRank = 1;
+constexpr uint32_t kFirstRequest = 1;
+constexpr uint32_t kSecondRequest = 2;
+constexpr uint64_t kShortTtlMs = 200;
+constexpr uint64_t kLongTtlMs = 5000;
+} // namespace
+
+TEST(TestMmcMetaLeaseManager, WaitReturnsAfterDeadline)
 {
     MmcMetaLeaseManager manager;
-    ASSERT_EQ(manager.Add(1, 2, 300000), MMC_OK);
-    ASSERT_GT(manager.RemainingLeaseTtlMs(), 0U);
-    ASSERT_EQ(manager.Remove(1, 2), MMC_OK);
-    EXPECT_EQ(manager.UseCount(), 0U);
+    EXPECT_EQ(manager.RemainingLeaseTtlMs(), 0U);
+    ASSERT_EQ(manager.Add(kClientRank, kFirstRequest, kShortTtlMs), MMC_OK);
+    EXPECT_GT(manager.RemainingLeaseTtlMs(), 0U);
+    ASSERT_EQ(manager.Wait(), MMC_OK);
     EXPECT_EQ(manager.RemainingLeaseTtlMs(), 0U);
 }
 
-TEST(TestMmcMetaLeaseManager, KeepsDeadlineUntilAllHoldersRelease)
+TEST(TestMmcMetaLeaseManager, ShorterLeasePreservesDeadline)
 {
     MmcMetaLeaseManager manager;
-    ASSERT_EQ(manager.Add(1, 2, 300000), MMC_OK);
-    ASSERT_EQ(manager.Add(1, 3, 300000), MMC_OK);
-    ASSERT_EQ(manager.Remove(1, 2), MMC_OK);
-    EXPECT_EQ(manager.UseCount(), 1U);
-    EXPECT_TRUE(manager.HasLease(1, 3));
-    EXPECT_GT(manager.RemainingLeaseTtlMs(), 0U);
-    ASSERT_EQ(manager.Remove(1, 3), MMC_OK);
-    EXPECT_EQ(manager.UseCount(), 0U);
-    EXPECT_EQ(manager.RemainingLeaseTtlMs(), 0U);
+    ASSERT_EQ(manager.Add(kClientRank, kFirstRequest, kLongTtlMs), MMC_OK);
+    ASSERT_EQ(manager.Add(kClientRank, kSecondRequest, kShortTtlMs), MMC_OK);
+    EXPECT_GT(manager.RemainingLeaseTtlMs(), kShortTtlMs);
 }
 
-TEST(TestMmcMetaLeaseManager, UnknownOrRepeatedReleasePreservesOtherHolder)
+TEST(TestMmcMetaLeaseManager, LongerLeaseExtendsDeadline)
 {
     MmcMetaLeaseManager manager;
-    ASSERT_EQ(manager.Add(1, 2, 300000), MMC_OK);
-    ASSERT_EQ(manager.Add(1, 3, 300000), MMC_OK);
-    ASSERT_EQ(manager.Remove(1, 2), MMC_OK);
-    ASSERT_EQ(manager.Remove(1, 2), MMC_OK);
-    ASSERT_EQ(manager.Remove(2, 3), MMC_OK);
-    EXPECT_EQ(manager.UseCount(), 1U);
-    EXPECT_TRUE(manager.HasLease(1, 3));
-    EXPECT_GT(manager.RemainingLeaseTtlMs(), 0U);
+    ASSERT_EQ(manager.Add(kClientRank, kFirstRequest, kShortTtlMs), MMC_OK);
+    ASSERT_EQ(manager.Add(kClientRank, kSecondRequest, kLongTtlMs), MMC_OK);
+    EXPECT_GT(manager.RemainingLeaseTtlMs(), kShortTtlMs);
+    EXPECT_LE(manager.RemainingLeaseTtlMs(), kLongTtlMs);
 }
 
-TEST(TestMmcMetaLeaseManager, NextAddUsesFreshDeadline)
+TEST(TestMmcMetaLeaseManager, RejectsTtlBeyondWaitDuration)
 {
+    constexpr auto maxWaitMs = static_cast<uint64_t>(std::chrono::milliseconds::max().count());
     MmcMetaLeaseManager manager;
-    ASSERT_EQ(manager.Add(1, 2, 300000), MMC_OK);
-    ASSERT_EQ(manager.Remove(1, 2), MMC_OK);
-    ASSERT_EQ(manager.Add(1, 3, 5000), MMC_OK);
-    EXPECT_EQ(manager.UseCount(), 1U);
-    EXPECT_GT(manager.RemainingLeaseTtlMs(), 0U);
-    EXPECT_LE(manager.RemainingLeaseTtlMs(), 5000U);
+    ASSERT_EQ(manager.Add(kClientRank, kFirstRequest, kLongTtlMs), MMC_OK);
+    EXPECT_EQ(manager.Add(kClientRank, kSecondRequest, maxWaitMs + 1U), MMC_INVALID_PARAM);
+    const auto remainingTtlMs = manager.RemainingLeaseTtlMs();
+    EXPECT_GT(remainingTtlMs, 0U);
+    EXPECT_LE(remainingTtlMs, kLongTtlMs);
 }
 } // namespace mmc
 } // namespace ock

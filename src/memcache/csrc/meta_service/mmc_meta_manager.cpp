@@ -1601,21 +1601,19 @@ bool MmcMetaManager::CheckActiveLease(const std::string &key, const MmcMemObjMet
 {
     // 契约：调用方必须已持有 meta->Mutex()，因此 GetBlobs 遍历是安全的
     bool hasActiveLease = false;
-    uint32_t leaseUseCount = 0;
     uint64_t leaseRemainTtlMs = 0;
     const char *leaseType = "read";
     for (const auto &blob : meta->GetBlobs(filter)) {
-        if (blob != nullptr && blob->UseCount() > 0) {
+        if (blob != nullptr && blob->LeaseTimeoutTtlMs() > 0) {
             hasActiveLease = true;
-            leaseUseCount = blob->UseCount();
             leaseRemainTtlMs = blob->LeaseTimeoutTtlMs();
             leaseType = (blob->State() == ALLOCATED) ? "write" : "read";
             break;
         }
     }
     if (hasActiveLease) {
-        MMC_LOG_WARN("Remove key=" << key << " with active " << leaseType << " lease, useCount=" << leaseUseCount
-                                   << ", remainTtlMs=" << leaseRemainTtlMs);
+        MMC_LOG_WARN("Remove key=" << key << " with active " << leaseType
+                                   << " lease, remainTtlMs=" << leaseRemainTtlMs);
     }
     return hasActiveLease;
 }
@@ -1732,27 +1730,6 @@ Result MmcMetaManager::AcquireBackupReadLease(const std::string &key, const MmcM
         return ret;
     }
     return MMC_UNMATCHED_STATE;
-}
-
-void MmcMetaManager::ReleaseBackupReadLease(const BackupReadLease &lease)
-{
-    if (lease.object == nullptr) {
-        return;
-    }
-    // Release through the original object even if the key was removed or recreated.
-    std::lock_guard<std::mutex> guard(lease.object->Mutex());
-    for (const auto &blob : lease.object->GetBlobs()) {
-        // Only release this operation's lease from a readable blob still owned by the object.
-        if (blob->Type() != MEDIA_DRAM || blob->State() != READABLE ||
-            !blob->HasLease(K_BACKUP_LEASE_RANK_ID, lease.sequence)) {
-            continue;
-        }
-        Result ret = blob->UpdateState(lease.key, K_BACKUP_LEASE_RANK_ID, lease.sequence, MMC_READ_FINISH);
-        if (ret != MMC_OK) {
-            MMC_LOG_WARN("Release backup read lease failed, key=" << lease.key << ", ret=" << ret);
-        }
-        return;
-    }
 }
 
 Result MmcMetaManager::AddSsdBlob(const std::string &key, const MmcMemBlobDesc &desc)
@@ -2801,7 +2778,7 @@ EvictResult MmcMetaManager::EvictCallBackFunction(const std::string &key, const 
     // Lease state and the eviction decision share the object lock with Alloc/UpdateState.
     // Released or expired leases do not protect blobs from reclamation.
     for (const auto &blob : objMeta->GetBlobs()) {
-        if (blob != nullptr && blob->Type() == srcMediaType && blob->UseCount() > 0 && blob->LeaseTimeoutTtlMs() > 0) {
+        if (blob != nullptr && blob->Type() == srcMediaType && blob->LeaseTimeoutTtlMs() > 0) {
             MMC_LOG_DEBUG("Evict skip key=" << key << " from " << srcMediaType << ", active lease");
             TP_TRACE_END(TP_MMC_META_EVICT, MMC_OK);
             return EvictResult::FAIL;
